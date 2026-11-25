@@ -27,7 +27,8 @@ Buckets: `main`, `extras`, `zeldrisho` (community bucket for Vietnamese IMEs).
 Apps — `main`: git, herdr, herdr-core, 7zip, mise, uv, ripgrep, fd, bat, fzf, jq,
 gh, less, starship, delta, zoxide, atuin, rustup, mingw, bun, cursor-cli,
 opencode.
-Apps — `extras`: vscode, lazygit, wezterm, sharex, tailscale, zed, grok-bot, pear-desktop, vicinae, chatgpt.
+Apps — `extras`: vscode, lazygit, wezterm, sharex, tailscale, zed, grok-bot, pear-desktop, vicinae, chatgpt,
+blender.
 Apps — `zeldrisho`: unikey (Vietnamese IME; third-party bucket).
 
 ## Conventions

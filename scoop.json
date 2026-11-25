@@ -176,6 +176,11 @@
     },
     {
       "Info": "",
+      "Source": "extras",
+      "Name": "blender"
+    },
+    {
+      "Info": "",
       "Source": "zeldrisho",
       "Name": "unikey"
     }
