@@ -58,7 +58,10 @@ if (Test-Path $sharexFix) { & $sharexFix }
 # 4. Make PowerShell load the repo-managed shell config on startup.
 $loader = Join-Path $repo 'profile.ps1'
 $hook = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$loader`""
-$already = (Test-Path $PROFILE) -and (Select-String -Path $PROFILE -SimpleMatch $loader -Quiet)
+$already = (Test-Path $PROFILE) -and (
+    (Select-String -Path $PROFILE -SimpleMatch $loader -Quiet) -or
+    (Select-String -Path $PROFILE -Pattern 'skoop\\profile\.ps1' -Quiet)
+)
 if (-not $already) {
     New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null
     Add-Content -Path $PROFILE -Value "`n$hook" -Encoding UTF8

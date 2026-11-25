@@ -4,7 +4,7 @@ Declarative Windows dev setup: [Scoop](https://scoop.sh) packages plus a repo-ma
 PowerShell profile, restored from a single manifest.
 
 - `scoop.json` — buckets + apps (`scoop export` format, replayed with `scoop import`)
-- `profile.ps1` — shell config, dot-sourced from your `$PROFILE`
+- `profile.ps1` — shell config (`zoxide` + `atuin` history search), dot-sourced from your `$PROFILE`
 - `install.ps1` — one-shot bootstrap for a fresh machine
 - `fix-sharex-printscreen.ps1` — hands the PrtSc key back to ShareX
 

@@ -156,7 +156,10 @@ if (Test-Path $sharexFix) {
 # --- 7. Hook the repo-managed profile into $PROFILE --------------------------
 Write-Step 'Wiring profile.ps1 into your PowerShell profile'
 $hook    = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$profileScript`""
-$already = (Test-Path $PROFILE) -and (Select-String -Path $PROFILE -SimpleMatch $profileScript -Quiet)
+$already = (Test-Path $PROFILE) -and (
+    (Select-String -Path $PROFILE -SimpleMatch $profileScript -Quiet) -or
+    (Select-String -Path $PROFILE -Pattern 'skoop\\profile\.ps1' -Quiet)
+)
 if ($already) {
     Write-Ok "already present in $PROFILE"
 } else {
