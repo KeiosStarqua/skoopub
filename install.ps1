@@ -145,7 +145,20 @@ Write-Step "Importing $manifestToImport"
 & $scoop import $manifestToImport
 if ($LASTEXITCODE -ne 0) { throw "scoop import failed with exit code $LASTEXITCODE." }
 
-# --- 6. Let ShareX own the PrtSc key -----------------------------------------
+# --- 6. Default Rust toolchain: GNU (no Visual Studio Build Tools needed) ----
+$cargoBin = Join-Path $env:SCOOP 'persist\rustup\.cargo\bin'
+if (Test-Path $cargoBin) { $env:Path = "$cargoBin;$env:Path" }
+if (Get-Command rustup -ErrorAction SilentlyContinue) {
+    $null = rustup show active-toolchain 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Step 'Setting GNU toolchain as the default Rust toolchain'
+        rustup default stable-x86_64-pc-windows-gnu
+    } else {
+        Write-Ok "Rust toolchain already set; keeping it"
+    }
+}
+
+# --- 7. Let ShareX own the PrtSc key -----------------------------------------
 if (Test-Path $sharexFix) {
     Write-Step 'Applying ShareX PrtSc fix'
     & $sharexFix
@@ -153,7 +166,7 @@ if (Test-Path $sharexFix) {
     Write-Ok 'fix-sharex-printscreen.ps1 not found - skipping'
 }
 
-# --- 7. Hook the repo-managed profile into $PROFILE --------------------------
+# --- 8. Hook the repo-managed profile into $PROFILE --------------------------
 Write-Step 'Wiring profile.ps1 into your PowerShell profile'
 $hook    = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$profileScript`""
 $already = (Test-Path $PROFILE) -and (

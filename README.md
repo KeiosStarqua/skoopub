@@ -35,8 +35,9 @@ cd skoop
 1. Installs **Scoop** if it is missing.
 2. Ensures **git** is available (Scoop buckets are git repos).
 3. Runs `scoop import scoop.json` — adds the `main` / `extras` / `zeldrisho` buckets and every listed app. If UniKey is already installed (common on public PCs), that one app is skipped so you do not end up with two IMEs; pass `-ForceUniKey` to install the Scoop copy anyway.
-4. Disables Windows' "Print screen opens Snipping Tool" so **ShareX** can bind PrtSc.
-5. Appends a dot-source line for `profile.ps1` to your `$PROFILE` (idempotent).
+4. Sets the default Rust toolchain to `stable-x86_64-pc-windows-gnu` if none is configured (no Visual Studio Build Tools needed).
+5. Disables Windows' "Print screen opens Snipping Tool" so **ShareX** can bind PrtSc.
+6. Appends a dot-source line for `profile.ps1` to your `$PROFILE` (idempotent).
 
 Then open a new PowerShell window and try:
 
@@ -66,5 +67,6 @@ scoop export | Out-File -Encoding utf8 scoop.json
 | Piped via `irm \| iex` | `scoop.json`, `profile.ps1`, `fix-sharex-printscreen.ps1` are fetched to `%LOCALAPPDATA%\skoop` |
 | From a clone | The files next to `install.ps1` are used, so edits apply directly |
 | UniKey preinstalled | Detected via process, uninstall registry and Scoop dir; the existing copy is kept unless `-ForceUniKey` is passed |
+| Rust toolchain | GNU is set as default only when no toolchain is active; switch with `rustup default stable-x86_64-pc-windows-msvc` (needs MSVC Build Tools) |
 
 Requires Windows 10/11 (or Server 2016+) with PowerShell 5.1+ and internet access.

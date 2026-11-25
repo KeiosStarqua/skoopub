@@ -101,6 +101,16 @@
     },
     {
       "Info": "",
+      "Source": "main",
+      "Name": "rustup"
+    },
+    {
+      "Info": "",
+      "Source": "main",
+      "Name": "mingw"
+    },
+    {
+      "Info": "",
       "Source": "extras",
       "Name": "vscode"
     },

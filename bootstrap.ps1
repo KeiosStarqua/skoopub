@@ -51,11 +51,25 @@ if (-not $ForceUniKey -and (Test-UniKeyInstalled)) {
 }
 scoop import $manifest
 
-# 3. Let ShareX own PrtSc: Windows otherwise hands the key to the Snipping Tool.
+# 3. Default the Rust toolchain to GNU when none is configured yet.
+$scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE 'scoop' }
+$cargoBin = Join-Path $scoopRoot 'persist\rustup\.cargo\bin'
+if (Test-Path $cargoBin) { $env:Path = "$cargoBin;$env:Path" }
+if (Get-Command rustup -ErrorAction SilentlyContinue) {
+    $null = rustup show active-toolchain 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'Setting GNU toolchain as the default Rust toolchain.'
+        rustup default stable-x86_64-pc-windows-gnu
+    } else {
+        Write-Host 'Rust toolchain already set; keeping it.'
+    }
+}
+
+# 4. Let ShareX own PrtSc: Windows otherwise hands the key to the Snipping Tool.
 $sharexFix = Join-Path $repo 'fix-sharex-printscreen.ps1'
 if (Test-Path $sharexFix) { & $sharexFix }
 
-# 4. Make PowerShell load the repo-managed shell config on startup.
+# 5. Make PowerShell load the repo-managed shell config on startup.
 $loader = Join-Path $repo 'profile.ps1'
 $hook = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$loader`""
 $already = (Test-Path $PROFILE) -and (
