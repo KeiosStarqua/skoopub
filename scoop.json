@@ -146,6 +146,11 @@
     },
     {
       "Info": "",
+      "Source": "extras",
+      "Name": "pear-desktop"
+    },
+    {
+      "Info": "",
       "Source": "zeldrisho",
       "Name": "unikey"
     }
