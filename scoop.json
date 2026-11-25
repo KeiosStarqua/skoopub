@@ -136,6 +136,11 @@
     },
     {
       "Info": "",
+      "Source": "extras",
+      "Name": "zed"
+    },
+    {
+      "Info": "",
       "Source": "zeldrisho",
       "Name": "unikey"
     }

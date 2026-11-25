@@ -25,7 +25,7 @@ Buckets: `main`, `extras`, `zeldrisho` (community bucket for Vietnamese IMEs).
 
 Apps — `main`: git, herdr, herdr-core, 7zip, mise, uv, ripgrep, fd, bat, fzf, jq,
 gh, less, starship, delta, zoxide, atuin, rustup, mingw.
-Apps — `extras`: vscode, lazygit, wezterm, sharex, tailscale.
+Apps — `extras`: vscode, lazygit, wezterm, sharex, tailscale, zed.
 Apps — `zeldrisho`: unikey (Vietnamese IME; third-party bucket).
 
 ## Conventions
@@ -54,3 +54,4 @@ Apps — `zeldrisho`: unikey (Vietnamese IME; third-party bucket).
 - `zeldrisho/scoop-bucket` is third-party: the UniKey manifest installs the official `unikey.org` archive with a pinned SHA-256 hash. Verify the diff when bumping versions.
 - Public PCs may already have UniKey installed outside Scoop. Both bootstraps detect it (running `UniKeyNT`, uninstall registry, existing Scoop app dir) and import a temporary manifest without `unikey`; `-ForceUniKey` overrides.
 - Rust: `rustup` installs the toolchain into `persist\rustup`; the bootstraps only set GNU as default when `rustup show active-toolchain` fails, so an existing MSVC choice survives. Cargo's bin is on the user PATH via the Scoop manifest.
+- Zed's in-app auto-update should be disabled; otherwise it installs outside Scoop and the pinned version in `scoop.json` stops matching reality. `innounp` is pulled in automatically as the installer dependency.
