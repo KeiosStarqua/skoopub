@@ -151,6 +151,11 @@
     },
     {
       "Info": "",
+      "Source": "extras",
+      "Name": "vicinae"
+    },
+    {
+      "Info": "",
       "Source": "zeldrisho",
       "Name": "unikey"
     }
