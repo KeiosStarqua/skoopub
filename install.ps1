@@ -55,7 +55,7 @@ if (-not $repoRoot) {
     Write-Step 'No local checkout found - downloading repo files'
     $repoRoot = Join-Path $env:LOCALAPPDATA 'skoop'
     New-Item -ItemType Directory -Force -Path $repoRoot | Out-Null
-    foreach ($file in 'scoop.json', 'profile.ps1', 'fix-sharex-printscreen.ps1') {
+    foreach ($file in 'scoop.json', 'profile.ps1', 'fix-sharex-printscreen.ps1', 'sharex-hotkeys.template.json') {
         $dest = Join-Path $repoRoot $file
         Invoke-WebRequest -UseBasicParsing -Uri "$RepoRawBase/$file" -OutFile $dest
         Unblock-File $dest
