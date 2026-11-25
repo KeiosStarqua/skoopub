@@ -10,10 +10,10 @@ manager of its own — the files are the product.
 | Path | Type | Purpose |
 |---|---|---|
 | `scoop.json` | Manifest (JSON) | Single source of truth: `buckets` (main, extras) + `apps` (name/source pairs) in `scoop export` format. Replayed with `scoop import scoop.json`. |
-| `install.ps1` | PowerShell 5.1 script | Primary one-shot bootstrap. Works locally (`.\install.ps1`) or piped (`irm ... \| iex`); downloads the manifest when there is no checkout, installs Scoop (per-user or system-wide when elevated), ensures git, runs `scoop import`, then hooks `profile.ps1` into `$PROFILE`. |
-| `bootstrap.ps1` | PowerShell script | Older/simpler equivalent of `install.ps1`: install Scoop, `scoop import scoop.json`, append the profile dot-source line. Kept for `-File` usage from a clone. |
+| `install.ps1` | PowerShell 5.1 script | Primary one-shot bootstrap. Works locally (`.\install.ps1`) or piped (`irm ... \| iex`); downloads the manifest when there is no checkout, installs Scoop (per-user or system-wide when elevated), ensures git, runs `scoop import`, applies the ShareX PrtSc fix, then hooks `profile.ps1` into `$PROFILE`. |
+| `bootstrap.ps1` | PowerShell script | Older/simpler equivalent of `install.ps1`: install Scoop, `scoop import scoop.json`, apply the ShareX PrtSc fix, append the profile dot-source line. Kept for `-File` usage from a clone. |
 | `profile.ps1` | PowerShell profile fragment | Shell config dot-sourced from `$PROFILE`. Must stay idempotent; currently initialises `zoxide`. |
-| `fix-sharex-printscreen.ps1` | PowerShell utility | One-off fix: disables the Windows "Print screen opens Snipping Tool" setting (`PrintScreenKeyForSnippingEnabled = 0`) so ShareX can own PrtSc, then restarts ShareX unless `-NoRestart`. |
+| `fix-sharex-printscreen.ps1` | PowerShell utility | Disables the Windows "Print screen opens Snipping Tool" setting (`PrintScreenKeyForSnippingEnabled = 0`) so ShareX can own PrtSc, then restarts ShareX unless `-NoRestart`. Run by `install.ps1`/`bootstrap.ps1` after the import; safe to run standalone. |
 | `README.md` | Docs | User-facing overview, install commands, update workflow, and per-user vs elevated behavior. |
 | `AGENTS.md` | Docs | This index and the conventions below. |
 | `.git/` | Git metadata | Version control only; not part of the setup. No tracked content should be added here by hand. |
@@ -24,7 +24,7 @@ Buckets: `main`, `extras`.
 
 Apps — `main`: git, herdr, herdr-core, 7zip, mise, uv, ripgrep, fd, bat, fzf, jq,
 gh, less, starship, delta, zoxide.
-Apps — `extras`: vscode, lazygit, wezterm, tailscale.
+Apps — `extras`: vscode, lazygit, wezterm, sharex, tailscale.
 
 ## Conventions
 

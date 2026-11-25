@@ -6,6 +6,7 @@
 .DESCRIPTION
     - Installs Scoop if it is missing (per-user, or system-wide when run elevated).
     - Makes sure git is available, then runs `scoop import scoop.json` (buckets + apps).
+    - Applies fix-sharex-printscreen.ps1 so ShareX owns the PrtSc key.
     - Adds a dot-source line for profile.ps1 to your PowerShell $PROFILE.
 
     Works two ways:
@@ -54,7 +55,7 @@ if (-not $repoRoot) {
     Write-Step 'No local checkout found - downloading repo files'
     $repoRoot = Join-Path $env:LOCALAPPDATA 'skoop'
     New-Item -ItemType Directory -Force -Path $repoRoot | Out-Null
-    foreach ($file in 'scoop.json', 'profile.ps1') {
+    foreach ($file in 'scoop.json', 'profile.ps1', 'fix-sharex-printscreen.ps1') {
         $dest = Join-Path $repoRoot $file
         Invoke-WebRequest -UseBasicParsing -Uri "$RepoRawBase/$file" -OutFile $dest
         Unblock-File $dest
@@ -64,6 +65,7 @@ if (-not $repoRoot) {
 
 $manifest      = Join-Path $repoRoot 'scoop.json'
 $profileScript = Join-Path $repoRoot 'profile.ps1'
+$sharexFix     = Join-Path $repoRoot 'fix-sharex-printscreen.ps1'
 Write-Ok "repo root: $repoRoot"
 
 # --- 2. Install Scoop if its shims are missing -------------------------------
@@ -105,7 +107,15 @@ Write-Step "Importing $manifest"
 & $scoop import $manifest
 if ($LASTEXITCODE -ne 0) { throw "scoop import failed with exit code $LASTEXITCODE." }
 
-# --- 6. Hook the repo-managed profile into $PROFILE --------------------------
+# --- 6. Let ShareX own the PrtSc key -----------------------------------------
+if (Test-Path $sharexFix) {
+    Write-Step 'Applying ShareX PrtSc fix'
+    & $sharexFix
+} else {
+    Write-Ok 'fix-sharex-printscreen.ps1 not found - skipping'
+}
+
+# --- 7. Hook the repo-managed profile into $PROFILE --------------------------
 Write-Step 'Wiring profile.ps1 into your PowerShell profile'
 $hook    = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$profileScript`""
 $already = (Test-Path $PROFILE) -and (Select-String -Path $PROFILE -SimpleMatch $profileScript -Quiet)

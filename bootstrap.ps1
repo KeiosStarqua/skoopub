@@ -17,7 +17,11 @@ $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
 # 2. Restore buckets + apps declared in scoop.json.
 scoop import (Join-Path $repo 'scoop.json')
 
-# 3. Make PowerShell load the repo-managed shell config on startup.
+# 3. Let ShareX own PrtSc: Windows otherwise hands the key to the Snipping Tool.
+$sharexFix = Join-Path $repo 'fix-sharex-printscreen.ps1'
+if (Test-Path $sharexFix) { & $sharexFix }
+
+# 4. Make PowerShell load the repo-managed shell config on startup.
 $loader = Join-Path $repo 'profile.ps1'
 $hook = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$loader`""
 $already = (Test-Path $PROFILE) -and (Select-String -Path $PROFILE -SimpleMatch $loader -Quiet)

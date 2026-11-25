@@ -108,6 +108,11 @@
     {
       "Info": "",
       "Source": "extras",
+      "Name": "sharex"
+    },
+    {
+      "Info": "",
+      "Source": "extras",
       "Name": "tailscale"
     }
   ]

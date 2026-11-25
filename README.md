@@ -6,6 +6,7 @@ PowerShell profile, restored from a single manifest.
 - `scoop.json` — buckets + apps (`scoop export` format, replayed with `scoop import`)
 - `profile.ps1` — shell config, dot-sourced from your `$PROFILE`
 - `install.ps1` — one-shot bootstrap for a fresh machine
+- `fix-sharex-printscreen.ps1` — hands the PrtSc key back to ShareX
 
 ## Install with one command
 
@@ -34,7 +35,8 @@ cd skoop
 1. Installs **Scoop** if it is missing.
 2. Ensures **git** is available (Scoop buckets are git repos).
 3. Runs `scoop import scoop.json` — adds the `main` / `extras` buckets and every listed app.
-4. Appends a dot-source line for `profile.ps1` to your `$PROFILE` (idempotent).
+4. Disables Windows' "Print screen opens Snipping Tool" so **ShareX** can bind PrtSc.
+5. Appends a dot-source line for `profile.ps1` to your `$PROFILE` (idempotent).
 
 Then open a new PowerShell window and try:
 
@@ -61,7 +63,7 @@ scoop export | Out-File -Encoding utf8 scoop.json
 |---|---|
 | Normal (non-elevated) shell | Scoop installs per-user under `%USERPROFILE%\scoop` |
 | Elevated shell | Scoop installs system-wide under `C:\ProgramData\scoop` |
-| Piped via `irm \| iex` | `scoop.json` / `profile.ps1` are fetched to `%LOCALAPPDATA%\skoop` |
+| Piped via `irm \| iex` | `scoop.json`, `profile.ps1`, `fix-sharex-printscreen.ps1` are fetched to `%LOCALAPPDATA%\skoop` |
 | From a clone | The files next to `install.ps1` are used, so edits apply directly |
 
 Requires Windows 10/11 (or Server 2016+) with PowerShell 5.1+ and internet access.
