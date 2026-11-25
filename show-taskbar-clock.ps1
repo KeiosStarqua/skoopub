@@ -1,5 +1,6 @@
 # show-taskbar-clock.ps1
 # Make sure Windows always shows the clock on the taskbar. Per-user, no admin.
+# Sets ShowClock (system-icon toggle) and clears the HideClock user policy.
 #
 #   powershell -ExecutionPolicy Bypass -File .\show-taskbar-clock.ps1
 #   powershell -ExecutionPolicy Bypass -File .\show-taskbar-clock.ps1 -Seconds
@@ -13,6 +14,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Method 1 equivalent: Turn system icons on or off → Clock = On
 $keyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
 if (-not (Test-Path $keyPath)) {
     New-Item -Path $keyPath -Force | Out-Null
@@ -22,6 +24,16 @@ $beforeClock = '<not set>'
 try { $beforeClock = (Get-ItemProperty -Path $keyPath -Name ShowClock -ErrorAction Stop).ShowClock } catch {}
 New-ItemProperty -Path $keyPath -Name ShowClock -Value 1 -PropertyType DWord -Force | Out-Null
 Write-Host "ShowClock: $beforeClock -> 1" -ForegroundColor Green
+
+# Method 2: clear user-level "Remove Clock from the system notification area" policy
+$policyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer'
+if (-not (Test-Path $policyPath)) {
+    New-Item -Path $policyPath -Force | Out-Null
+}
+$beforeHide = '<not set>'
+try { $beforeHide = (Get-ItemProperty -Path $policyPath -Name HideClock -ErrorAction Stop).HideClock } catch {}
+New-ItemProperty -Path $policyPath -Name HideClock -Value 0 -PropertyType DWord -Force | Out-Null
+Write-Host "HideClock (policy): $beforeHide -> 0" -ForegroundColor Green
 
 if ($Seconds) {
     $beforeSeconds = '<not set>'
