@@ -1,6 +1,6 @@
 # show-taskbar-clock.ps1
 # Make sure Windows always shows the clock on the taskbar. Per-user, no admin.
-# Sets ShowClock / ShowSecondsInSystemClock to 1 and clears the HideClock user policy.
+# Sets ShowClock / ShowSecondsInSystemClock to 1 and removes the HideClock policy override.
 #
 #   powershell -ExecutionPolicy Bypass -File .\show-taskbar-clock.ps1
 [CmdletBinding()]
@@ -11,7 +11,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Method 1 equivalent: Turn system icons on or off → Clock = On
 $keyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
 if (-not (Test-Path $keyPath)) {
     New-Item -Path $keyPath -Force | Out-Null
@@ -29,23 +28,40 @@ try {
 New-ItemProperty -Path $keyPath -Name ShowSecondsInSystemClock -Value 1 -PropertyType DWord -Force | Out-Null
 Write-Host "ShowSecondsInSystemClock: $beforeSeconds -> 1" -ForegroundColor Green
 
-# Method 2: clear user-level "Remove Clock from the system notification area" policy
+# Remove HideClock instead of setting 0 — a present DWORD can still lock the Settings toggle / tray clock.
 $policyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer'
-if (-not (Test-Path $policyPath)) {
-    New-Item -Path $policyPath -Force | Out-Null
+if (Test-Path $policyPath) {
+    $hadHide = $false
+    try {
+        $null = Get-ItemProperty -Path $policyPath -Name HideClock -ErrorAction Stop
+        $hadHide = $true
+    } catch {}
+    if ($hadHide) {
+        Remove-ItemProperty -Path $policyPath -Name HideClock -Force
+        Write-Host 'HideClock (policy): removed' -ForegroundColor Green
+    } else {
+        Write-Host 'HideClock (policy): not present' -ForegroundColor Green
+    }
+    $remaining = (Get-Item -Path $policyPath).Property | Where-Object { $_ -notmatch '^PS' }
+    if (-not $remaining) {
+        Remove-Item -Path $policyPath -Force -ErrorAction SilentlyContinue
+    }
+} else {
+    Write-Host 'HideClock (policy): not present' -ForegroundColor Green
 }
-$beforeHide = '<not set>'
-try { $beforeHide = (Get-ItemProperty -Path $policyPath -Name HideClock -ErrorAction Stop).HideClock } catch {}
-New-ItemProperty -Path $policyPath -Name HideClock -Value 0 -PropertyType DWord -Force | Out-Null
-Write-Host "HideClock (policy): $beforeHide -> 0" -ForegroundColor Green
 
 if ($NoRestartExplorer) {
     Write-Host 'Explorer not restarted; sign out/in (or restart explorer) to see the change.'
 } else {
+    foreach ($proc in @('ShellExperienceHost', 'StartMenuExperienceHost')) {
+        Get-Process -Name $proc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    }
     Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
     if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue)) {
         Start-Process explorer.exe
     }
-    Write-Host 'Explorer restarted; the taskbar clock is now shown.' -ForegroundColor Green
+    Start-Sleep -Seconds 1
+    Write-Host 'Explorer restarted; the taskbar clock should be visible now.' -ForegroundColor Green
+    Write-Host 'If it is still missing, sign out and back in once (policy keys are cached at logon).' -ForegroundColor Yellow
 }
