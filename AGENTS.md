@@ -24,7 +24,7 @@ manager of its own — the files are the product.
 Buckets: `main`, `extras`, `zeldrisho` (community bucket for Vietnamese IMEs).
 
 Apps — `main`: git, herdr, herdr-core, 7zip, mise, uv, ripgrep, fd, bat, fzf, jq,
-gh, less, starship, delta, zoxide.
+gh, less, starship, delta, zoxide, atuin.
 Apps — `extras`: vscode, lazygit, wezterm, sharex, tailscale.
 Apps — `zeldrisho`: unikey (Vietnamese IME; third-party bucket).
 

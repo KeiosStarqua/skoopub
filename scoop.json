@@ -96,6 +96,11 @@
     },
     {
       "Info": "",
+      "Source": "main",
+      "Name": "atuin"
+    },
+    {
+      "Info": "",
       "Source": "extras",
       "Name": "vscode"
     },
