@@ -9,6 +9,7 @@
     - Keeps a UniKey that is already installed (e.g. on a public PC) instead of
       adding a second copy; -ForceUniKey installs the Scoop build anyway.
     - Applies fix-sharex-printscreen.ps1 so ShareX owns the PrtSc key.
+    - Applies show-taskbar-clock.ps1 so the clock is always on the taskbar.
     - Adds a dot-source line for profile.ps1 to your PowerShell $PROFILE.
 
     Works two ways:
@@ -83,7 +84,7 @@ if (-not $repoRoot) {
     Write-Step 'No local checkout found - downloading repo files'
     $repoRoot = Join-Path $env:LOCALAPPDATA 'skoop'
     New-Item -ItemType Directory -Force -Path $repoRoot | Out-Null
-    foreach ($file in 'scoop.json', 'profile.ps1', 'fix-sharex-printscreen.ps1', 'sharex-hotkeys.template.json') {
+    foreach ($file in 'scoop.json', 'profile.ps1', 'fix-sharex-printscreen.ps1', 'sharex-hotkeys.template.json', 'show-taskbar-clock.ps1') {
         $dest = Join-Path $repoRoot $file
         Invoke-WebRequest -UseBasicParsing -Uri "$RepoRawBase/$file" -OutFile $dest
         Unblock-File $dest
@@ -166,7 +167,16 @@ if (Test-Path $sharexFix) {
     Write-Ok 'fix-sharex-printscreen.ps1 not found - skipping'
 }
 
-# --- 8. Hook the repo-managed profile into $PROFILE --------------------------
+# --- 8. Make sure the taskbar clock is visible -------------------------------
+$clockFix = Join-Path $repoRoot 'show-taskbar-clock.ps1'
+if (Test-Path $clockFix) {
+    Write-Step 'Showing the taskbar clock'
+    & $clockFix
+} else {
+    Write-Ok 'show-taskbar-clock.ps1 not found - skipping'
+}
+
+# --- 9. Hook the repo-managed profile into $PROFILE --------------------------
 Write-Step 'Wiring profile.ps1 into your PowerShell profile'
 $hook    = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$profileScript`""
 $already = (Test-Path $PROFILE) -and (

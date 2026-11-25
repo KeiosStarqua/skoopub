@@ -69,7 +69,11 @@ if (Get-Command rustup -ErrorAction SilentlyContinue) {
 $sharexFix = Join-Path $repo 'fix-sharex-printscreen.ps1'
 if (Test-Path $sharexFix) { & $sharexFix }
 
-# 5. Make PowerShell load the repo-managed shell config on startup.
+# 5. Always show the clock on the taskbar.
+$clockFix = Join-Path $repo 'show-taskbar-clock.ps1'
+if (Test-Path $clockFix) { & $clockFix }
+
+# 6. Make PowerShell load the repo-managed shell config on startup.
 $loader = Join-Path $repo 'profile.ps1'
 $hook = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$loader`""
 $already = (Test-Path $PROFILE) -and (

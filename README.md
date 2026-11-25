@@ -7,6 +7,7 @@ PowerShell profile, restored from a single manifest.
 - `profile.ps1` — shell config (`zoxide` + `atuin` history search), dot-sourced from your `$PROFILE`
 - `install.ps1` — one-shot bootstrap for a fresh machine
 - `fix-sharex-printscreen.ps1` — hands the PrtSc key back to ShareX
+- `show-taskbar-clock.ps1` — keeps the taskbar clock visible (`-Seconds` for seconds)
 
 ## Install with one command
 
@@ -37,7 +38,8 @@ cd skoop
 3. Runs `scoop import scoop.json` — adds the `main` / `extras` / `zeldrisho` buckets and every listed app. If UniKey is already installed (common on public PCs), that one app is skipped so you do not end up with two IMEs; pass `-ForceUniKey` to install the Scoop copy anyway.
 4. Sets the default Rust toolchain to `stable-x86_64-pc-windows-gnu` if none is configured (no Visual Studio Build Tools needed).
 5. Disables Windows' "Print screen opens Snipping Tool" so **ShareX** can bind PrtSc.
-6. Appends a dot-source line for `profile.ps1` to your `$PROFILE` (idempotent).
+6. Makes sure the **taskbar clock** is visible (run `.\show-taskbar-clock.ps1 -Seconds` if you also want seconds).
+7. Appends a dot-source line for `profile.ps1` to your `$PROFILE` (idempotent).
 
 Then open a new PowerShell window and try:
 
