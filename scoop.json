@@ -121,6 +121,11 @@
     },
     {
       "Info": "",
+      "Source": "main",
+      "Name": "opencode"
+    },
+    {
+      "Info": "",
       "Source": "extras",
       "Name": "vscode"
     },
