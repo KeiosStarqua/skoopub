@@ -87,6 +87,11 @@
     },
     {
       "Info": "",
+      "Source": "main",
+      "Name": "zoxide"
+    },
+    {
+      "Info": "",
       "Source": "extras",
       "Name": "vscode"
     },
