@@ -111,6 +111,11 @@
     },
     {
       "Info": "",
+      "Source": "main",
+      "Name": "bun"
+    },
+    {
+      "Info": "",
       "Source": "extras",
       "Name": "vscode"
     },
