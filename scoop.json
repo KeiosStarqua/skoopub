@@ -116,6 +116,11 @@
     },
     {
       "Info": "",
+      "Source": "main",
+      "Name": "cursor-cli"
+    },
+    {
+      "Info": "",
       "Source": "extras",
       "Name": "vscode"
     },
