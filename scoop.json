@@ -166,6 +166,11 @@
     },
     {
       "Info": "",
+      "Source": "extras",
+      "Name": "chatgpt"
+    },
+    {
+      "Info": "",
       "Source": "zeldrisho",
       "Name": "unikey"
     }
