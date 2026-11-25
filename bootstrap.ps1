@@ -81,7 +81,7 @@ $hook = "# Load the repo-managed shell config. Edit that file, not this one.`n. 
 
 New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null
 $lines = if (Test-Path $PROFILE) { @(Get-Content -Path $PROFILE) } else { @() }
-$stale   = 'skoop[\\/]profile\.ps1|\$skoopProfile|^# Load the repo-managed shell config'
+$stale   = 'skoop[\\/]profile\.ps1|\$skoopProfile|^# Load the repo-managed shell config|' + [regex]::Escape($loader)
 $body    = (($lines | Where-Object { $_ -notmatch $stale }) -join "`r`n").TrimEnd()
 $desired = if ($body) { "$body`r`n$hook" } else { $hook }
 

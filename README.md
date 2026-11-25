@@ -39,7 +39,7 @@ cd skoop
 4. Sets the default Rust toolchain to `stable-x86_64-pc-windows-gnu` if none is configured (no Visual Studio Build Tools needed).
 5. Disables Windows' "Print screen opens Snipping Tool" so **ShareX** can bind PrtSc.
 6. Makes sure the **taskbar clock** is visible (with seconds).
-7. Appends a dot-source line for `profile.ps1` to your `$PROFILE` (idempotent).
+7. Wires `profile.ps1` into your `$PROFILE` (idempotent). An older hook pointing at a `profile.ps1` that no longer exists is rewritten, which is what silently breaks `z` after the repo moves.
 
 Then open a new PowerShell window and try:
 
@@ -70,5 +70,6 @@ scoop export | Out-File -Encoding utf8 scoop.json
 | From a clone | The files next to `install.ps1` are used, so edits apply directly |
 | UniKey preinstalled | Detected via process, uninstall registry and Scoop dir; the existing copy is kept unless `-ForceUniKey` is passed |
 | Rust toolchain | GNU is set as default only when no toolchain is active; switch with `rustup default stable-x86_64-pc-windows-msvc` (needs MSVC Build Tools) |
+| `z` / `atuin` not found | The profile hook points at a missing `profile.ps1` or the window predates the install. Check `Get-Content $PROFILE`, then open a new PowerShell window |
 
 Requires Windows 10/11 (or Server 2016+) with PowerShell 5.1+ and internet access.

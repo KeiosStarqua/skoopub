@@ -183,10 +183,10 @@ $hook = "# Load the repo-managed shell config. Edit that file, not this one.`n. 
 New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null
 $lines = if (Test-Path $PROFILE) { @(Get-Content -Path $PROFILE) } else { @() }
 
-# Rewrite any earlier hook instead of trusting it: a stale one can point at a
+# Replace any earlier hook instead of trusting it: a stale one can point at a
 # profile.ps1 that no longer exists (e.g. ~\skoop\profile.ps1) and then silently
 # load nothing, which looks like the packages are missing.
-$stale   = 'skoop[\\/]profile\.ps1|\$skoopProfile|^# Load the repo-managed shell config'
+$stale   = 'skoop[\\/]profile\.ps1|\$skoopProfile|^# Load the repo-managed shell config|' + [regex]::Escape($profileScript)
 $body    = (($lines | Where-Object { $_ -notmatch $stale }) -join "`r`n").TrimEnd()
 $desired = if ($body) { "$body`r`n$hook" } else { $hook }
 
