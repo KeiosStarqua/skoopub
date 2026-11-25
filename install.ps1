@@ -6,6 +6,8 @@
 .DESCRIPTION
     - Installs Scoop if it is missing (per-user, or system-wide when run elevated).
     - Makes sure git is available, then runs `scoop import scoop.json` (buckets + apps).
+    - Keeps a UniKey that is already installed (e.g. on a public PC) instead of
+      adding a second copy; -ForceUniKey installs the Scoop build anyway.
     - Applies fix-sharex-printscreen.ps1 so ShareX owns the PrtSc key.
     - Adds a dot-source line for profile.ps1 to your PowerShell $PROFILE.
 
@@ -17,6 +19,9 @@
     Raw URL base used to fetch scoop.json / profile.ps1 when the script is piped in
     and there is no local checkout. Override this if you use a fork.
 
+.PARAMETER ForceUniKey
+    Install the Scoop UniKey package even if another UniKey is already installed.
+
 .EXAMPLE
     irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
@@ -25,7 +30,8 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$RepoRawBase = 'https://raw.githubusercontent.com/KeiosStarqua/skoopub/main'
+    [string]$RepoRawBase = 'https://raw.githubusercontent.com/KeiosStarqua/skoopub/main',
+    [switch]$ForceUniKey
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,6 +40,28 @@ $ProgressPreference    = 'SilentlyContinue'
 
 function Write-Step([string]$Message) { Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok([string]$Message)   { Write-Host "    $Message" -ForegroundColor DarkGray }
+
+function Test-UniKeyInstalled {
+    # Public PCs often ship a manually installed UniKey; installing the Scoop
+    # copy as well would leave two IMEs fighting over the same hotkeys.
+    if (Get-Process -Name UniKeyNT -ErrorAction SilentlyContinue) { return $true }
+
+    $uninstallKeys = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    )
+    foreach ($key in $uninstallKeys) {
+        if (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -match 'UniKey' }) { return $true }
+    }
+
+    $scoopRoots = @($env:SCOOP, (Join-Path $env:USERPROFILE 'scoop'), (Join-Path $env:ProgramData 'scoop'))
+    foreach ($root in $scoopRoots) {
+        if ($root -and (Test-Path (Join-Path $root 'apps\unikey\current'))) { return $true }
+    }
+    return $false
+}
 
 function Find-ScoopShims {
     @(
@@ -103,8 +131,18 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 }
 
 # --- 5. Restore buckets + apps ----------------------------------------------
-Write-Step "Importing $manifest"
-& $scoop import $manifest
+$manifestToImport = $manifest
+if (-not $ForceUniKey -and (Test-UniKeyInstalled)) {
+    Write-Step 'UniKey already installed - keeping the existing copy'
+    $json = Get-Content -Raw $manifest | ConvertFrom-Json
+    $json.apps = @($json.apps | Where-Object { $_.Name -ne 'unikey' })
+    $manifestToImport = Join-Path $env:TEMP 'skoop-scoop-no-unikey.json'
+    $json | ConvertTo-Json -Depth 10 | Set-Content -Path $manifestToImport -Encoding UTF8
+    Write-Ok "importing without unikey ($manifestToImport)"
+}
+
+Write-Step "Importing $manifestToImport"
+& $scoop import $manifestToImport
 if ($LASTEXITCODE -ne 0) { throw "scoop import failed with exit code $LASTEXITCODE." }
 
 # --- 6. Let ShareX own the PrtSc key -----------------------------------------

@@ -9,9 +9,9 @@ manager of its own — the files are the product.
 
 | Path | Type | Purpose |
 |---|---|---|
-| `scoop.json` | Manifest (JSON) | Single source of truth: `buckets` (main, extras) + `apps` (name/source pairs) in `scoop export` format. Replayed with `scoop import scoop.json`. |
-| `install.ps1` | PowerShell 5.1 script | Primary one-shot bootstrap. Works locally (`.\install.ps1`) or piped (`irm ... \| iex`); downloads the manifest when there is no checkout, installs Scoop (per-user or system-wide when elevated), ensures git, runs `scoop import`, applies the ShareX PrtSc fix, then hooks `profile.ps1` into `$PROFILE`. |
-| `bootstrap.ps1` | PowerShell script | Older/simpler equivalent of `install.ps1`: install Scoop, `scoop import scoop.json`, apply the ShareX PrtSc fix, append the profile dot-source line. Kept for `-File` usage from a clone. |
+| `scoop.json` | Manifest (JSON) | Single source of truth: `buckets` (main, extras, zeldrisho) + `apps` (name/source pairs) in `scoop export` format. Replayed with `scoop import scoop.json`. |
+| `install.ps1` | PowerShell 5.1 script | Primary one-shot bootstrap. Works locally (`.\install.ps1`) or piped (`irm ... \| iex`); downloads the manifest when there is no checkout, installs Scoop (per-user or system-wide when elevated), ensures git, runs `scoop import`, applies the ShareX PrtSc fix, then hooks `profile.ps1` into `$PROFILE`. Skips UniKey if one is already installed unless `-ForceUniKey`. |
+| `bootstrap.ps1` | PowerShell script | Older/simpler equivalent of `install.ps1`: install Scoop, `scoop import scoop.json`, apply the ShareX PrtSc fix, append the profile dot-source line. Also skips an existing UniKey unless `-ForceUniKey`. Kept for `-File` usage from a clone. |
 | `profile.ps1` | PowerShell profile fragment | Shell config dot-sourced from `$PROFILE`. Must stay idempotent; currently initialises `zoxide`. |
 | `fix-sharex-printscreen.ps1` | PowerShell utility | Disables the Windows "Print screen opens Snipping Tool" setting (`PrintScreenKeyForSnippingEnabled = 0`), optionally restarts Explorer (`-RestartExplorer`), seeds ShareX config so hotkeys register without the first-run welcome screen, then restarts ShareX unless `-NoRestart`. Run by `install.ps1`/`bootstrap.ps1` after the import; safe to run standalone. |
 | `sharex-hotkeys.template.json` | JSON template | Default ShareX hotkey set (PrtSc, Ctrl/PrtSc, Alt/PrtSc, Shift/PrtSc, Ctrl+Shift/PrtSc) copied on first run when `HotkeysConfig.json` is missing. |
@@ -21,11 +21,12 @@ manager of its own — the files are the product.
 
 ## Current inventory
 
-Buckets: `main`, `extras`.
+Buckets: `main`, `extras`, `zeldrisho` (community bucket for Vietnamese IMEs).
 
 Apps — `main`: git, herdr, herdr-core, 7zip, mise, uv, ripgrep, fd, bat, fzf, jq,
 gh, less, starship, delta, zoxide.
 Apps — `extras`: vscode, lazygit, wezterm, sharex, tailscale.
+Apps — `zeldrisho`: unikey (Vietnamese IME; third-party bucket).
 
 ## Conventions
 
@@ -50,3 +51,5 @@ Apps — `extras`: vscode, lazygit, wezterm, sharex, tailscale.
 
 - The repo is not a Scoop bucket and publishes nothing; `install.ps1` is fetched raw from `https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1` (override with `-RepoRawBase`).
 - Tailscale installs its service separately; the Scoop package provides the CLI (`tailscale`, `tailscaled`) and needs `tailscaled` running before `tailscale status` works.
+- `zeldrisho/scoop-bucket` is third-party: the UniKey manifest installs the official `unikey.org` archive with a pinned SHA-256 hash. Verify the diff when bumping versions.
+- Public PCs may already have UniKey installed outside Scoop. Both bootstraps detect it (running `UniKeyNT`, uninstall registry, existing Scoop app dir) and import a temporary manifest without `unikey`; `-ForceUniKey` overrides.

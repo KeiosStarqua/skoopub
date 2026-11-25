@@ -7,7 +7,7 @@
       },
       "TaskSettings": {
         "Description": "",
-        "Job": "RectangleRegion",
+        "Job": "PrintScreen",
         "UseDefaultAfterCaptureJob": true,
         "AfterCaptureJob": "CopyImageToClipboard, SaveImageToFile",
         "UseDefaultAfterUploadJob": true,
@@ -51,7 +51,7 @@
       },
       "TaskSettings": {
         "Description": "",
-        "Job": "PrintScreen",
+        "Job": "RectangleRegion",
         "UseDefaultAfterCaptureJob": true,
         "AfterCaptureJob": "CopyImageToClipboard, SaveImageToFile",
         "UseDefaultAfterUploadJob": true,
