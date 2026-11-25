@@ -1,13 +1,10 @@
 # show-taskbar-clock.ps1
 # Make sure Windows always shows the clock on the taskbar. Per-user, no admin.
-# Sets ShowClock (system-icon toggle) and clears the HideClock user policy.
+# Sets ShowClock / ShowSecondsInSystemClock to 1 and clears the HideClock user policy.
 #
 #   powershell -ExecutionPolicy Bypass -File .\show-taskbar-clock.ps1
-#   powershell -ExecutionPolicy Bypass -File .\show-taskbar-clock.ps1 -Seconds
 [CmdletBinding()]
 param(
-    # Also show seconds in the taskbar clock.
-    [switch]$Seconds,
     # Set the registry values but leave the current Explorer session alone.
     [switch]$NoRestartExplorer
 )
@@ -25,6 +22,13 @@ try { $beforeClock = (Get-ItemProperty -Path $keyPath -Name ShowClock -ErrorActi
 New-ItemProperty -Path $keyPath -Name ShowClock -Value 1 -PropertyType DWord -Force | Out-Null
 Write-Host "ShowClock: $beforeClock -> 1" -ForegroundColor Green
 
+$beforeSeconds = '<not set>'
+try {
+    $beforeSeconds = (Get-ItemProperty -Path $keyPath -Name ShowSecondsInSystemClock -ErrorAction Stop).ShowSecondsInSystemClock
+} catch {}
+New-ItemProperty -Path $keyPath -Name ShowSecondsInSystemClock -Value 1 -PropertyType DWord -Force | Out-Null
+Write-Host "ShowSecondsInSystemClock: $beforeSeconds -> 1" -ForegroundColor Green
+
 # Method 2: clear user-level "Remove Clock from the system notification area" policy
 $policyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer'
 if (-not (Test-Path $policyPath)) {
@@ -34,15 +38,6 @@ $beforeHide = '<not set>'
 try { $beforeHide = (Get-ItemProperty -Path $policyPath -Name HideClock -ErrorAction Stop).HideClock } catch {}
 New-ItemProperty -Path $policyPath -Name HideClock -Value 0 -PropertyType DWord -Force | Out-Null
 Write-Host "HideClock (policy): $beforeHide -> 0" -ForegroundColor Green
-
-if ($Seconds) {
-    $beforeSeconds = '<not set>'
-    try {
-        $beforeSeconds = (Get-ItemProperty -Path $keyPath -Name ShowSecondsInSystemClock -ErrorAction Stop).ShowSecondsInSystemClock
-    } catch {}
-    New-ItemProperty -Path $keyPath -Name ShowSecondsInSystemClock -Value 1 -PropertyType DWord -Force | Out-Null
-    Write-Host "ShowSecondsInSystemClock: $beforeSeconds -> 1" -ForegroundColor Green
-}
 
 if ($NoRestartExplorer) {
     Write-Host 'Explorer not restarted; sign out/in (or restart explorer) to see the change.'
