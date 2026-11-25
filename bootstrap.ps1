@@ -74,15 +74,21 @@ $clockFix = Join-Path $repo 'show-taskbar-clock.ps1'
 if (Test-Path $clockFix) { & $clockFix }
 
 # 6. Make PowerShell load the repo-managed shell config on startup.
+#    Any earlier hook is rewritten: a stale path (e.g. ~\skoop\profile.ps1 from an
+#    old layout) would point at a missing file and silently load nothing.
 $loader = Join-Path $repo 'profile.ps1'
 $hook = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$loader`""
-$already = (Test-Path $PROFILE) -and (
-    (Select-String -Path $PROFILE -SimpleMatch $loader -Quiet) -or
-    (Select-String -Path $PROFILE -Pattern 'skoop\\profile\.ps1' -Quiet)
-)
-if (-not $already) {
-    New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null
-    Add-Content -Path $PROFILE -Value "`n$hook" -Encoding UTF8
+
+New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null
+$lines = if (Test-Path $PROFILE) { @(Get-Content -Path $PROFILE) } else { @() }
+$stale   = 'skoop[\\/]profile\.ps1|\$skoopProfile|^# Load the repo-managed shell config'
+$body    = (($lines | Where-Object { $_ -notmatch $stale }) -join "`r`n").TrimEnd()
+$desired = if ($body) { "$body`r`n$hook" } else { $hook }
+
+$existing = if (Test-Path $PROFILE) { Get-Content -Raw -Path $PROFILE } else { '' }
+if ($existing.TrimEnd() -ne $desired) {
+    Set-Content -Path $PROFILE -Value $desired -Encoding UTF8
+    Write-Host "Wired profile.ps1 into $PROFILE"
 }
 
 Write-Host "Done. Open a new PowerShell window, then try: z .." -ForegroundColor Green

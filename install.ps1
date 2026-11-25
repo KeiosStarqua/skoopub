@@ -178,17 +178,24 @@ if (Test-Path $clockFix) {
 
 # --- 9. Hook the repo-managed profile into $PROFILE --------------------------
 Write-Step 'Wiring profile.ps1 into your PowerShell profile'
-$hook    = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$profileScript`""
-$already = (Test-Path $PROFILE) -and (
-    (Select-String -Path $PROFILE -SimpleMatch $profileScript -Quiet) -or
-    (Select-String -Path $PROFILE -Pattern 'skoop\\profile\.ps1' -Quiet)
-)
-if ($already) {
+$hook = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$profileScript`""
+
+New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null
+$lines = if (Test-Path $PROFILE) { @(Get-Content -Path $PROFILE) } else { @() }
+
+# Rewrite any earlier hook instead of trusting it: a stale one can point at a
+# profile.ps1 that no longer exists (e.g. ~\skoop\profile.ps1) and then silently
+# load nothing, which looks like the packages are missing.
+$stale   = 'skoop[\\/]profile\.ps1|\$skoopProfile|^# Load the repo-managed shell config'
+$body    = (($lines | Where-Object { $_ -notmatch $stale }) -join "`r`n").TrimEnd()
+$desired = if ($body) { "$body`r`n$hook" } else { $hook }
+
+$existing = if (Test-Path $PROFILE) { Get-Content -Raw -Path $PROFILE } else { '' }
+if ($existing.TrimEnd() -eq $desired) {
     Write-Ok "already present in $PROFILE"
 } else {
-    New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null
-    Add-Content -Path $PROFILE -Value "`n$hook" -Encoding UTF8
-    Write-Ok "added to $PROFILE"
+    Set-Content -Path $PROFILE -Value $desired -Encoding UTF8
+    Write-Ok "wired into $PROFILE"
 }
 
 Write-Host ''
