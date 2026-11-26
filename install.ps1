@@ -55,6 +55,10 @@
       template) via apps/yasb/configure.ps1 and starts YASB for the Komorebi UI.
     - Adds an `n` alias for Nushell in PowerShell (profile.ps1) and a cmd.exe
       AutoRun doskey macro via apps/nushell/setup.ps1, preserving existing AutoRun entries.
+    - Registers a per-user scheduled task (SkoopCleanupOnShutdown) via
+      core/install-shutdown-hook.ps1 so the Firefox backup + auth cleanup runs
+      automatically on shutdown/logoff; -BackupUser / SKOOP_BACKUP_USER supplies
+      the SSH user, and -SkipShutdownHook opts out.
 
     Interactive CLI: when gum (charm-gum) is available, the script opens a menu
     to choose Full setup / Configure only / Connect Herdr only / Quit. It falls
@@ -134,6 +138,8 @@ param(
     [switch]$NoMenu,
     [switch]$NoGum,
     [switch]$NoPwsh,
+    [string]$BackupUser = "$env:SKOOP_BACKUP_USER",
+    [switch]$SkipShutdownHook,
     [switch]$Help
 )
 
@@ -157,8 +163,8 @@ Usage:
   .\install.ps1 -SkipHerdrConnect        # configure only
   irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
-Options: -ForceUniKey -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -NoMenu -NoGum -NoPwsh -Help
-Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH
+Options: -ForceUniKey -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -NoMenu -NoGum -NoPwsh -BackupUser -SkipShutdownHook -Help
+Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_BACKUP_USER
 '@
     return
 }
@@ -852,6 +858,21 @@ if (Test-Path $starshipConfig) {
     Write-Ok 'apps/starship/configure.ps1 not found - skipping'
 }
 
+# --- 23. Automatic cleanup on shutdown / logoff -----------------------------
+$shutdownHook = Join-Path $repoRoot 'core\install-shutdown-hook.ps1'
+if (-not $SkipShutdownHook -and (Test-Path $shutdownHook)) {
+    Write-Step 'Registering the shutdown cleanup hook'
+    try {
+        & $shutdownHook -User $BackupUser
+    } catch {
+        Write-Host "    Shutdown hook setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} elseif ($SkipShutdownHook) {
+    Write-Ok 'Shutdown cleanup hook skipped (-SkipShutdownHook)'
+} else {
+    Write-Ok 'core/install-shutdown-hook.ps1 not found - skipping'
+}
+
 Write-Host ''
 Write-Host 'Done. Open a new PowerShell window, then try: z ..' -ForegroundColor Green
 Write-Host 'git push will use your gh login (no username prompt).' -ForegroundColor Green
@@ -863,3 +884,6 @@ Write-Host 'Komorebi hotkeys are ready (see apps/komorebi/whkdrc).' -ForegroundC
 Write-Host 'YASB status bar is configured; fill ~/.config/yasb/.env for weather/wallpapers.' -ForegroundColor Green
 Write-Host 'Type `n` in PowerShell or cmd to open Nushell.' -ForegroundColor Green
 Write-Host 'Starship is the prompt in new PowerShell and cmd windows.' -ForegroundColor Green
+if (-not $SkipShutdownHook) {
+    Write-Host 'Shutdown cleanup is registered: Firefox backs up to acer-ubuntu and local auth is cleared on shutdown/logoff.' -ForegroundColor Green
+}
