@@ -49,6 +49,29 @@ function Write-Step([string]$Message) { Write-Host "==> $Message" -ForegroundCol
 function Write-Ok([string]$Message)   { Write-Host "    $Message" -ForegroundColor DarkGray }
 function Write-Warn([string]$Message) { Write-Host "    $Message" -ForegroundColor Yellow }
 
+function Invoke-GumPicker {
+    # gum draws its UI on stderr and writes only the answer to stdout.
+    # Redirecting or piping stderr (2>&1, | Out-String) leaves gum without a
+    # terminal, so it renders nothing and returns no choice; letting PowerShell
+    # inherit stderr instead turns every UI frame into a NativeCommandError under
+    # $ErrorActionPreference='Stop'. So: capture stdout with a .NET process and
+    # leave stderr on the console, where gum can draw.
+    param([string]$GumPath, [string[]]$Arguments)
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $GumPath
+    $psi.Arguments = (@($Arguments | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $false
+    $process = [System.Diagnostics.Process]::Start($psi)
+    $output = $process.StandardOutput.ReadToEnd()
+    $process.WaitForExit()
+    return [pscustomobject]@{
+        ExitCode = $process.ExitCode
+        Output   = $output
+    }
+}
+
 $script:TailscaleCliError = $null
 $script:TailscaleBackend  = $null
 
@@ -169,25 +192,16 @@ function Select-Peer {
         return $null
     }
 
-    # gum gives a real interactive picker (arrow keys / filtering). It draws on
-    # stderr and answers on stdout; PowerShell pipes stderr for native commands,
-    # so 2>&1 (and a PowerShell pipeline) leaves gum without a terminal to draw
-    # on. Send stderr to the console via cmd and collect stdout from a temp file.
+    # gum gives a real interactive picker (arrow keys / filtering); Invoke-GumPicker
+    # keeps its TUI on the console while capturing only the chosen label.
     $gum = Get-Command gum -ErrorAction SilentlyContinue
     if ($gum -and $env:SKOOP_NO_GUM -ne '1') {
         Write-Host 'Choose the machine that has Herdr inside:'
-        $quoted = @($labels | ForEach-Object { '"' + $_ + '"' }) -join ' '
-        $answerFile = [System.IO.Path]::GetTempFileName()
         try {
-            $cmdLine = '"{0}" choose --header "Herdr machine" {1} > "{2}" 2> CON' -f $gum.Source, $quoted, $answerFile
-            $null = & cmd /c $cmdLine
-            $gumExit = $LASTEXITCODE
-            $raw = ''
-            if (Test-Path -LiteralPath $answerFile) {
-                $raw = [System.IO.File]::ReadAllText($answerFile, [System.Text.Encoding]::UTF8)
-            }
-            $lines = @($raw -split "`r?`n" | ForEach-Object { $_ -replace "`e\[[0-9;?]*[a-zA-Z]", '' })
-            if ($gumExit -eq 0) {
+            $gumArgs = @('choose', '--header', 'Herdr machine') + @($labels)
+            $result = Invoke-GumPicker -GumPath $gum.Source -Arguments $gumArgs
+            $lines = @($result.Output -split "`r?`n" | ForEach-Object { $_ -replace "`e\[[0-9;?]*[a-zA-Z]", '' })
+            if ($result.ExitCode -eq 0) {
                 for ($i = 0; $i -lt $labels.Count; $i++) {
                     if (@($lines | Where-Object { $_.Trim() -eq $labels[$i] }).Count -gt 0) {
                         return $Peers[$i]
@@ -197,8 +211,6 @@ function Select-Peer {
             Write-Ok 'gum did not return a machine - using the numbered list'
         } catch {
             Write-Ok "gum picker failed ($($_.Exception.Message)) - using the numbered list"
-        } finally {
-            Remove-Item -LiteralPath $answerFile -Force -ErrorAction SilentlyContinue
         }
     }
 

@@ -60,6 +60,13 @@
       Local :  .\install.ps1
       Remote:  irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
+    Runs under PowerShell 7 (pwsh) when it is already installed: from Windows
+    PowerShell 5.1 the script re-launches itself with the same options via
+    `pwsh -NoProfile -File`, so gum's TUI, native stderr and UTF-8 files behave
+    correctly. Use -NoPwsh (or $env:SKOOP_NO_PWSH=1) to stay on 5.1, e.g. before
+    pwsh is installed. Piped runs cannot re-launch (there is no script file) and
+    stay in the shell that evaluates them.
+
 .PARAMETER RepoRawBase
     Raw URL base used to fetch scoop.json / profile.ps1 when the script is piped in
     and there is no local checkout. Override this if you use a fork.
@@ -92,6 +99,10 @@
     Force the numbered prompt instead of gum (or set $env:SKOOP_NO_GUM=1). Useful
     in terminals where gum cannot draw its TUI.
 
+.PARAMETER NoPwsh
+    Do not re-launch under PowerShell 7. Stays on Windows PowerShell 5.1 (also
+    $env:SKOOP_NO_PWSH=1).
+
 .EXAMPLE
     # One command: configure this machine, then pick a tailnet machine and add it to Herdr.
     powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
@@ -117,6 +128,7 @@ param(
     [switch]$SkipHerdrConnect,
     [switch]$NoMenu,
     [switch]$NoGum,
+    [switch]$NoPwsh,
     [switch]$Help
 )
 
@@ -140,10 +152,40 @@ Usage:
   .\install.ps1 -SkipHerdrConnect        # configure only
   irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
-Options: -ForceUniKey -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -NoMenu -NoGum -Help
-Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_NO_MENU, SKOOP_NO_GUM
+Options: -ForceUniKey -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -NoMenu -NoGum -NoPwsh -Help
+Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH
 '@
     return
+}
+
+# Prefer PowerShell 7+ when it is installed: Windows PowerShell 5.1 rewrites
+# native stderr (gum's TUI becomes a NativeCommandError) and decodes BOM-less
+# UTF-8 as ANSI. Re-launch the same script with the same options once; the child
+# is PSEdition Core, so it does not re-launch. -NoPwsh / $env:SKOOP_NO_PWSH=1
+# stays on 5.1, and a piped `irm ... | iex` run has no script file to re-launch.
+if (-not $NoPwsh -and $env:SKOOP_NO_PWSH -ne '1' -and
+    $PSVersionTable.PSEdition -eq 'Desktop' -and
+    $PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath)) {
+    $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+    if ($pwsh) {
+        Write-Host '    re-launching under PowerShell 7 (pwsh); pass -NoPwsh to stay on 5.1' -ForegroundColor DarkGray
+        $reLaunch = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
+        foreach ($name in $PSBoundParameters.Keys) {
+            if ($name -eq 'NoPwsh') { continue }
+            $value = $PSBoundParameters[$name]
+            if ($value -is [switch]) {
+                if ($value.IsPresent) { $reLaunch += "-$name" }
+            } elseif ($null -ne $value -and "$value" -ne '') {
+                $reLaunch += @("-$name", "$value")
+            }
+        }
+        try {
+            & $pwsh.Source @reLaunch
+            exit $LASTEXITCODE
+        } catch {
+            Write-Host "    could not start pwsh ($($_.Exception.Message)) - continuing on Windows PowerShell 5.1" -ForegroundColor Yellow
+        }
+    }
 }
 
 $ErrorActionPreference = 'Stop'
@@ -152,6 +194,29 @@ $ProgressPreference    = 'SilentlyContinue'
 
 function Write-Step([string]$Message) { Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok([string]$Message)   { Write-Host "    $Message" -ForegroundColor DarkGray }
+
+function Invoke-GumPicker {
+    # gum draws its UI on stderr and writes only the answer to stdout.
+    # Redirecting or piping stderr (2>&1, | Out-String) leaves gum without a
+    # terminal, so it renders nothing and returns no choice; letting PowerShell
+    # inherit stderr instead turns every UI frame into a NativeCommandError under
+    # $ErrorActionPreference='Stop'. So: capture stdout with a .NET process and
+    # leave stderr on the console, where gum can draw.
+    param([string]$GumPath, [string[]]$Arguments)
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $GumPath
+    $psi.Arguments = (@($Arguments | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $false
+    $process = [System.Diagnostics.Process]::Start($psi)
+    $output = $process.StandardOutput.ReadToEnd()
+    $process.WaitForExit()
+    return [pscustomobject]@{
+        ExitCode = $process.ExitCode
+        Output   = $output
+    }
+}
 
 function Invoke-SetupMenu {
     # Interactive CLI entry point. gum is used when available (charm-gum from
@@ -169,24 +234,11 @@ function Invoke-SetupMenu {
 
     $gum = Get-Command gum -ErrorAction SilentlyContinue
     if ($gum -and $env:SKOOP_NO_GUM -ne '1') {
-        # gum draws its UI on stderr and writes only the answer to stdout.
-        # PowerShell pipes stderr for native commands (and PS 5.1 turns it into a
-        # terminating NativeCommandError under $ErrorActionPreference='Stop'), so
-        # merging it with 2>&1 leaves gum with no terminal to draw on and it
-        # returns nothing. Let cmd send stderr to the console and collect stdout
-        # through a temp file, so the picker can actually render.
         Write-Host 'Choose an action:' -ForegroundColor Cyan
-        $labels  = @($items.Label | ForEach-Object { '"' + $_ + '"' }) -join ' '
-        $answerFile = [System.IO.Path]::GetTempFileName()
         try {
-            $cmdLine = '"{0}" choose --header "skoop setup" {1} > "{2}" 2> CON' -f $gum.Source, $labels, $answerFile
-            $null = & cmd /c $cmdLine
-            $gumExit = $LASTEXITCODE
-            $raw = ''
-            if (Test-Path -LiteralPath $answerFile) {
-                $raw = [System.IO.File]::ReadAllText($answerFile, [System.Text.Encoding]::UTF8)
-            }
-            $lines = @($raw -split "`r?`n" | ForEach-Object { $_ -replace "`e\[[0-9;?]*[a-zA-Z]", '' })
+            $gumArgs = @('choose', '--header', 'skoop setup') + @($items.Label)
+            $result = Invoke-GumPicker -GumPath $gum.Source -Arguments $gumArgs
+            $lines = @($result.Output -split "`r?`n" | ForEach-Object { $_ -replace "`e\[[0-9;?]*[a-zA-Z]", '' })
             $choice = ''
             foreach ($line in $lines) {
                 foreach ($item in $items) {
@@ -194,15 +246,13 @@ function Invoke-SetupMenu {
                 }
                 if ($choice) { break }
             }
-            if ($gumExit -eq 0 -and $choice) {
+            if ($result.ExitCode -eq 0 -and $choice) {
                 foreach ($item in $items) { if ($choice -eq $item.Label) { return $item.Key } }
                 return 'full'
             }
             Write-Ok 'gum menu did not return a choice - using the numbered prompt'
         } catch {
             Write-Ok "gum menu failed ($($_.Exception.Message)) - using the numbered prompt"
-        } finally {
-            Remove-Item -LiteralPath $answerFile -Force -ErrorAction SilentlyContinue
         }
     }
 
