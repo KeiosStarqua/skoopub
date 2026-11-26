@@ -106,7 +106,10 @@ param(
 if ($env:SKOOP_SKIP_HERDR -eq '1') { $SkipHerdrConnect = $true }
 
 # `--help` arrives in $args with CmdletBinding; handle it before any side effect.
-if ($Help -or ($args | Where-Object { $_ -in @('--help', '-h', '/?', 'help') })) {
+# --help binds to the first positional string parameter ($RepoRawBase) when
+# the script is invoked as `& .\install.ps1 --help`, so check that too.
+if ($Help -or $RepoRawBase -in @('--help', '-h', '/?', 'help') -or
+    ($args | Where-Object { $_ -in @('--help', '-h', '/?', 'help') })) {
     Write-Host @'
 skoop install.ps1 - interactive Windows setup
 
@@ -153,8 +156,14 @@ function Invoke-SetupMenu {
         $cmdLine = '"{0}" choose --header "skoop setup" {1} 2>&1' -f $gum.Source, $labels
         try {
             $raw = (& cmd /c $cmdLine | Out-String)
-            $choice = ($raw -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
-            $choice = $choice -replace "`e\[[0-9;?]*[a-zA-Z]", ''
+            $lines = @($raw -split "`r?`n" | ForEach-Object { $_ -replace "`e\[[0-9;?]*[a-zA-Z]", '' })
+            $choice = ''
+            foreach ($line in $lines) {
+                foreach ($item in $items) {
+                    if ($line.Trim() -eq $item.Label) { $choice = $item.Label; break }
+                }
+                if ($choice) { break }
+            }
             if ($LASTEXITCODE -eq 0 -and $choice) {
                 foreach ($item in $items) { if ($choice -eq $item.Label) { return $item.Key } }
                 return 'full'
