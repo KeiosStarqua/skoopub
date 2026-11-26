@@ -169,13 +169,23 @@ function Invoke-SetupMenu {
 
     $gum = Get-Command gum -ErrorAction SilentlyContinue
     if ($gum -and $env:SKOOP_NO_GUM -ne '1') {
-        # cmd /c merges stderr (PS 5.1 otherwise turns gum's output into a
-        # terminating NativeCommandError under $ErrorActionPreference='Stop').
+        # gum draws its UI on stderr and writes only the answer to stdout.
+        # PowerShell pipes stderr for native commands (and PS 5.1 turns it into a
+        # terminating NativeCommandError under $ErrorActionPreference='Stop'), so
+        # merging it with 2>&1 leaves gum with no terminal to draw on and it
+        # returns nothing. Let cmd send stderr to the console and collect stdout
+        # through a temp file, so the picker can actually render.
         Write-Host 'Choose an action:' -ForegroundColor Cyan
         $labels  = @($items.Label | ForEach-Object { '"' + $_ + '"' }) -join ' '
-        $cmdLine = '"{0}" choose --header "skoop setup" {1} 2>&1' -f $gum.Source, $labels
+        $answerFile = [System.IO.Path]::GetTempFileName()
         try {
-            $raw = (& cmd /c $cmdLine | Out-String)
+            $cmdLine = '"{0}" choose --header "skoop setup" {1} > "{2}" 2> CON' -f $gum.Source, $labels, $answerFile
+            $null = & cmd /c $cmdLine
+            $gumExit = $LASTEXITCODE
+            $raw = ''
+            if (Test-Path -LiteralPath $answerFile) {
+                $raw = [System.IO.File]::ReadAllText($answerFile, [System.Text.Encoding]::UTF8)
+            }
             $lines = @($raw -split "`r?`n" | ForEach-Object { $_ -replace "`e\[[0-9;?]*[a-zA-Z]", '' })
             $choice = ''
             foreach ($line in $lines) {
@@ -184,13 +194,15 @@ function Invoke-SetupMenu {
                 }
                 if ($choice) { break }
             }
-            if ($LASTEXITCODE -eq 0 -and $choice) {
+            if ($gumExit -eq 0 -and $choice) {
                 foreach ($item in $items) { if ($choice -eq $item.Label) { return $item.Key } }
                 return 'full'
             }
             Write-Ok 'gum menu did not return a choice - using the numbered prompt'
         } catch {
             Write-Ok "gum menu failed ($($_.Exception.Message)) - using the numbered prompt"
+        } finally {
+            Remove-Item -LiteralPath $answerFile -Force -ErrorAction SilentlyContinue
         }
     }
 

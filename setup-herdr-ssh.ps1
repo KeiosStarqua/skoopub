@@ -169,24 +169,36 @@ function Select-Peer {
         return $null
     }
 
-    # gum gives a real interactive picker (arrow keys / filtering). cmd /c
-    # merges stderr so PS 5.1 does not turn gum output into a terminating error.
+    # gum gives a real interactive picker (arrow keys / filtering). It draws on
+    # stderr and answers on stdout; PowerShell pipes stderr for native commands,
+    # so 2>&1 (and a PowerShell pipeline) leaves gum without a terminal to draw
+    # on. Send stderr to the console via cmd and collect stdout from a temp file.
     $gum = Get-Command gum -ErrorAction SilentlyContinue
     if ($gum -and $env:SKOOP_NO_GUM -ne '1') {
         Write-Host 'Choose the machine that has Herdr inside:'
         $quoted = @($labels | ForEach-Object { '"' + $_ + '"' }) -join ' '
-        $cmdLine = '"{0}" choose --header "Herdr machine" {1} 2>&1' -f $gum.Source, $quoted
+        $answerFile = [System.IO.Path]::GetTempFileName()
         try {
-            $raw = (& cmd /c $cmdLine | Out-String)
+            $cmdLine = '"{0}" choose --header "Herdr machine" {1} > "{2}" 2> CON' -f $gum.Source, $quoted, $answerFile
+            $null = & cmd /c $cmdLine
+            $gumExit = $LASTEXITCODE
+            $raw = ''
+            if (Test-Path -LiteralPath $answerFile) {
+                $raw = [System.IO.File]::ReadAllText($answerFile, [System.Text.Encoding]::UTF8)
+            }
             $lines = @($raw -split "`r?`n" | ForEach-Object { $_ -replace "`e\[[0-9;?]*[a-zA-Z]", '' })
-            for ($i = 0; $i -lt $labels.Count; $i++) {
-                if (@($lines | Where-Object { $_.Trim() -eq $labels[$i] }).Count -gt 0) {
-                    return $Peers[$i]
+            if ($gumExit -eq 0) {
+                for ($i = 0; $i -lt $labels.Count; $i++) {
+                    if (@($lines | Where-Object { $_.Trim() -eq $labels[$i] }).Count -gt 0) {
+                        return $Peers[$i]
+                    }
                 }
             }
             Write-Ok 'gum did not return a machine - using the numbered list'
         } catch {
             Write-Ok "gum picker failed ($($_.Exception.Message)) - using the numbered list"
+        } finally {
+            Remove-Item -LiteralPath $answerFile -Force -ErrorAction SilentlyContinue
         }
     }
 
