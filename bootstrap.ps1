@@ -4,6 +4,7 @@
 # Use -SkipGhLogin to avoid the interactive `gh auth login` prompt.
 # Also applies the repo-managed Zed config from zed\ via configure-zed.ps1.
 # After Tailscale starts, setup-herdr-ssh.ps1 offers a temporary SSH key + Herdr remote.
+# Also registers Vicinae to start at login via enable-vicinae-autostart.ps1.
 [CmdletBinding()]
 param(
     [switch]$ForceUniKey,
@@ -254,6 +255,14 @@ if (Test-Path $zedConfig) {
     catch { Write-Host "Zed config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
+# 12. Auto-start Vicinae (Startup shortcut + start the server now).
+$vicinae = Join-Path $repo 'enable-vicinae-autostart.ps1'
+if (Test-Path $vicinae) {
+    try { & $vicinae }
+    catch { Write-Host "Vicinae autostart setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+
 Write-Host "Done. Open a new PowerShell window, then try: z .." -ForegroundColor Green
 Write-Host "git push will use your gh login (no username prompt)." -ForegroundColor Green
+Write-Host "Vicinae starts at login; use its shortcut to open the launcher." -ForegroundColor Green
 Write-Host "Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL)." -ForegroundColor Green

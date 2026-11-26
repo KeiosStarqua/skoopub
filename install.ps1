@@ -33,6 +33,8 @@
       Shift+click still bypasses a TUI for text selection.
     - Offers to run `gh auth login` (only when needed) and runs `gh auth setup-git`
       so `git push` uses the GitHub CLI token instead of prompting for a username.
+    - Registers `vicinae-server.exe` in the per-user Startup folder and starts it
+      now, so the Vicinae global shortcut works after every sign-in.
 
     Works two ways:
       Local :  .\install.ps1
@@ -251,6 +253,7 @@ if (-not $repoRoot) {
         'scoop.json', 'profile.ps1', 'fix-sharex-printscreen.ps1',
         'sharex-hotkeys.template.json', 'firefox-policies.template.json',
         'setup-gh-auth.ps1', 'configure-zed.ps1', 'setup-herdr-ssh.ps1',
+        'enable-vicinae-autostart.ps1',
         'zed/settings.json', 'zed/keymap.json', 'zed/tasks.json'
     )
     foreach ($file in $repoFiles) {
@@ -269,6 +272,7 @@ $firefoxPolicies = Join-Path $repoRoot 'firefox-policies.template.json'
 $ghAuth          = Join-Path $repoRoot 'setup-gh-auth.ps1'
 $zedConfig       = Join-Path $repoRoot 'configure-zed.ps1'
 $herdrSsh        = Join-Path $repoRoot 'setup-herdr-ssh.ps1'
+$vicinae         = Join-Path $repoRoot 'enable-vicinae-autostart.ps1'
 Write-Ok "repo root: $repoRoot"
 
 # --- 2. Hook the repo-managed profile into $PROFILE --------------------------
@@ -439,7 +443,20 @@ if (Test-Path $zedConfig) {
     Write-Ok 'configure-zed.ps1 not found - skipping'
 }
 
+# --- 15. Auto-start Vicinae --------------------------------------------------
+if (Test-Path $vicinae) {
+    Write-Step 'Enabling Vicinae to start at login'
+    try {
+        & $vicinae
+    } catch {
+        Write-Host "    Vicinae autostart setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Ok 'enable-vicinae-autostart.ps1 not found - skipping'
+}
+
 Write-Host ''
 Write-Host 'Done. Open a new PowerShell window, then try: z ..' -ForegroundColor Green
 Write-Host 'git push will use your gh login (no username prompt).' -ForegroundColor Green
+Write-Host 'Vicinae starts at login; use its shortcut to open the launcher.' -ForegroundColor Green
 Write-Host 'Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL).' -ForegroundColor Green
