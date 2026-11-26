@@ -4,7 +4,7 @@ Declarative Windows dev setup: [Scoop](https://scoop.sh) packages plus a repo-ma
 PowerShell profile, restored from a single manifest.
 
 - `scoop.json` — buckets + apps (`scoop export` format, replayed with `scoop import`), including the personal `kbots` bucket
-- `profile.ps1` — shell config (`zoxide` + `atuin` history search, Starship prompt), dot-sourced from your `$PROFILE`; also drops inherited `HERDR_*` variables so a fresh shell is not mistaken for a nested Herdr pane
+- `profile.ps1` — shell config (`zoxide` + `atuin` history search, Starship prompt), dot-sourced from your `$PROFILE`; aliases `btop-lhm` / `btop-lh` to `btop` and drops inherited `HERDR_*` variables so a fresh shell is not mistaken for a nested Herdr pane
 - `install.ps1` — one-shot bootstrap for a fresh machine
 - `firefox-policies.template.json` — Firefox policy for extensions, managed bookmarks, homepage, and password saving
 - `fix-sharex-printscreen.ps1` — hands the PrtSc key back to ShareX

@@ -55,6 +55,16 @@ if (Get-Command nu -ErrorAction SilentlyContinue) {
     }
 }
 
+# btop-lhm installs the `btop` binary, so expose the package name as a command
+# too (`btop-lhm` / `btop-lh` both start btop). Guarded for machines without it.
+if (Get-Command btop -ErrorAction SilentlyContinue) {
+    foreach ($aliasName in @('btop-lhm', 'btop-lh')) {
+        if (-not (Get-Alias -Name $aliasName -ErrorAction SilentlyContinue)) {
+            Set-Alias -Name $aliasName -Value btop -Scope Global
+        }
+    }
+}
+
 # Starship prompt for PowerShell (cmd.exe uses the same config through Clink).
 # Skip when the prompt is already Starship, so sourcing this file twice in one
 # session does not stack initialisations.
