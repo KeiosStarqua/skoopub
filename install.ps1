@@ -14,6 +14,9 @@
     - Runs `scoop import scoop.json` (buckets + apps).
     - Starts Tailscale after the import (Windows service if present, otherwise
       the Scoop `tailscaled` shim); the interactive `tailscale up` login is left to you.
+    - Offers a temporary SSH key + Herdr remote setup via setup-herdr-ssh.ps1:
+      pick a tailnet machine, generate a throwaway key, authorize it with your
+      SSH password, add an SSH alias and register it with Herdr.
     - Keeps a UniKey that is already installed (e.g. on a public PC) instead of
       adding a second copy; -ForceUniKey installs the Scoop build anyway.
     - Adds a dot-source line for profile.ps1 to your PowerShell $PROFILE early on,
@@ -243,7 +246,7 @@ if (-not $repoRoot) {
     $repoFiles = @(
         'scoop.json', 'profile.ps1', 'fix-sharex-printscreen.ps1',
         'sharex-hotkeys.template.json', 'firefox-policies.template.json',
-        'setup-gh-auth.ps1', 'configure-zed.ps1',
+        'setup-gh-auth.ps1', 'configure-zed.ps1', 'setup-herdr-ssh.ps1',
         'zed/settings.json', 'zed/keymap.json', 'zed/tasks.json'
     )
     foreach ($file in $repoFiles) {
@@ -261,6 +264,7 @@ $sharexFix      = Join-Path $repoRoot 'fix-sharex-printscreen.ps1'
 $firefoxPolicies = Join-Path $repoRoot 'firefox-policies.template.json'
 $ghAuth          = Join-Path $repoRoot 'setup-gh-auth.ps1'
 $zedConfig       = Join-Path $repoRoot 'configure-zed.ps1'
+$herdrSsh        = Join-Path $repoRoot 'setup-herdr-ssh.ps1'
 Write-Ok "repo root: $repoRoot"
 
 # --- 2. Hook the repo-managed profile into $PROFILE --------------------------
@@ -359,7 +363,19 @@ if ($LASTEXITCODE -ne 0) { throw "scoop import failed with exit code $LASTEXITCO
 # --- 9. Start Tailscale ------------------------------------------------------
 Start-TailscaleDaemon
 
-# --- 10. Default Rust toolchain: GNU (no Visual Studio Build Tools needed) ---
+# --- 10. Temporary SSH + Herdr remote setup (interactive) -------------------
+if (Test-Path $herdrSsh) {
+    Write-Step 'Setting up a temporary SSH key for a Herdr remote machine'
+    try {
+        & $herdrSsh
+    } catch {
+        Write-Host "    Herdr SSH setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Ok 'setup-herdr-ssh.ps1 not found - skipping'
+}
+
+# --- 11. Default Rust toolchain: GNU (no Visual Studio Build Tools needed) ---
 $cargoBin = Join-Path $env:SCOOP 'persist\rustup\.cargo\bin'
 if (Test-Path $cargoBin) { $env:Path = "$cargoBin;$env:Path" }
 if (Get-Command rustup -ErrorAction SilentlyContinue) {
@@ -380,7 +396,7 @@ if (Get-Command rustup -ErrorAction SilentlyContinue) {
     }
 }
 
-# --- 11. Let ShareX own the PrtSc key ---------------------------------------
+# --- 12. Let ShareX own the PrtSc key ---------------------------------------
 if (Test-Path $sharexFix) {
     Write-Step 'Applying ShareX PrtSc fix'
     try {
@@ -393,7 +409,7 @@ if (Test-Path $sharexFix) {
     Write-Ok 'fix-sharex-printscreen.ps1 not found - skipping'
 }
 
-# --- 12. GitHub CLI auth for git push (interactive unless -SkipGhLogin) -------
+# --- 13. GitHub CLI auth for git push (interactive unless -SkipGhLogin) -------
 if (Test-Path $ghAuth) {
     Write-Step 'Setting up GitHub authentication for git'
     try {
@@ -406,7 +422,7 @@ if (Test-Path $ghAuth) {
     Write-Ok 'setup-gh-auth.ps1 not found - skipping'
 }
 
-# --- 13. Apply the repo-managed Zed config ----------------------------------
+# --- 14. Apply the repo-managed Zed config ----------------------------------
 if (Test-Path $zedConfig) {
     Write-Step 'Applying Zed settings, keymap and tasks'
     try {

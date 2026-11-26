@@ -3,6 +3,7 @@
 # Use -ForceUniKey to replace an already installed UniKey with the Scoop build.
 # Use -SkipGhLogin to avoid the interactive `gh auth login` prompt.
 # Also applies the repo-managed Zed config from zed\ via configure-zed.ps1.
+# After Tailscale starts, setup-herdr-ssh.ps1 offers a temporary SSH key + Herdr remote.
 [CmdletBinding()]
 param(
     [switch]$ForceUniKey,
@@ -202,7 +203,14 @@ scoop import $manifest
 # 6. Start Tailscale (daemon/service only; login stays manual).
 Start-TailscaleDaemon
 
-# 7. Default the Rust toolchain to GNU when none is configured yet.
+# 7. Offer a temporary SSH key + Herdr remote setup (interactive).
+$herdrSsh = Join-Path $repo 'setup-herdr-ssh.ps1'
+if (Test-Path $herdrSsh) {
+    try { & $herdrSsh }
+    catch { Write-Host "Herdr SSH setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+
+# 8. Default the Rust toolchain to GNU when none is configured yet.
 $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE 'scoop' }
 $cargoBin = Join-Path $scoopRoot 'persist\rustup\.cargo\bin'
 if (Test-Path $cargoBin) { $env:Path = "$cargoBin;$env:Path" }
@@ -222,7 +230,7 @@ if (Get-Command rustup -ErrorAction SilentlyContinue) {
     }
 }
 
-# 8. Let ShareX own PrtSc: Windows otherwise hands the key to the Snipping Tool.
+# 9. Let ShareX own PrtSc: Windows otherwise hands the key to the Snipping Tool.
 $sharexFix = Join-Path $repo 'fix-sharex-printscreen.ps1'
 if (Test-Path $sharexFix) {
     try { & $sharexFix }
@@ -232,14 +240,14 @@ if (Test-Path $sharexFix) {
     }
 }
 
-# 9. Offer gh auth login (if needed), then wire gh into git as credential helper.
+# 10. Offer gh auth login (if needed), then wire gh into git as credential helper.
 $ghAuth = Join-Path $repo 'setup-gh-auth.ps1'
 if (Test-Path $ghAuth) {
     try { & $ghAuth -SkipLogin:$SkipGhLogin }
     catch { Write-Host "GitHub auth setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
-# 10. Apply the repo-managed Zed config (settings/keymap/tasks).
+# 11. Apply the repo-managed Zed config (settings/keymap/tasks).
 $zedConfig = Join-Path $repo 'configure-zed.ps1'
 if (Test-Path $zedConfig) {
     try { & $zedConfig }
