@@ -168,7 +168,7 @@ function Select-Peer {
     # gum gives a real interactive picker (arrow keys / filtering). cmd /c
     # merges stderr so PS 5.1 does not turn gum output into a terminating error.
     $gum = Get-Command gum -ErrorAction SilentlyContinue
-    if ($gum) {
+    if ($gum -and $env:SKOOP_NO_GUM -ne '1') {
         Write-Host 'Choose the machine that has Herdr inside:'
         $quoted = @($labels | ForEach-Object { '"' + $_ + '"' }) -join ' '
         $cmdLine = '"{0}" choose --header "Herdr machine" {1} 2>&1' -f $gum.Source, $quoted

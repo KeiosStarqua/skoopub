@@ -83,6 +83,10 @@
     Skip the interactive gum menu and run the full setup directly. The menu is
     also skipped for non-interactive shells and when any other option is passed.
 
+.PARAMETER NoGum
+    Force the numbered prompt instead of gum (or set $env:SKOOP_NO_GUM=1). Useful
+    in terminals where gum cannot draw its TUI.
+
 .EXAMPLE
     # One command: configure this machine, then pick a tailnet machine and attach Herdr.
     powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
@@ -107,11 +111,13 @@ param(
     [string]$HerdrUser = "$env:SKOOP_HERDR_USER",
     [switch]$SkipHerdrConnect,
     [switch]$NoMenu,
+    [switch]$NoGum,
     [switch]$Help
 )
 
 # Env vars let the piped (`irm ... | iex`) form pass the same options.
 if ($env:SKOOP_SKIP_HERDR -eq '1') { $SkipHerdrConnect = $true }
+if ($NoGum) { $env:SKOOP_NO_GUM = '1' }
 
 # `--help` arrives in $args with CmdletBinding; handle it before any side effect.
 # --help binds to the first positional string parameter ($RepoRawBase) when
@@ -129,8 +135,8 @@ Usage:
   .\install.ps1 -SkipHerdrConnect        # configure only
   irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
-Options: -ForceUniKey -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -NoMenu -Help
-Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_NO_MENU
+Options: -ForceUniKey -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -NoMenu -NoGum -Help
+Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_NO_MENU, SKOOP_NO_GUM
 '@
     return
 }
@@ -157,7 +163,7 @@ function Invoke-SetupMenu {
     }
 
     $gum = Get-Command gum -ErrorAction SilentlyContinue
-    if ($gum) {
+    if ($gum -and $env:SKOOP_NO_GUM -ne '1') {
         # cmd /c merges stderr (PS 5.1 otherwise turns gum's output into a
         # terminating NativeCommandError under $ErrorActionPreference='Stop').
         Write-Host 'Choose an action:' -ForegroundColor Cyan
@@ -398,10 +404,11 @@ function Find-ScoopShims {
 
 # --- 0. Interactive CLI menu (gum when available) ----------------------------
 $runMode = 'full'
-if (-not $NoMenu -and $env:SKOOP_NO_MENU -ne '1' -and
+if (-not $NoMenu -and -not $HerdrPeer -and $env:SKOOP_NO_MENU -ne '1' -and
     -not ($ForceUniKey -or $SkipGhLogin -or $SkipHerdrConnect -or $Peer -or $HerdrUser)) {
     $runMode = Invoke-SetupMenu
 }
+if ($HerdrPeer) { $runMode = 'herdr' }
 if ($runMode -eq 'quit') {
     Write-Host 'Cancelled - nothing changed.' -ForegroundColor Yellow
     return
