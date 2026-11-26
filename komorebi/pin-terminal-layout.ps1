@@ -44,8 +44,8 @@ if (-not $komorebic) {
 }
 
 if ($Stop) {
-    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -like $marker -and $_.ProcessId -ne $PID } |
+    @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like $marker -and $_.CommandLine -notlike '*-Command*' -and $_.ProcessId -ne $PID }) |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     Write-Log 'watcher stopped'
     return

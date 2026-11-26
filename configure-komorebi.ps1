@@ -92,13 +92,14 @@ function Resolve-Tool {
 
 function Get-PinWatcherProcesses {
     return @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -like '*-File*komorebi-pin.ps1*' })
+        Where-Object { $_.CommandLine -like '*-File*komorebi-pin.ps1*' -and $_.CommandLine -notlike '*-Command*' })
 }
 
 function Start-PinWatcher {
     param([switch]$Force)
     if (-not (Test-Path -LiteralPath $pinScript)) { return }
-    $existing = Get-PinWatcherProcesses
+    # Wrap in @(): a single CIM instance has no .Count in PowerShell 5.1.
+    $existing = @(Get-PinWatcherProcesses)
     if ($existing.Count -gt 0) {
         if (-not $Force) {
             Write-Host 'Terminal layout watcher is already running.'
