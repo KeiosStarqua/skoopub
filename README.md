@@ -8,6 +8,8 @@ PowerShell profile, restored from a single manifest.
 - `install.ps1` — one-shot bootstrap for a fresh machine
 - `firefox-policies.template.json` — Firefox policy that auto-installs Bitwarden and mymind
 - `fix-sharex-printscreen.ps1` — hands the PrtSc key back to ShareX
+- `setup-gh-auth.ps1` — asks you to log in with `gh auth login` if needed, then makes `git push` use that login
+- `zed/` + `configure-zed.ps1` — repo-managed Zed settings/keymap/tasks, copied to `%APPDATA%\Zed` on install
 
 ## Install with one command
 
@@ -39,8 +41,11 @@ cd skoop
 4. Ensures **git** is available (Scoop buckets are git repos).
 5. Installs **Firefox** first, then **WezTerm**, then **Herdr** (adds the `extras` bucket if needed). Firefox is made the default browser and `firefox-policies.template.json` is copied into Firefox's `distribution` folder so the Bitwarden and mymind extensions install automatically on the next start. On Windows 11, confirm the default-browser change in Settings if it opens there.
 6. Runs `scoop import scoop.json` — adds the `main` / `extras` / `zeldrisho` buckets and every listed app. If UniKey is already installed (common on public PCs), that one app is skipped so you do not end up with two IMEs; pass `-ForceUniKey` to install the Scoop copy anyway.
-7. Sets the default Rust toolchain to `stable-x86_64-pc-windows-gnu` if none is configured (no Visual Studio Build Tools needed). The check tolerates a fresh `rustup`'s stderr so it cannot abort the bootstrap.
-8. Disables Windows' "Print screen opens Snipping Tool" so **ShareX** can bind PrtSc. A failure here is reported but does not abort the setup.
+7. Starts **Tailscale**: enables/starts the Windows service if it exists, otherwise launches the Scoop `tailscaled` binary. Run `tailscale up` yourself afterwards to sign in.
+8. Sets the default Rust toolchain to `stable-x86_64-pc-windows-gnu` if none is configured (no Visual Studio Build Tools needed). The check tolerates a fresh `rustup`'s stderr so it cannot abort the bootstrap.
+9. Disables Windows' "Print screen opens Snipping Tool" so **ShareX** can bind PrtSc. A failure here is reported but does not abort the setup.
+10. Checks GitHub CLI auth. If you are not logged in, it asks whether to run `gh auth login` for you (HTTPS, no SSH key prompt), then runs `gh auth setup-git` so `git push` uses your gh token instead of prompting for a username. Pass `-SkipGhLogin` to skip the interactive prompt on unattended runs.
+11. Copies `zed/settings.json`, `zed/keymap.json` and `zed/tasks.json` into `%APPDATA%\Zed` via `configure-zed.ps1` (existing files are backed up first). Zed installs the declared extensions on its first start: **PowerShell**, HTML, Dockerfile, Docker Compose, TOML, Nix and SQL. PowerShell support needs `pwsh` (added to `scoop.json`); Rust is supported natively in Zed via `rust-analyzer`, so there is no Rust extension to install.
 
 Then open a new PowerShell window and try:
 
@@ -52,6 +57,12 @@ z ..
 
 ```powershell
 scoop import .\scoop.json
+```
+
+Re-apply the editor config after editing files in `zed/`:
+
+```powershell
+.\configure-zed.ps1
 ```
 
 …or add a package and re-export to commit:
@@ -67,12 +78,16 @@ scoop export | Out-File -Encoding utf8 scoop.json
 |---|---|
 | Normal (non-elevated) shell | Scoop installs per-user under `%USERPROFILE%\scoop` |
 | Elevated shell | Scoop installs system-wide under `C:\ProgramData\scoop` |
-| Piped via `irm \| iex` | `scoop.json`, `profile.ps1`, `fix-sharex-printscreen.ps1` are fetched to `%LOCALAPPDATA%\skoop` |
+| Piped via `irm \| iex` | `scoop.json`, `profile.ps1`, `fix-sharex-printscreen.ps1`, `setup-gh-auth.ps1`, `configure-zed.ps1` and `zed/*.json` are fetched to `%LOCALAPPDATA%\skoop` |
 | Task Manager disabled by policy | `DisableTaskMgr` is set to `0` for the current user; elevated runs also clear the machine-wide value. A domain policy may reapply it on the next refresh |
 | From a clone | The files next to `install.ps1` are used, so edits apply directly |
 | Firefox default browser | `firefox --setDefaultBrowser` runs after install (skipped if Firefox is already the http handler); Windows 11 may open Settings for confirmation, and a failure is non-fatal |
 | Bitwarden / mymind extensions | Both use Firefox `normal_installed` policies, so they install automatically but can still be disabled or removed. Bitwarden updates from AMO; mymind is pinned to the 2.0.2 XPI URL, so bump that URL when a newer version ships. Restart Firefox once after setup; check `about:policies` |
+| Tailscale | The installer starts the `Tailscale` service (and sets it to Automatic) when present, otherwise launches the Scoop `tailscaled` shim. Login still needs `tailscale up` in a terminal; the Scoop package does not install the Windows service by itself |
+| `git push` asks for a username | Being logged in to `gh` is not enough: git also needs `gh auth setup-git`. `setup-gh-auth.ps1` does both; re-run it any time, or use `-SkipGhLogin` for unattended runs |
 | UniKey preinstalled | Detected via process, uninstall registry and Scoop dir; the existing copy is kept unless `-ForceUniKey` is passed |
+| Zed config | `configure-zed.ps1` copies `zed/*.json` to `%APPDATA%\Zed` and backs up changed originals as `.bak.<timestamp>`; use `-NoBackup` to overwrite directly, or `-ConfigDir` to target another folder |
+| Zed extensions | Zed installs `auto_install_extensions` when it starts, so launch it once after setup; the PowerShell extension uses `pwsh` from Scoop, and Rust language support is built in (`rust-analyzer`) rather than an extension |
 | Rust toolchain | GNU is set as default only when no toolchain is active; switch with `rustup default stable-x86_64-pc-windows-msvc` (needs MSVC Build Tools) |
 | `z` / `atuin` not found | The profile hook is missing or points at a missing `profile.ps1`, or the window predates the install. Check `Get-Content $PROFILE`; re-run `install.ps1` to rewrite it, then open a new PowerShell window |
 

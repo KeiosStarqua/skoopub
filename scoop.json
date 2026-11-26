@@ -42,6 +42,11 @@
                  {
                      "Info":  "",
                      "Source":  "main",
+                     "Name":  "pwsh"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
                      "Name":  "7zip"
                  },
                  {

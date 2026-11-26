@@ -1,0 +1,9 @@
+[
+  {
+    "label": "cargo check (all targets)",
+    "command": "cargo",
+    "args": ["check", "--workspace", "--all-targets"],
+    "reveal": "always",
+    "hide": "on_success"
+  }
+]

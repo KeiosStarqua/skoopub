@@ -1,9 +1,12 @@
 # bootstrap.ps1 - restore this Scoop + shell setup on a Windows machine.
 # Usage:  powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
 # Use -ForceUniKey to replace an already installed UniKey with the Scoop build.
+# Use -SkipGhLogin to avoid the interactive `gh auth login` prompt.
+# Also applies the repo-managed Zed config from zed\ via configure-zed.ps1.
 [CmdletBinding()]
 param(
-    [switch]$ForceUniKey
+    [switch]$ForceUniKey,
+    [switch]$SkipGhLogin
 )
 
 $ErrorActionPreference = 'Stop'
@@ -116,6 +119,44 @@ function Enable-TaskManager {
     }
 }
 
+function Start-TailscaleDaemon {
+    # Scoop ships tailscaled but not the Windows service. Prefer the service
+    # when the official installer created it; otherwise run the shim directly.
+    # Login (`tailscale up`) is interactive, so it is left to the user.
+    Write-Host 'Starting Tailscale...'
+    $service = Get-Service -Name 'Tailscale' -ErrorAction SilentlyContinue
+    if ($service) {
+        try {
+            if ($service.Status -ne 'Running') { Start-Service -Name 'Tailscale' }
+            Write-Host 'Tailscale service is running.'
+        } catch {
+            Write-Host "Could not start the Tailscale service (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+        try {
+            if ((Get-Service -Name 'Tailscale' -ErrorAction SilentlyContinue).StartType -ne 'Automatic') {
+                Set-Service -Name 'Tailscale' -StartupType Automatic
+                Write-Host 'Tailscale service set to Automatic.'
+            }
+        } catch {
+            Write-Host "Could not set Tailscale to Automatic (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+        return
+    }
+
+    $tailscaled = Get-Command tailscaled -ErrorAction SilentlyContinue
+    if (-not $tailscaled) { Write-Host 'tailscaled not on PATH - skipping.'; return }
+    if (Get-Process -Name 'tailscaled' -ErrorAction SilentlyContinue) {
+        Write-Host 'tailscaled is already running.'
+        return
+    }
+    try {
+        Start-Process -FilePath $tailscaled.Source -WindowStyle Hidden
+        Write-Host 'Launched tailscaled from Scoop (run `tailscale up` to sign in).'
+    } catch {
+        Write-Host "Could not launch tailscaled (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
 # 1. Install Scoop if it is missing (no admin needed unless already elevated).
 if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
     $installer = Join-Path $env:TEMP 'install-scoop.ps1'
@@ -158,7 +199,10 @@ if (-not $ForceUniKey -and (Test-UniKeyInstalled)) {
 }
 scoop import $manifest
 
-# 6. Default the Rust toolchain to GNU when none is configured yet.
+# 6. Start Tailscale (daemon/service only; login stays manual).
+Start-TailscaleDaemon
+
+# 7. Default the Rust toolchain to GNU when none is configured yet.
 $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE 'scoop' }
 $cargoBin = Join-Path $scoopRoot 'persist\rustup\.cargo\bin'
 if (Test-Path $cargoBin) { $env:Path = "$cargoBin;$env:Path" }
@@ -178,7 +222,7 @@ if (Get-Command rustup -ErrorAction SilentlyContinue) {
     }
 }
 
-# 7. Let ShareX own PrtSc: Windows otherwise hands the key to the Snipping Tool.
+# 8. Let ShareX own PrtSc: Windows otherwise hands the key to the Snipping Tool.
 $sharexFix = Join-Path $repo 'fix-sharex-printscreen.ps1'
 if (Test-Path $sharexFix) {
     try { & $sharexFix }
@@ -188,4 +232,20 @@ if (Test-Path $sharexFix) {
     }
 }
 
+# 9. Offer gh auth login (if needed), then wire gh into git as credential helper.
+$ghAuth = Join-Path $repo 'setup-gh-auth.ps1'
+if (Test-Path $ghAuth) {
+    try { & $ghAuth -SkipLogin:$SkipGhLogin }
+    catch { Write-Host "GitHub auth setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+
+# 10. Apply the repo-managed Zed config (settings/keymap/tasks).
+$zedConfig = Join-Path $repo 'configure-zed.ps1'
+if (Test-Path $zedConfig) {
+    try { & $zedConfig }
+    catch { Write-Host "Zed config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+
 Write-Host "Done. Open a new PowerShell window, then try: z .." -ForegroundColor Green
+Write-Host "git push will use your gh login (no username prompt)." -ForegroundColor Green
+Write-Host "Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL)." -ForegroundColor Green

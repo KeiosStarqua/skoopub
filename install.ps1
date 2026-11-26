@@ -9,6 +9,8 @@
       Firefox to become the default browser (Windows may ask you to confirm).
     - Installs a Firefox policy that auto-installs the Bitwarden extension.
     - Runs `scoop import scoop.json` (buckets + apps).
+    - Starts Tailscale after the import (Windows service if present, otherwise
+      the Scoop `tailscaled` shim); the interactive `tailscale up` login is left to you.
     - Keeps a UniKey that is already installed (e.g. on a public PC) instead of
       adding a second copy; -ForceUniKey installs the Scoop build anyway.
     - Adds a dot-source line for profile.ps1 to your PowerShell $PROFILE early on,
@@ -17,6 +19,10 @@
       machine-wide when elevated); a failure is reported but does not abort.
     - Applies fix-sharex-printscreen.ps1 so ShareX owns the PrtSc key; a failure
       there is reported but does not abort the bootstrap.
+    - Copies the repo-managed Zed settings/keymap/tasks into %APPDATA%\Zed (old
+      files are backed up); Zed installs its declared extensions on next start.
+    - Offers to run `gh auth login` (only when needed) and runs `gh auth setup-git`
+      so `git push` uses the GitHub CLI token instead of prompting for a username.
 
     Works two ways:
       Local :  .\install.ps1
@@ -29,6 +35,9 @@
 .PARAMETER ForceUniKey
     Install the Scoop UniKey package even if another UniKey is already installed.
 
+.PARAMETER SkipGhLogin
+    Skip the interactive `gh auth login` prompt; only wire up an existing gh login.
+
 .EXAMPLE
     irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
@@ -38,7 +47,8 @@
 [CmdletBinding()]
 param(
     [string]$RepoRawBase = 'https://raw.githubusercontent.com/KeiosStarqua/skoopub/main',
-    [switch]$ForceUniKey
+    [switch]$ForceUniKey,
+    [switch]$SkipGhLogin
 )
 
 $ErrorActionPreference = 'Stop'
@@ -70,6 +80,47 @@ function Enable-TaskManager {
             # Best-effort: a locked key should not abort the rest of the setup.
             Write-Host "    Could not update $path - $($_.Exception.Message)" -ForegroundColor Yellow
         }
+    }
+}
+
+function Start-TailscaleDaemon {
+    # Scoop ships tailscaled but not the Windows service. Prefer the service
+    # when the official installer created it; otherwise run the shim directly.
+    # Login (`tailscale up`) is interactive, so it is left to the user.
+    Write-Step 'Starting Tailscale'
+    $service = Get-Service -Name 'Tailscale' -ErrorAction SilentlyContinue
+    if ($service) {
+        try {
+            if ($service.Status -ne 'Running') { Start-Service -Name 'Tailscale' }
+            Write-Ok 'Tailscale service is running'
+        } catch {
+            Write-Host "    Could not start the Tailscale service (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+        try {
+            if ((Get-Service -Name 'Tailscale' -ErrorAction SilentlyContinue).StartType -ne 'Automatic') {
+                Set-Service -Name 'Tailscale' -StartupType Automatic
+                Write-Ok 'Tailscale service set to Automatic'
+            }
+        } catch {
+            Write-Host "    Could not set Tailscale to Automatic (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+        return
+    }
+
+    $tailscaled = Get-Command tailscaled -ErrorAction SilentlyContinue
+    if (-not $tailscaled) {
+        Write-Ok 'tailscaled not on PATH - skipping'
+        return
+    }
+    if (Get-Process -Name 'tailscaled' -ErrorAction SilentlyContinue) {
+        Write-Ok 'tailscaled is already running'
+        return
+    }
+    try {
+        Start-Process -FilePath $tailscaled.Source -WindowStyle Hidden
+        Write-Ok 'launched tailscaled from Scoop (run `tailscale up` to sign in)'
+    } catch {
+        Write-Host "    Could not launch tailscaled (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
@@ -186,8 +237,15 @@ if (-not $repoRoot) {
     Write-Step 'No local checkout found - downloading repo files'
     $repoRoot = Join-Path $env:LOCALAPPDATA 'skoop'
     New-Item -ItemType Directory -Force -Path $repoRoot | Out-Null
-    foreach ($file in 'scoop.json', 'profile.ps1', 'fix-sharex-printscreen.ps1', 'sharex-hotkeys.template.json', 'firefox-policies.template.json') {
+    $repoFiles = @(
+        'scoop.json', 'profile.ps1', 'fix-sharex-printscreen.ps1',
+        'sharex-hotkeys.template.json', 'firefox-policies.template.json',
+        'setup-gh-auth.ps1', 'configure-zed.ps1',
+        'zed/settings.json', 'zed/keymap.json', 'zed/tasks.json'
+    )
+    foreach ($file in $repoFiles) {
         $dest = Join-Path $repoRoot $file
+        New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
         Invoke-WebRequest -UseBasicParsing -Uri "$RepoRawBase/$file" -OutFile $dest
         Unblock-File $dest
         Write-Ok "fetched $file"
@@ -198,6 +256,8 @@ $manifest       = Join-Path $repoRoot 'scoop.json'
 $profileScript  = Join-Path $repoRoot 'profile.ps1'
 $sharexFix      = Join-Path $repoRoot 'fix-sharex-printscreen.ps1'
 $firefoxPolicies = Join-Path $repoRoot 'firefox-policies.template.json'
+$ghAuth          = Join-Path $repoRoot 'setup-gh-auth.ps1'
+$zedConfig       = Join-Path $repoRoot 'configure-zed.ps1'
 Write-Ok "repo root: $repoRoot"
 
 # --- 2. Hook the repo-managed profile into $PROFILE --------------------------
@@ -293,7 +353,10 @@ Write-Step "Importing $manifestToImport"
 & $scoop import $manifestToImport
 if ($LASTEXITCODE -ne 0) { throw "scoop import failed with exit code $LASTEXITCODE." }
 
-# --- 9. Default Rust toolchain: GNU (no Visual Studio Build Tools needed) ----
+# --- 9. Start Tailscale ------------------------------------------------------
+Start-TailscaleDaemon
+
+# --- 10. Default Rust toolchain: GNU (no Visual Studio Build Tools needed) ---
 $cargoBin = Join-Path $env:SCOOP 'persist\rustup\.cargo\bin'
 if (Test-Path $cargoBin) { $env:Path = "$cargoBin;$env:Path" }
 if (Get-Command rustup -ErrorAction SilentlyContinue) {
@@ -314,7 +377,7 @@ if (Get-Command rustup -ErrorAction SilentlyContinue) {
     }
 }
 
-# --- 10. Let ShareX own the PrtSc key ----------------------------------------
+# --- 11. Let ShareX own the PrtSc key ---------------------------------------
 if (Test-Path $sharexFix) {
     Write-Step 'Applying ShareX PrtSc fix'
     try {
@@ -327,5 +390,33 @@ if (Test-Path $sharexFix) {
     Write-Ok 'fix-sharex-printscreen.ps1 not found - skipping'
 }
 
+# --- 12. GitHub CLI auth for git push (interactive unless -SkipGhLogin) -------
+if (Test-Path $ghAuth) {
+    Write-Step 'Setting up GitHub authentication for git'
+    try {
+        & $ghAuth -SkipLogin:$SkipGhLogin
+    } catch {
+        # Cosmetic/convenience step: never let it abort the rest of the setup.
+        Write-Host "    GitHub auth setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Ok 'setup-gh-auth.ps1 not found - skipping'
+}
+
+# --- 13. Apply the repo-managed Zed config ----------------------------------
+if (Test-Path $zedConfig) {
+    Write-Step 'Applying Zed settings, keymap and tasks'
+    try {
+        & $zedConfig
+    } catch {
+        # Editor config is cosmetic: never let it abort the bootstrap.
+        Write-Host "    Zed config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Ok 'configure-zed.ps1 not found - skipping'
+}
+
 Write-Host ''
 Write-Host 'Done. Open a new PowerShell window, then try: z ..' -ForegroundColor Green
+Write-Host 'git push will use your gh login (no username prompt).' -ForegroundColor Green
+Write-Host 'Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL).' -ForegroundColor Green

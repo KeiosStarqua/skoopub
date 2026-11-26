@@ -1,0 +1,26 @@
+{
+  "theme": {
+    "mode": "system",
+    "light": "One Light",
+    "dark": "One Dark"
+  },
+  "buffer_font_family": "JetBrains Mono",
+  "buffer_font_size": 14,
+  "vim_mode": false,
+  "format_on_save": "on",
+  "auto_update": false,
+  "auto_install_extensions": {
+    "html": true,
+    "powershell": true,
+    "dockerfile": true,
+    "docker-compose": true,
+    "toml": true,
+    "nix": true,
+    "sql": true
+  },
+  "lsp": {
+    "rust-analyzer": {
+      "enable_lsp_tasks": true
+    }
+  }
+}

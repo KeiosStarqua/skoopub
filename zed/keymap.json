@@ -1,0 +1,16 @@
+[
+  {
+    "context": "Editor",
+    "bindings": {
+      "alt-left": "editor::MoveToPreviousSubwordStart",
+      "alt-right": "editor::MoveToNextSubwordEnd",
+      "shift-alt-left": "editor::SelectToPreviousSubwordStart",
+      "shift-alt-right": "editor::SelectToNextSubwordEnd"
+    }
+  },
+  {
+    "bindings": {
+      "ctrl-alt-r": "task::Rerun"
+    }
+  }
+]
