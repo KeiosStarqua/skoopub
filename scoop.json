@@ -215,6 +215,11 @@
                  },
                  {
                      "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "rio"
+                 },
+                 {
+                     "Info":  "",
                      "Source":  "nerd-fonts",
                      "Name":  "JetBrainsMono-NF"
                  },

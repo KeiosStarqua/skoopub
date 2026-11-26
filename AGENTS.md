@@ -36,7 +36,7 @@ gh, less, starship, delta, zoxide, atuin, rustup, mingw, bun, cursor-cli,
 opencode.
 Apps — `extras`: firefox, vscode, lazygit, alacritty, sharex, tailscale, zed, grok-bot, pear-desktop, vicinae, chatgpt,
 blender, yasb (YASB Windows taskbar replacement), komorebi (tiling window manager),
-whkd (hotkey daemon for komorebi).
+whkd (hotkey daemon for komorebi), rio (GPU-accelerated terminal).
 Apps — `nerd-fonts`: JetBrainsMono-NF (JetBrains Mono Nerd Font for Alacritty/Herdr TUI).
 Apps — `zeldrisho`: unikey (Vietnamese IME; third-party bucket).
 
