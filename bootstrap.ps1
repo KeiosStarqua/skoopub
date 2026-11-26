@@ -6,7 +6,7 @@
 # Also applies the repo-managed Zed config from zed\ via configure-zed.ps1.
 # Also applies the repo-managed Rio config (font size / zoom 16) via configure-rio.ps1.
 # After Tailscale starts, setup-herdr-ssh.ps1 asks which tailnet machine to
-# attach to and connects Herdr over Tailscale SSH.
+# add to Herdr (saved via `herdr machine add` over Tailscale SSH).
 # Also registers Vicinae to start at login via enable-vicinae-autostart.ps1
 # and sets its global shortcut to Ctrl+Space via configure-vicinae.ps1.
 # Deploys ~/.config/whkdrc and starts Komorebi/whkd via configure-komorebi.ps1.

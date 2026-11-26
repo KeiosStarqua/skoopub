@@ -18,8 +18,9 @@
       tray icon - the CLI may be missing or unable to reach the daemon on Windows).
     - Offers a one-prompt Herdr remote setup via setup-herdr-ssh.ps1: pick a
       machine from the tailnet list (or type its IP/MagicDNS name when the CLI
-      is not usable), then attach with Herdr over Tailscale SSH. No keys,
-      passwords or machine addresses are stored in the repo.
+      is not usable), then save it in Herdr (`herdr machine add`) over Tailscale
+      SSH so it shows up in your Herdr sidebar. No keys, passwords or machine
+      addresses are stored in the repo.
     - Keeps a UniKey that is already installed (e.g. on a public PC) instead of
       adding a second copy; -ForceUniKey installs the Scoop build anyway.
     - Adds a dot-source line for profile.ps1 to your PowerShell $PROFILE early on,
@@ -92,7 +93,7 @@
     in terminals where gum cannot draw its TUI.
 
 .EXAMPLE
-    # One command: configure this machine, then pick a tailnet machine and attach Herdr.
+    # One command: configure this machine, then pick a tailnet machine and add it to Herdr.
     powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 
 .EXAMPLE
@@ -474,7 +475,7 @@ if ($runMode -eq 'herdr') {
     Start-TailscaleDaemon
     Connect-HerdrRemote
     Write-Host ''
-    Write-Host 'Done. Herdr attach finished; run the full setup to configure this machine.' -ForegroundColor Green
+    Write-Host 'Done. Herdr machine saved - open Herdr and pick it from the sidebar; run the full setup to configure this machine.' -ForegroundColor Green
     return
 }
 

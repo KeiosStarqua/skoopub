@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Pick a machine from your tailnet and attach Herdr to it over Tailscale SSH.
+    Pick a machine from your tailnet and save it in Herdr over Tailscale SSH.
 
 .DESCRIPTION
     Run this after signing in to Tailscale. It is the one-prompt path to a
@@ -14,10 +14,11 @@
       - Silently probes a few SSH user names (from your git identity, the
         Windows user and root) to find one Tailscale SSH permits. No prompt,
         no password and no generated keys.
-      - Runs `herdr --remote ssh://<user>@<machine>` to attach immediately. If
-        this script runs inside a Herdr pane, the inherited HERDR_* markers are
-        hidden for the attach; otherwise herdr refuses with "nested herdr is
-        disabled by default" and the remote attach never starts.
+      - Runs `herdr machine add <user>@<machine> --label <machine>`, which
+        prepares the remote Herdr server and stores the machine profile, so it
+        shows up in the sidebar of every open Herdr client. Nothing is shelled
+        into with `herdr --remote`, so this also works from inside a Herdr pane.
+        An already-saved target is left untouched, which keeps re-runs safe.
 
     Nothing about a particular machine is stored in this repo: no name, no
     tailnet IP and no private key.
@@ -286,40 +287,35 @@ if (-not $sshUser) {
 Write-Ok "Tailscale SSH works as $sshUser@$hostName"
 $herdr = Get-Command herdr -ErrorAction SilentlyContinue
 if (-not $herdr) {
-    Write-Warn ("herdr is not on PATH - attach manually with: herdr --remote ssh://{0}@{1}" -f $sshUser, $hostName)
+    Write-Warn ("herdr is not on PATH - add the machine manually with: herdr machine add {0}@{1} --label {1}" -f $sshUser, $hostName)
     return
 }
 
-Write-Step "Attaching Herdr to $hostName"
-$target = "ssh://{0}@{1}" -f $sshUser, $hostName
+# Save the machine inside Herdr instead of shelling in with `herdr --remote`:
+# `herdr machine add` prepares the remote server, keeps the profile in the
+# sidebar and works from inside a Herdr pane (no "nested herdr" refusal).
+$target = "{0}@{1}" -f $sshUser, $hostName
+$label  = if ($selected.Alias) { $selected.Alias } else { $hostName }
 
-# herdr refuses to start from inside another herdr pane ("nested herdr is
-# disabled by default"). The inherited HERDR_* markers describe this pane, not
-# the remote client, so hide them for the attach and restore them afterwards so
-# the calling shell keeps its own state.
-$herdrEnvNames = @(
-    'HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID',
-    'HERDR_WORKSPACE_ID', 'HERDR_SOCKET_PATH', 'HERDR_BIN_PATH'
-)
-$savedHerdrEnv = @{}
-foreach ($name in $herdrEnvNames) {
-    $value = [Environment]::GetEnvironmentVariable($name, 'Process')
-    if ($null -ne $value) { $savedHerdrEnv[$name] = $value }
-}
-if ($savedHerdrEnv.ContainsKey('HERDR_ENV') -and $savedHerdrEnv['HERDR_ENV'] -eq '1') {
-    Write-Ok 'running inside a Herdr pane - attaching with a clean environment (nested herdr is off by default)'
+Write-Step "Adding $hostName to Herdr"
+$listOutput = (& cmd /c ('"{0}" machine list 2>&1' -f $herdr.Source) | Out-String)
+$alreadySaved = $false
+foreach ($line in ($listOutput -split "`r?`n")) {
+    $fields = @($line -split "`t")
+    if ($fields.Count -ge 3 -and $fields[2].Trim() -eq $target) { $alreadySaved = $true; break }
 }
 
-try {
-    foreach ($name in $herdrEnvNames) { [Environment]::SetEnvironmentVariable($name, $null, 'Process') }
-    & herdr --remote $target
-} finally {
-    foreach ($name in $herdrEnvNames) {
-        if ($savedHerdrEnv.ContainsKey($name)) {
-            [Environment]::SetEnvironmentVariable($name, $savedHerdrEnv[$name], 'Process')
-        }
+if ($alreadySaved) {
+    Write-Ok "already saved as $target - leaving the Herdr profile alone"
+} else {
+    $addOutput = (& cmd /c ('"{0}" machine add "{1}" --label "{2}" 2>&1' -f $herdr.Source, $target, $label) | Out-String)
+    $addExit = $LASTEXITCODE
+    foreach ($line in ($addOutput -split "`r?`n")) {
+        if ($line.Trim()) { Write-Ok $line.Trim() }
     }
-}
-if ($LASTEXITCODE -ne 0) {
-    Write-Warn "herdr --remote failed (non-fatal); retry with: herdr --remote $target"
+    if ($addExit -ne 0) {
+        Write-Warn "herdr machine add failed (non-fatal); retry with: herdr machine add $target --label `"$label`""
+        return
+    }
+    Write-Ok "saved as $label - open Herdr and pick it from the sidebar"
 }
