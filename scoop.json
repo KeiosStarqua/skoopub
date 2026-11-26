@@ -56,6 +56,11 @@
                  {
                      "Info":  "",
                      "Source":  "main",
+                     "Name":  "btop"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
                      "Name":  "mise"
                  },
                  {
