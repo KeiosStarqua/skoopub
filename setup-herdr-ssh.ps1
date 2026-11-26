@@ -154,15 +154,41 @@ function Read-ManualPeer {
 function Select-Peer {
     param([object[]]$Peers)
 
-    Write-Host 'Choose the machine that has Herdr inside:'
+    $labels = @()
     for ($i = 0; $i -lt $Peers.Count; $i++) {
         $p = $Peers[$i]
         $state = if ($p.Online) { 'online' } else { 'offline' }
-        Write-Host ('  [{0}] {1} ({2}) - {3}' -f ($i + 1), $p.Dns, $p.Ip, $state)
+        $labels += ('{0} ({1}) - {2}' -f $p.Dns, $p.Ip, $state)
     }
     if (-not [Environment]::UserInteractive) {
         Write-Warn 'Non-interactive shell - skipping Herdr remote setup.'
         return $null
+    }
+
+    # gum gives a real interactive picker (arrow keys / filtering). cmd /c
+    # merges stderr so PS 5.1 does not turn gum output into a terminating error.
+    $gum = Get-Command gum -ErrorAction SilentlyContinue
+    if ($gum) {
+        Write-Host 'Choose the machine that has Herdr inside:'
+        $quoted = @($labels | ForEach-Object { '"' + $_ + '"' }) -join ' '
+        $cmdLine = '"{0}" choose --header "Herdr machine" {1} 2>&1' -f $gum.Source, $quoted
+        try {
+            $raw = (& cmd /c $cmdLine | Out-String)
+            $lines = @($raw -split "`r?`n" | ForEach-Object { $_ -replace "`e\[[0-9;?]*[a-zA-Z]", '' })
+            for ($i = 0; $i -lt $labels.Count; $i++) {
+                if (@($lines | Where-Object { $_.Trim() -eq $labels[$i] }).Count -gt 0) {
+                    return $Peers[$i]
+                }
+            }
+            Write-Ok 'gum did not return a machine - using the numbered list'
+        } catch {
+            Write-Ok "gum picker failed ($($_.Exception.Message)) - using the numbered list"
+        }
+    }
+
+    Write-Host 'Choose the machine that has Herdr inside:'
+    for ($i = 0; $i -lt $Peers.Count; $i++) {
+        Write-Host ('  [{0}] {1}' -f ($i + 1), $labels[$i])
     }
     $answer = Read-Host 'Machine number (Enter to cancel)'
     if (-not $answer -or $answer -notmatch '^\d+$') { return $null }
