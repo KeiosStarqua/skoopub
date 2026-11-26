@@ -16,6 +16,7 @@ PowerShell profile, restored from a single manifest.
 - `vicinae/` + `configure-vicinae.ps1` — sets Vicinae's global shortcut to **Ctrl+Space** via a config import
 - `rio/` + `configure-rio.ps1` — repo-managed Rio config (font size / zoom **16**), copied to `%LOCALAPPDATA%\rio\config.toml` on install
 - `komorebi/whkdrc` + `configure-komorebi.ps1` — tiling hotkeys for Komorebi, deployed to `~/.config/whkdrc` and started on install
+- `yasb/` + `configure-yasb.ps1` — Komorebi status bar (`config.yaml`, `styles.css`, `.env.example`) from the Ultimate-Win11-Setup repo, deployed to `~/.config/yasb` on install
 
 ## Install with one command
 
@@ -58,6 +59,7 @@ cd skoop
 15. Creates a per-user Startup shortcut for `vicinae-server.exe` via `enable-vicinae-autostart.ps1` and starts the server in the current session. Vicinae's global shortcut needs the server running, so it now works after every sign-in. The script clears inherited `HERDR_*` variables first, so terminals opened from Vicinae do not think they are inside a Herdr pane. Use `-Remove` to undo the autostart, `-NoLaunch` to only install the shortcut, or `-Restart` to relaunch an already running (contaminated) server.
 16. Sets the Vicinae global shortcut to **Ctrl+Space** via `configure-vicinae.ps1`: it copies `vicinae/keybinds.json` into `%LOCALAPPDATA%\vicinae\config` and adds it to `settings.json`'s `imports`, so GUI changes never overwrite it. Existing settings are backed up before editing. Restart Vicinae (or sign in again) to register the shortcut; `.\configure-vicinae.ps1 -Restart` does that now.
 17. Deploys `komorebi/whkdrc` to `~/.config/whkdrc` via `configure-komorebi.ps1` (a changed original is backed up first), then starts Komorebi if needed and starts/reloads `whkd`. The scheme uses `Win` as the primary modifier: `Win+←/↓/↑/→` focus, `Win+Shift+←/↓/↑/→` move, `Win+Ctrl+←/↓/↑/→` resize, `Win+1..9` switch workspace, and `Win+Shift+1..9` move a window to a workspace. Arrows replace H/J/K/L because Windows 11 reserves `Win+H/J/K/L`; some remaining `Win` combos (e.g. `Win+Q`, `Win+F`, `Win+Space`) are native Windows shortcuts, and Snap may need disabling for `Win+Arrow` to reach whkd. See `komorebi/whkdrc` for the full list.
+18. Deploys the YASB status bar from `yasb/` via `configure-yasb.ps1`: `config.yaml` and `styles.css` go to `~/.config/yasb` (changed originals are backed up), and a `.env` is created from `.env.example` if missing. YASB starts automatically; it watches the config, so edits reload without a restart (`.\configure-yasb.ps1 -Restart` forces one). Fill `~/.config/yasb/.env` with a WeatherAPI key/location and optional wallpaper directory to enable those widgets. In-app updates are off so Scoop stays the version source. Source config: https://github.com/SleepyCatHey/Ultimate-Win11-Setup/tree/main/Komorebi/YASB%20config%20for%20Komorebi.
 
 Then open a new PowerShell window and try:
 
@@ -89,6 +91,12 @@ Re-apply the Komorebi hotkeys after editing `komorebi/whkdrc`:
 .\configure-komorebi.ps1 -Restart
 ```
 
+Re-apply the YASB bar after editing `yasb/config.yaml` or `yasb/styles.css`:
+
+```powershell
+.\configure-yasb.ps1 -Restart
+```
+
 …or add a package and re-export to commit:
 
 ```powershell
@@ -102,7 +110,7 @@ scoop export | Out-File -Encoding utf8 scoop.json
 |---|---|
 | Normal (non-elevated) shell | Scoop installs per-user under `%USERPROFILE%\scoop` |
 | Elevated shell | Scoop installs system-wide under `C:\ProgramData\scoop` |
-| Piped via `irm \| iex` | `scoop.json`, `profile.ps1`, `firefox-policies.template.json`, `fix-sharex-printscreen.ps1`, `setup-gh-auth.ps1`, `setup-git-identity.ps1`, `configure-zed.ps1`, `setup-herdr-ssh.ps1`, `enable-vicinae-autostart.ps1`, `configure-vicinae.ps1`, `configure-rio.ps1`, `configure-komorebi.ps1`, `vicinae/keybinds.json`, `rio/config.toml`, `komorebi/whkdrc` and `zed/*.json` are fetched to `%LOCALAPPDATA%\skoop` |
+| Piped via `irm \| iex` | `scoop.json`, `profile.ps1`, `firefox-policies.template.json`, `fix-sharex-printscreen.ps1`, `setup-gh-auth.ps1`, `setup-git-identity.ps1`, `configure-zed.ps1`, `setup-herdr-ssh.ps1`, `enable-vicinae-autostart.ps1`, `configure-vicinae.ps1`, `configure-rio.ps1`, `configure-komorebi.ps1`, `configure-yasb.ps1`, `vicinae/keybinds.json`, `rio/config.toml`, `komorebi/whkdrc`, `yasb/config.yaml`, `yasb/styles.css`, `yasb/.env.example` and `zed/*.json` are fetched to `%LOCALAPPDATA%\skoop` |
 | Task Manager disabled by policy | `DisableTaskMgr` is set to `0` for the current user; elevated runs also clear the machine-wide value. A domain policy may reapply it on the next refresh |
 | From a clone | The files next to `install.ps1` are used, so edits apply directly |
 | Firefox default browser | `firefox --setDefaultBrowser` runs after install (skipped if Firefox is already the http handler); Windows 11 may open Settings for confirmation, and a failure is non-fatal |
@@ -119,6 +127,7 @@ scoop export | Out-File -Encoding utf8 scoop.json
 | Vicinae autostart | `enable-vicinae-autostart.ps1` creates `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Vicinae.lnk` pointing at the Scoop `vicinae-server.exe` (via `current`, so updates do not break it) and starts the server now. Global shortcuts need that server; `-Remove` deletes the shortcut, `-NoLaunch` skips starting it |
 | Vicinae shortcut | The global toggle is **Ctrl+Space**, set through an imported `keybinds.json` so the settings GUI cannot overwrite it. Change it in `vicinae/keybinds.json` and re-run `.\configure-vicinae.ps1 -Restart`; Vicinae must be restarted for a new global shortcut to register |
 | Komorebi hotkeys | `configure-komorebi.ps1` copies `komorebi/whkdrc` to `~/.config/whkdrc`, backs up a changed original as `.bak.<timestamp>`, and starts/reloads `whkd`. Use `-NoBackup` to overwrite directly and `-NoStart` to only deploy the file; `-Restart` forces a whkd reload. The config needs `komorebi` and `whkd` from `scoop.json`; the `Win` modifier overlaps some Windows 11 shortcuts and Snap layouts, so disable Snap if `Win+Arrow` does not reach whkd |
+| YASB status bar | `configure-yasb.ps1` copies `yasb/config.yaml` and `yasb/styles.css` to `~/.config/yasb`, backs up changed originals, creates a `.env` from `.env.example` when missing, and starts YASB. The vendored config comes from SleepyCatHey/Ultimate-Win11-Setup; weather needs a WeatherAPI key in `.env`, and the cava widget needs `cava` installed. YASB's in-app update is disabled so Scoop owns the version |
 | Rio config | `configure-rio.ps1` copies `rio/config.toml` to `%LOCALAPPDATA%\rio\config.toml`, backing up a changed original as `.bak.<timestamp>` unless `-NoBackup`. Font size (zoom) is **16**; Rio hot-reloads the file, so no restart is needed |
 | `herdr` says "nested herdr"/inception | A long-lived launcher (often Vicinae) inherited `HERDR_ENV=1` from a Herdr pane and passes it to new terminals. Run `.\enable-vicinae-autostart.ps1 -Restart`, then close and reopen Rio/WezTerm. `profile.ps1` already clears the variables for new PowerShell sessions |
 | Rust toolchain | GNU is set as default only when no toolchain is active; switch with `rustup default stable-x86_64-pc-windows-msvc` (needs MSVC Build Tools) |

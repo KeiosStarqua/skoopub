@@ -9,6 +9,7 @@
 # Also registers Vicinae to start at login via enable-vicinae-autostart.ps1
 # and sets its global shortcut to Ctrl+Space via configure-vicinae.ps1.
 # Deploys ~/.config/whkdrc and starts Komorebi/whkd via configure-komorebi.ps1.
+# Deploys the YASB status bar config and starts YASB via configure-yasb.ps1.
 [CmdletBinding()]
 param(
     [switch]$ForceUniKey,
@@ -294,10 +295,18 @@ if (Test-Path $komorebiConfig) {
     catch { Write-Host "Komorebi hotkey setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
+# 17. Deploy the repo-managed YASB status bar config and start YASB.
+$yasbConfig = Join-Path $repo 'configure-yasb.ps1'
+if (Test-Path $yasbConfig) {
+    try { & $yasbConfig }
+    catch { Write-Host "YASB config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+
 Write-Host "Done. Open a new PowerShell window, then try: z .." -ForegroundColor Green
 Write-Host "git push will use your gh login (no username prompt)." -ForegroundColor Green
 Write-Host "Commits will be authored as Keios <git@taquangkhoi.com>." -ForegroundColor Green
 Write-Host "Vicinae starts at login; press Ctrl+Space to open the launcher." -ForegroundColor Green
 Write-Host "Rio font size / zoom is 16." -ForegroundColor Green
 Write-Host "Komorebi hotkeys are ready (see komorebi\whkdrc)." -ForegroundColor Green
+Write-Host "YASB status bar is configured; fill ~\.config\yasb\.env for weather/wallpapers." -ForegroundColor Green
 Write-Host "Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL)." -ForegroundColor Green

@@ -39,6 +39,8 @@
       config import (existing Vicinae settings are preserved).
     - Deploys a conflict-free whkdrc to ~/.config/whkdrc via configure-komorebi.ps1
       and starts/reloads whkd (and Komorebi when needed) so tiling hotkeys work.
+    - Deploys the repo-managed YASB status bar (config.yaml, styles.css and a .env
+      template) via configure-yasb.ps1 and starts YASB for the Komorebi UI.
 
     Works two ways:
       Local :  .\install.ps1
@@ -259,9 +261,10 @@ if (-not $repoRoot) {
         'setup-gh-auth.ps1', 'configure-zed.ps1', 'setup-herdr-ssh.ps1',
         'setup-git-identity.ps1',
         'enable-vicinae-autostart.ps1', 'configure-vicinae.ps1',
-        'configure-rio.ps1', 'configure-komorebi.ps1',
+        'configure-rio.ps1', 'configure-komorebi.ps1', 'configure-yasb.ps1',
         'zed/settings.json', 'zed/keymap.json', 'zed/tasks.json',
-        'vicinae/keybinds.json', 'rio/config.toml', 'komorebi/whkdrc'
+        'vicinae/keybinds.json', 'rio/config.toml', 'komorebi/whkdrc',
+        'yasb/config.yaml', 'yasb/styles.css', 'yasb/.env.example'
     )
     foreach ($file in $repoFiles) {
         $dest = Join-Path $repoRoot $file
@@ -284,6 +287,7 @@ $herdrSsh        = Join-Path $repoRoot 'setup-herdr-ssh.ps1'
 $vicinae         = Join-Path $repoRoot 'enable-vicinae-autostart.ps1'
 $vicinaeConfig   = Join-Path $repoRoot 'configure-vicinae.ps1'
 $komorebiConfig  = Join-Path $repoRoot 'configure-komorebi.ps1'
+$yasbConfig      = Join-Path $repoRoot 'configure-yasb.ps1'
 Write-Ok "repo root: $repoRoot"
 
 # --- 2. Hook the repo-managed profile into $PROFILE --------------------------
@@ -515,6 +519,19 @@ if (Test-Path $komorebiConfig) {
     Write-Ok 'configure-komorebi.ps1 not found - skipping'
 }
 
+# --- 20. Apply the repo-managed YASB status bar config ------------------------
+if (Test-Path $yasbConfig) {
+    Write-Step 'Deploying the YASB status bar and starting it'
+    try {
+        & $yasbConfig
+    } catch {
+        # Cosmetic/convenience step: never let it abort the bootstrap.
+        Write-Host "    YASB config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Ok 'configure-yasb.ps1 not found - skipping'
+}
+
 Write-Host ''
 Write-Host 'Done. Open a new PowerShell window, then try: z ..' -ForegroundColor Green
 Write-Host 'git push will use your gh login (no username prompt).' -ForegroundColor Green
@@ -523,3 +540,4 @@ Write-Host 'Vicinae starts at login; press Ctrl+Space to open the launcher.' -Fo
 Write-Host 'Rio font size / zoom is 16.' -ForegroundColor Green
 Write-Host 'Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL).' -ForegroundColor Green
 Write-Host 'Komorebi hotkeys are ready (see komorebi/whkdrc).' -ForegroundColor Green
+Write-Host 'YASB status bar is configured; fill ~/.config/yasb/.env for weather/wallpapers.' -ForegroundColor Green
