@@ -1,12 +1,14 @@
 <#
 .SYNOPSIS
-    Register a per-user scheduled task that runs the Firefox backup + auth cleanup on shutdown/logoff.
+    Register a per-user scheduled task that runs the Firefox/Vicinae backup and local sign-in cleanup on shutdown/logoff.
 
 .DESCRIPTION
     Triggers on Windows event 1074 (shutdown initiated) in the System log and, when
     available, 4647 (logoff) in the Security log. The action runs
-    core/cleanup-before-shutdown.ps1 with -User so the SSH user never has to be
-    typed during shutdown. Nothing is changed until the remote backup verifies.
+    core/shutdown-cleanup-guard.ps1, which skips the work when a full cleanup
+    already finished within -MaxAgeMinutes; otherwise it runs
+    core/cleanup-before-shutdown.ps1 with -User. Nothing is changed until the
+    remote backup verifies.
 
     Registration is per-user and non-elevated. Use -Remove to unregister.
 
@@ -17,7 +19,13 @@
     Scheduled task name (default 'SkoopCleanupOnShutdown').
 
 .PARAMETER ScriptPath
-    Cleanup script to run (defaults to cleanup-before-shutdown.ps1 next to this file).
+    Guard script to run (defaults to shutdown-cleanup-guard.ps1 next to this file).
+
+.PARAMETER MaxAgeMinutes
+    Skip cleanup when the last successful run is younger than this (default 10).
+
+.PARAMETER Force
+    Always run cleanup, ignoring the last-success timestamp.
 
 .PARAMETER Remove
     Unregister the task instead of creating it.

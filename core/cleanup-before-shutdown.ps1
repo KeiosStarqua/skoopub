@@ -1,25 +1,30 @@
 <#
 .SYNOPSIS
-    Back up Firefox profiles to acer-ubuntu over Tailscale SSH, then remove local auth state.
+    Back up Firefox profiles, Vicinae and Atuin data to acer-ubuntu over Tailscale
+    SSH, then remove local sign-ins (GitHub, Tailscale, Pear Desktop, Firefox).
 
 .DESCRIPTION
     Intended for public/shared PCs: run it before turning the machine off to leave
     no signed-in accounts behind. It copies every Firefox profile found in
-    profiles.ini into a local staging folder, uploads it to the tailnet machine
-    acer-ubuntu with scp, verifies the remote copy over ssh, and only then removes
-    local credentials:
+    profiles.ini plus Vicinae's config/data/state folders into local staging folders,
+    uploads them to the tailnet machine acer-ubuntu with scp, verifies the remote
+    copies over ssh, and only then removes local credentials:
 
       - gh auth logout for github.com (plus the hosts.yml file as a fallback)
       - git's GitHub credential helper/username and ~/.git-credentials
       - GitHub entries in Windows Credential Manager
       - SSH private keys under ~/.ssh and the temporary Herdr key folder
+      - Tailscale login (tailscale logout), so the PC is no longer on the tailnet
+      - Pear Desktop / YouTube Music user data (saved Google login and cache)
       - Firefox logins.json / key4.db from the backed-up profiles
 
-    The SSH user is asked for at runtime (pass -User to skip the prompt). Backups
-    land in ~/<RemotePath>/<timestamp>/firefox on acer-ubuntu. Nothing is deleted
-    until the remote copy has been verified; if verification fails, the staging
-    copy is kept and the script stops. -DryRun previews without changing anything.
-    The script never shuts the PC down.
+    The SSH user is asked for at runtime (pass -User to skip the prompt). Firefox
+    lands in ~/<RemotePath>/<timestamp>/firefox and Vicinae in
+    ~/<VicinaeRemotePath>/<timestamp>/vicinae on acer-ubuntu, so restore-backup.ps1
+    can pick the latest of each app independently. Nothing is deleted until each
+    remote copy has been verified; if verification fails, the staging copy is kept
+    and the script stops. -DryRun previews without changing anything. The script
+    never shuts the PC down.
 
 .PARAMETER User
     SSH user on acer-ubuntu. When omitted, the script prompts for it.
@@ -28,7 +33,17 @@
     Tailnet hostname/IP of the backup machine (default 'acer-ubuntu').
 
 .PARAMETER RemotePath
-    Destination folder relative to the remote home (default 'skoop-backups/firefox').
+    Firefox destination folder relative to the remote home (default 'skoop-backups/firefox').
+
+.PARAMETER VicinaeRemotePath
+    Vicinae destination folder relative to the remote home (default 'skoop-backups/vicinae').
+
+.PARAMETER VicinaeDataDir
+    Local Vicinae data folder to back up (default: %LOCALAPPDATA%\vicinae). Its
+    config, data and state subfolders are copied; the disposable cache is skipped.
+
+.PARAMETER NoVicinae
+    Skip the Vicinae snapshot and back up Firefox only.
 
 .PARAMETER StagingDir
     Local folder used to assemble the backup before upload. Defaults to
@@ -65,8 +80,11 @@ param(
     [string] $User,
     [string] $TargetHost = 'acer-ubuntu',
     [string] $RemotePath = 'skoop-backups/firefox',
+    [string] $VicinaeRemotePath = 'skoop-backups/vicinae',
+    [string] $VicinaeDataDir = (Join-Path $env:LOCALAPPDATA 'vicinae'),
     [string] $StagingDir,
     [string] $LogPath,
+    [switch] $NoVicinae,
     [switch] $SkipBackup,
     [switch] $KeepFirefoxLogins,
     [switch] $BackupOnly,
@@ -170,8 +188,48 @@ function Copy-Profile {
     }
 }
 
+function Copy-VicinaeData {
+    param([string] $Source, [string] $Destination)
+
+    if (-not (Test-Path -LiteralPath $Source)) {
+        Write-Log ("Vicinae data folder not found, skipping: " + $Source)
+        return $false
+    }
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    foreach ($name in @('config', 'data', 'state')) {
+        $sub = Join-Path $Source $name
+        if (-not (Test-Path -LiteralPath $sub)) { continue }
+        $target = Join-Path $Destination $name
+        Write-Log ("staging vicinae/" + $name)
+        if (Get-Command robocopy -ErrorAction SilentlyContinue) {
+            $copyOutput = (& robocopy $sub $target /E /COPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NP 2>&1 | Out-String)
+            $code = $LASTEXITCODE
+            foreach ($line in (@($copyOutput -split '\r?\n' | Where-Object { $_.Trim() }) | Select-Object -Last 10)) {
+                Write-Log ("robocopy: " + $line.Trim())
+            }
+            if ($code -ge 16) { throw "robocopy failed with code $code for $sub" }
+            if ($code -ge 8) { Write-Log ("warning: robocopy skipped some files in " + $sub) }
+        } else {
+            Copy-Item -LiteralPath $sub -Destination $target -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    $files = @(Get-ChildItem -LiteralPath $Destination -Recurse -File -ErrorAction SilentlyContinue)
+    if ($files.Count -lt 1) {
+        Write-Log 'Vicinae data had no files to back up; no snapshot will be uploaded'
+        return $false
+    }
+    return $true
+}
+
 function Invoke-RemoteBackup {
-    param([string] $Source, [string] $Stamp, [string] $SshUser)
+    param(
+        [string] $Source,
+        [string] $Stamp,
+        [string] $SshUser,
+        [string] $RemotePath,
+        [string[]] $RequiredPaths,
+        [int] $MinFiles = 1
+    )
 
     foreach ($tool in @('ssh', 'scp')) {
         if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
@@ -193,6 +251,7 @@ function Invoke-RemoteBackup {
         throw 'Could not determine the remote home directory.'
     }
 
+    $folderName = Split-Path -Leaf $Source
     $remoteDir = $remoteHome.TrimEnd('/') + '/' + $RemotePath.Trim('/') + '/' + $Stamp
     $scpArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10', '-r', $Source, ($peer + ':' + $remoteDir + '/'))
 
@@ -234,21 +293,29 @@ function Invoke-RemoteBackup {
         }
     }
 
-    # scp copies the whole 'firefox' staging folder, so profiles sit one level deeper.
-    $verifyCmd = "d='" + $remoteDir + "/firefox'; p=`$(find `"`$d`" -name prefs.js -print -quit); n=`$(find `"`$d`" -type f | wc -l); if [ -n `"`$p`" ] && [ `"`$n`" -gt 0 ]; then echo `"`$n`"; else exit 1; fi"
+    # The staging folder is copied into $remoteDir, so files sit one level deeper.
+    $checks = ''
+    foreach ($path in $RequiredPaths) {
+        $checks += 'if [ ! -e "$d/' + $path + '" ]; then exit 2; fi; '
+    }
+    $verifyCmd = @'
+d='__DIR__'; __CHECKS__ n=$(find "$d" -type f | wc -l); if [ "$n" -lt __MIN__ ]; then exit 3; fi; echo "$n"
+'@
+    $verifyDir = $remoteDir + '/' + $folderName
+    $verifyCmd = $verifyCmd.Replace('__DIR__', $verifyDir).Replace('__CHECKS__', $checks).Replace('__MIN__', [string] $MinFiles)
     Write-Log ("verify command: ssh " + ($sshArgs -join ' ') + " " + $verifyCmd)
     $check = & ssh @sshArgs $verifyCmd 2>&1
     foreach ($line in $check) { Write-Log ("verify: " + $line.ToString().Trim()) }
     if ($LASTEXITCODE -ne 0) {
-        throw 'Remote backup verification failed.'
+        throw "Remote backup verification failed for $folderName."
     }
     $countLine = ($check | Select-Object -Last 1).ToString().Trim()
     $count = 0
-    if (-not [int]::TryParse($countLine, [ref] $count) -or $count -lt 1) {
-        throw 'Remote backup is empty or unreadable; refusing to remove any auth state.'
+    if (-not [int]::TryParse($countLine, [ref] $count) -or $count -lt $MinFiles) {
+        throw "Remote backup for $folderName is empty or unreadable; refusing to remove any auth state."
     }
-    Write-Log ("upload verified: " + $count + " files at " + $peer + ':' + $remoteDir)
-    return ($peer + ':' + $remoteDir + '/firefox')
+    Write-Log ("upload verified: " + $folderName + " " + $count + " files at " + $peer + ':' + $remoteDir)
+    return ($peer + ':' + $remoteDir + '/' + $folderName)
 }
 
 function Remove-Path {
@@ -343,10 +410,67 @@ function Remove-SshKeys {
     }
 }
 
+function Resolve-TailscaleCli {
+    # The official Windows installer does not add tailscale.exe to PATH.
+    $cmd = Get-Command tailscale -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+
+    $candidates = @()
+    if ($env:ProgramFiles) { $candidates += Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe' }
+    if (${env:ProgramFiles(x86)}) { $candidates += Join-Path ${env:ProgramFiles(x86)} 'Tailscale\tailscale.exe' }
+    if ($env:LOCALAPPDATA) { $candidates += Join-Path $env:LOCALAPPDATA 'Tailscale\tailscale.exe' }
+    $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE 'scoop' }
+    $candidates += Join-Path $scoopRoot 'apps\tailscale\current\tailscale.exe'
+    $candidates += Join-Path $scoopRoot 'shims\tailscale.exe'
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+    return $null
+}
+
+function Remove-TailscaleAuth {
+    $cli = Resolve-TailscaleCli
+    if ($DryRun) {
+        Write-Log ("DRYRUN " + $(if ($cli) { $cli } else { 'tailscale.exe' }) + " logout")
+        return
+    }
+    if (-not $cli) {
+        Write-Log 'tailscale.exe not found (PATH, Program Files or Scoop) - skipping Tailscale logout'
+        return
+    }
+    try {
+        # cmd /c merges stderr so PS 5.1 does not raise a terminating NativeCommandError.
+        $output = (& cmd /c ('"{0}" logout 2>&1' -f $cli) | Out-String)
+        foreach ($line in ($output -split '\r?\n' | Where-Object { $_.Trim() } | Select-Object -Last 10)) {
+            Write-Log ("tailscale: " + $line.Trim())
+        }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Log ("WARNING: tailscale logout exited with code " + $LASTEXITCODE)
+        } else {
+            Write-Log 'Tailscale logged out - this device is no longer signed in to the tailnet'
+        }
+    } catch {
+        Write-Log ("WARNING: tailscale logout failed: " + $_.Exception.Message)
+    }
+}
+
+function Remove-PearDesktopData {
+    # Pear Desktop is an Electron app; its YouTube Music userData folder holds the
+    # saved Google login, cookies and cache. No repo-managed config lives there.
+    foreach ($dir in @(
+        (Join-Path $env:APPDATA 'YouTube Music'),
+        (Join-Path $env:LOCALAPPDATA 'YouTube Music'),
+        (Join-Path $env:APPDATA 'Pear Desktop'),
+        (Join-Path $env:LOCALAPPDATA 'Pear Desktop')
+    )) {
+        Remove-Path $dir -Recurse
+    }
+}
+
 $profiles = @()
 $stamp = Get-Date -Format 'yyyy-MM-dd-HHmmss'
 $stagingRoot = $null
-$remoteBackup = $null
+$remoteBackups = @()
 
 $logDir = if ($StagingDir) { $StagingDir } else { Join-Path $env:LOCALAPPDATA 'skoop\backup' }
 $script:LogPath = if ($LogPath) { $LogPath } else { Join-Path $logDir ('cleanup-' + $stamp + '.log') }
@@ -367,13 +491,16 @@ if (-not $SkipBackup) {
 
     $stagingRoot = Join-Path $logDir $stamp
     if ($DryRun) {
-        Write-Log 'DRYRUN would stage profiles locally, upload via scp, verify over ssh, then delete staging'
+        Write-Log 'DRYRUN would stage Firefox + Vicinae locally, upload each, verify over ssh, then delete staging'
     } else {
         $firefoxRoot = Join-Path $stagingRoot 'firefox'
         New-Item -ItemType Directory -Force -Path $firefoxRoot | Out-Null
-        $ini = Join-Path $env:APPDATA 'Mozilla\Firefox\profiles.ini'
-        if (Test-Path -LiteralPath $ini) {
-            Copy-Item -LiteralPath $ini -Destination (Join-Path $firefoxRoot 'profiles.ini') -Force
+        $firefoxBase = Join-Path $env:APPDATA 'Mozilla\Firefox'
+        foreach ($name in @('profiles.ini', 'installs.ini')) {
+            $ini = Join-Path $firefoxBase $name
+            if (Test-Path -LiteralPath $ini) {
+                Copy-Item -LiteralPath $ini -Destination (Join-Path $firefoxRoot $name) -Force
+            }
         }
         foreach ($profile in $profiles) {
             $target = Join-Path $firefoxRoot (Split-Path -Leaf $profile)
@@ -383,8 +510,17 @@ if (-not $SkipBackup) {
         $stagedFiles = @(Get-ChildItem -LiteralPath $firefoxRoot -Recurse -File -ErrorAction SilentlyContinue)
         $stagedBytes = ($stagedFiles | Measure-Object -Property Length -Sum).Sum
         Write-Log ("local staging complete: " + $stagedFiles.Count + " files, " + ('{0:N1}' -f ($stagedBytes / 1MB)) + ' MB')
-        $remoteBackup = Invoke-RemoteBackup -Source $firefoxRoot -Stamp $stamp -SshUser $sshUser
-        Write-Log 'remote backup verified - auth cleanup may proceed'
+        $remoteBackups += Invoke-RemoteBackup -Source $firefoxRoot -Stamp $stamp -SshUser $sshUser `
+            -RemotePath $RemotePath -RequiredPaths @('profiles.ini') -MinFiles 2
+
+        if (-not $NoVicinae) {
+            $vicinaeRoot = Join-Path $stagingRoot 'vicinae'
+            if (Copy-VicinaeData -Source $VicinaeDataDir -Destination $vicinaeRoot) {
+                $remoteBackups += Invoke-RemoteBackup -Source $vicinaeRoot -Stamp $stamp -SshUser $sshUser `
+                    -RemotePath $VicinaeRemotePath -RequiredPaths @('config') -MinFiles 1
+            }
+        }
+        Write-Log 'remote backups verified - auth cleanup may proceed'
         Remove-Path $stagingRoot -Recurse
     }
 }
@@ -394,6 +530,8 @@ if ($BackupOnly) {
 } else {
     Remove-GitHubAuth
     Remove-SshKeys
+    Remove-TailscaleAuth
+    Remove-PearDesktopData
 
     if (-not $KeepFirefoxLogins) {
         foreach ($profile in $profiles) {
@@ -407,10 +545,13 @@ if ($BackupOnly) {
 if (Get-Process -Name firefox -ErrorAction SilentlyContinue) {
     Write-Log 'Firefox is running - close it and reopen before use so the login changes take effect'
 }
+if (Get-Process -Name 'YouTube Music' -ErrorAction SilentlyContinue) {
+    Write-Log 'Pear Desktop is running - close it and reopen before use so the login changes take effect'
+}
 if ($DryRun) {
     Write-Log 'DRYRUN complete; nothing was changed'
 } else {
-    Write-Log ("done. Remote backup: " + $(if ($remoteBackup) { $remoteBackup } else { '(none)' }))
+    Write-Log ("done. Remote backups: " + $(if ($remoteBackups) { $remoteBackups -join ', ' } else { '(none)' }))
     Write-Log ("log saved: " + $script:LogPath)
 
     if (-not $BackupOnly) {
@@ -419,7 +560,7 @@ if ($DryRun) {
         $stampPath = Join-Path $logDir 'last-cleanup.json'
         $marker = [ordered] @{
             timestamp = (Get-Date).ToString('o')
-            backups   = @($remoteBackup)
+            backups   = @($remoteBackups)
             log       = $script:LogPath
             host      = $env:COMPUTERNAME
         }
@@ -427,6 +568,6 @@ if ($DryRun) {
         Write-Log ("last cleanup stamp: " + $stampPath)
 
         $history = Join-Path $logDir 'cleanup-history.log'
-        Add-Content -LiteralPath $history -Value ((Get-Date -Format 'o') + "`tOK`tauth-removed`tbackups=" + $remoteBackup) -Encoding UTF8
+        Add-Content -LiteralPath $history -Value ((Get-Date -Format 'o') + "`tOK`tauth-removed`tbackups=" + ($remoteBackups -join '; ')) -Encoding UTF8
     }
 }
