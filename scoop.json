@@ -25,11 +25,6 @@
                  },
                  {
                      "Info":  "",
-                     "Source":  "extras",
-                     "Name":  "alacritty"
-                 },
-                 {
-                     "Info":  "",
                      "Source":  "main",
                      "Name":  "herdr"
                  },

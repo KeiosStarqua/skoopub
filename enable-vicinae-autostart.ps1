@@ -44,7 +44,7 @@ function Write-Ok([string]$Message)   { Write-Host "    $Message" -ForegroundCol
 function Clear-HerdrEnv {
     # Vicinae is often started by install.ps1 from inside a Herdr pane. The
     # HERDR_* variables would then be inherited by every app Vicinae launches,
-    # making Alacritty/WezTerm shells look like a nested Herdr session.
+    # making Rio/WezTerm shells look like a nested Herdr session.
     foreach ($name in @(
         'HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID',
         'HERDR_WORKSPACE_ID', 'HERDR_SOCKET_PATH', 'HERDR_BIN_PATH'

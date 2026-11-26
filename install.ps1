@@ -27,10 +27,6 @@
       there is reported but does not abort the bootstrap.
     - Copies the repo-managed Zed settings/keymap/tasks into %APPDATA%\Zed (old
       files are backed up); Zed installs its declared extensions on next start.
-    - Copies alacritty/alacritty.toml into %APPDATA%\alacritty (old file is backed
-      up): JetBrainsMono NF at 12pt for Herdr TUI glyphs and hide-when-typing.
-      No mouse bindings are set, so clicks reach Herdr/lazygit mouse capture;
-      Shift+click still bypasses a TUI for text selection.
     - Offers to run `gh auth login` (only when needed) and runs `gh auth setup-git`
       so `git push` uses the GitHub CLI token instead of prompting for a username.
     - Registers `vicinae-server.exe` in the per-user Startup folder and starts it
