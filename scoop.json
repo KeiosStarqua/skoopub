@@ -200,6 +200,16 @@
                  },
                  {
                      "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "komorebi"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "whkd"
+                 },
+                 {
+                     "Info":  "",
                      "Source":  "nerd-fonts",
                      "Name":  "JetBrainsMono-NF"
                  },
