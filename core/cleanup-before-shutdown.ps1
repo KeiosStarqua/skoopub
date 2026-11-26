@@ -34,12 +34,19 @@
     Local folder used to assemble the backup before upload. Defaults to
     %LOCALAPPDATA%\skoop\backup and is removed after a verified upload.
 
+.PARAMETER LogPath
+    File to mirror all log output into. Defaults to
+    <StagingDir>\cleanup-<timestamp>.log so a failed upload can be debugged.
+
 .PARAMETER SkipBackup
     Skip the Firefox backup. Requires -Force, so an auth wipe cannot happen
     by accident without a verified copy.
 
 .PARAMETER KeepFirefoxLogins
     Keep Firefox's saved logins/key database after the backup (opt-out).
+
+.PARAMETER BackupOnly
+    Upload the backup and stop; do not remove any auth state. Useful for testing.
 
 .PARAMETER DryRun
     Print what would happen; do not copy, upload or delete anything.
@@ -59,17 +66,30 @@ param(
     [string] $TargetHost = 'acer-ubuntu',
     [string] $RemotePath = 'skoop-backups/firefox',
     [string] $StagingDir,
+    [string] $LogPath,
     [switch] $SkipBackup,
     [switch] $KeepFirefoxLogins,
+    [switch] $BackupOnly,
     [switch] $DryRun,
     [switch] $Force
 )
 
 $ErrorActionPreference = 'Stop'
 
+$script:LogPath = $null
+
 function Write-Log {
     param([string] $Message)
-    Write-Host ("[cleanup] " + $Message)
+
+    $line = '[' + (Get-Date -Format 'HH:mm:ss') + '] ' + $Message
+    Write-Host $line
+    if ($script:LogPath) {
+        try {
+            Add-Content -LiteralPath $script:LogPath -Value $line -Encoding UTF8
+        } catch {
+            Write-Host ("[cleanup] WARNING: could not write log file: " + $_.Exception.Message)
+        }
+    }
 }
 
 function Resolve-SshUser {
@@ -124,17 +144,29 @@ function Copy-Profile {
     param([string] $Source, [string] $Destination)
 
     if (Get-Command robocopy -ErrorAction SilentlyContinue) {
-        & robocopy $Source $Destination /E /COPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+        # Firefox keeps parent.lock and some WAL files open; a few skips are fine
+        # as long as the critical profile files make it into the backup.
+        Write-Log ("robocopy: " + $Source + " -> " + $Destination)
+        $copyOutput = (& robocopy $Source $Destination /E /COPY:DAT /R:1 /W:1 /XF parent.lock /NFL /NDL /NJH /NP 2>&1 | Out-String)
         $code = $LASTEXITCODE
-        if ($code -gt 7) {
+        $copyLines = @($copyOutput -split '\r?\n' | Where-Object { $_.Trim() })
+        foreach ($copyLine in ($copyLines | Select-Object -Last 20)) {
+            Write-Log ("robocopy: " + $copyLine.Trim())
+        }
+        if ($code -ge 16) {
             throw "robocopy failed with code $code for $Source"
         }
+        if ($code -ge 8) {
+            Write-Log ("warning: robocopy skipped some locked files in " + $Source)
+        }
     } else {
-        Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
+        Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    if (-not (Test-Path -LiteralPath (Join-Path $Destination 'prefs.js'))) {
-        throw "Backup verification failed for $Source"
+    foreach ($required in @('prefs.js', 'places.sqlite')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Destination $required))) {
+            throw "Backup verification failed for ${Source}: missing $required"
+        }
     }
 }
 
@@ -150,7 +182,9 @@ function Invoke-RemoteBackup {
     $sshArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10', ($SshUser + '@' + $TargetHost))
     $peer = $SshUser + '@' + $TargetHost
 
+    Write-Log ("ssh command: ssh " + ($sshArgs -join ' ') + ' printf %s "$HOME"')
     $homeOutput = & ssh @sshArgs 'printf %s "$HOME"' 2>&1
+    foreach ($line in $homeOutput) { Write-Log ("ssh: " + $line.ToString().Trim()) }
     if ($LASTEXITCODE -ne 0) {
         throw ("ssh to " + $peer + " failed: " + ($homeOutput | Out-String))
     }
@@ -162,18 +196,24 @@ function Invoke-RemoteBackup {
     $remoteDir = $remoteHome.TrimEnd('/') + '/' + $RemotePath.Trim('/') + '/' + $Stamp
     $scpArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10', '-r', $Source, ($peer + ':' + $remoteDir + '/'))
 
+    Write-Log ("remote home: " + $remoteHome)
     Write-Log ("remote destination: " + $peer + ':' + $remoteDir)
-    & ssh @sshArgs ("mkdir -p '" + $remoteDir + "'") 2>&1 | ForEach-Object { Write-Log $_ }
+    Write-Log ("ssh command: ssh " + ($sshArgs -join ' ') + " mkdir -p '" + $remoteDir + "'")
+    & ssh @sshArgs ("mkdir -p '" + $remoteDir + "'") 2>&1 | ForEach-Object { Write-Log ("ssh: " + $_.ToString().Trim()) }
     if ($LASTEXITCODE -ne 0) {
         throw 'Could not create the remote backup folder.'
     }
 
-    & scp @scpArgs 2>&1 | ForEach-Object { Write-Log $_ }
+    Write-Log ("scp command: scp " + ($scpArgs -join ' '))
+    & scp @scpArgs 2>&1 | ForEach-Object { Write-Log ("scp: " + $_.ToString().Trim()) }
     if ($LASTEXITCODE -ne 0) {
         throw 'scp upload failed.'
     }
 
-    $check = & ssh @sshArgs ("test -f '" + $remoteDir + "/firefox/prefs.js' && find '" + $remoteDir + "/firefox' -type f | wc -l") 2>&1
+    $verifyCmd = "test -f '" + $remoteDir + "/firefox/prefs.js' && find '" + $remoteDir + "/firefox' -type f | wc -l"
+    Write-Log ("verify command: ssh " + ($sshArgs -join ' ') + " " + $verifyCmd)
+    $check = & ssh @sshArgs $verifyCmd 2>&1
+    foreach ($line in $check) { Write-Log ("verify: " + $line.ToString().Trim()) }
     if ($LASTEXITCODE -ne 0) {
         throw 'Remote backup verification failed.'
     }
@@ -283,6 +323,14 @@ $stamp = Get-Date -Format 'yyyy-MM-dd-HHmmss'
 $stagingRoot = $null
 $remoteBackup = $null
 
+$logDir = if ($StagingDir) { $StagingDir } else { Join-Path $env:LOCALAPPDATA 'skoop\backup' }
+$script:LogPath = if ($LogPath) { $LogPath } else { Join-Path $logDir ('cleanup-' + $stamp + '.log') }
+$logParent = Split-Path -Parent $script:LogPath
+if (-not $logParent) { $logParent = '.' }
+New-Item -ItemType Directory -Force -Path $logParent | Out-Null
+[System.IO.File]::WriteAllText($script:LogPath, '', (New-Object System.Text.UTF8Encoding($false)))
+Write-Log ("log file: " + $script:LogPath)
+
 if ($SkipBackup -and -not $DryRun -and -not $Force) {
     throw 'Refusing to remove auth without a verified backup. Re-run with -Force or omit -SkipBackup.'
 }
@@ -292,8 +340,7 @@ if (-not $SkipBackup) {
     Write-Log ("backup target: " + $sshUser + '@' + $TargetHost)
     $profiles = @(Get-FirefoxProfilePaths)
 
-    $stagingBase = if ($StagingDir) { $StagingDir } else { Join-Path $env:LOCALAPPDATA 'skoop\backup' }
-    $stagingRoot = Join-Path $stagingBase $stamp
+    $stagingRoot = Join-Path $logDir $stamp
     if ($DryRun) {
         Write-Log 'DRYRUN would stage profiles locally, upload via scp, verify over ssh, then delete staging'
     } else {
@@ -308,20 +355,26 @@ if (-not $SkipBackup) {
             Write-Log ("staging: " + $profile)
             Copy-Profile -Source $profile -Destination $target
         }
-        Write-Log 'local staging complete'
+        $stagedFiles = @(Get-ChildItem -LiteralPath $firefoxRoot -Recurse -File -ErrorAction SilentlyContinue)
+        $stagedBytes = ($stagedFiles | Measure-Object -Property Length -Sum).Sum
+        Write-Log ("local staging complete: " + $stagedFiles.Count + " files, " + ('{0:N1}' -f ($stagedBytes / 1MB)) + ' MB')
         $remoteBackup = Invoke-RemoteBackup -Source $firefoxRoot -Stamp $stamp -SshUser $sshUser
         Write-Log 'remote backup verified - auth cleanup may proceed'
         Remove-Path $stagingRoot -Recurse
     }
 }
 
-Remove-GitHubAuth
-Remove-SshKeys
+if ($BackupOnly) {
+    Write-Log 'BackupOnly: skipping all auth removal'
+} else {
+    Remove-GitHubAuth
+    Remove-SshKeys
 
-if (-not $KeepFirefoxLogins) {
-    foreach ($profile in $profiles) {
-        foreach ($file in @('logins.json', 'key4.db')) {
-            Remove-Path (Join-Path $profile $file)
+    if (-not $KeepFirefoxLogins) {
+        foreach ($profile in $profiles) {
+            foreach ($file in @('logins.json', 'key4.db')) {
+                Remove-Path (Join-Path $profile $file)
+            }
         }
     }
 }
@@ -333,4 +386,5 @@ if ($DryRun) {
     Write-Log 'DRYRUN complete; nothing was changed'
 } else {
     Write-Log ("done. Remote backup: " + $(if ($remoteBackup) { $remoteBackup } else { '(none)' }))
+    Write-Log ("log saved: " + $script:LogPath)
 }
