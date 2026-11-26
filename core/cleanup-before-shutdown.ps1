@@ -204,10 +204,34 @@ function Invoke-RemoteBackup {
         throw 'Could not create the remote backup folder.'
     }
 
-    Write-Log ("scp command: scp " + ($scpArgs -join ' '))
-    & scp @scpArgs 2>&1 | ForEach-Object { Write-Log ("scp: " + $_.ToString().Trim()) }
-    if ($LASTEXITCODE -ne 0) {
-        throw 'scp upload failed.'
+    $remoteHasTar = $false
+    try {
+        $tarCheck = & ssh @sshArgs 'command -v tar >/dev/null 2>&1; echo $?' 2>$null
+        $remoteHasTar = (($tarCheck | Select-Object -Last 1).ToString().Trim() -eq '0')
+    } catch { }
+
+    if ((Get-Command tar -ErrorAction SilentlyContinue) -and $remoteHasTar) {
+        # One compressed stream avoids per-file overhead (hundreds of small
+        # profile files made scp -r take ~10 minutes over the tailnet).
+        $sourceParent = Split-Path -Parent $Source
+        $sourceLeaf = Split-Path -Leaf $Source
+        $extractCmd = "tar -xzf - -C '" + $remoteDir + "'"
+        $streamCmd = 'tar -czf - -C "' + $sourceParent + '" ' + $sourceLeaf +
+            ' | ssh ' + ($sshArgs -join ' ') + ' "' + $extractCmd + '"'
+        Write-Log ("stream command: " + $streamCmd)
+        $streamOutput = (& cmd /c $streamCmd 2>&1 | Out-String)
+        foreach ($line in ($streamOutput -split '\r?\n' | Where-Object { $_.Trim() } | Select-Object -Last 20)) {
+            Write-Log ("tar/ssh: " + $line.Trim())
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw 'tar-over-ssh upload failed.'
+        }
+    } else {
+        Write-Log ("scp command: scp " + ($scpArgs -join ' '))
+        & scp @scpArgs 2>&1 | ForEach-Object { Write-Log ("scp: " + $_.ToString().Trim()) }
+        if ($LASTEXITCODE -ne 0) {
+            throw 'scp upload failed.'
+        }
     }
 
     # scp copies the whole 'firefox' staging folder, so profiles sit one level deeper.
