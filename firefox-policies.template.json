@@ -19,6 +19,8 @@
     "Homepage": {
       "URL": "https://chatgpt.com/",
       "StartPage": "homepage"
-    }
+    },
+    "OfferToSaveLogins": false,
+    "OfferToSaveLoginsDefault": false
   }
 }

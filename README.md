@@ -6,7 +6,7 @@ PowerShell profile, restored from a single manifest.
 - `scoop.json` — buckets + apps (`scoop export` format, replayed with `scoop import`)
 - `profile.ps1` — shell config (`zoxide` + `atuin` history search), dot-sourced from your `$PROFILE`
 - `install.ps1` — one-shot bootstrap for a fresh machine
-- `firefox-policies.template.json` — Firefox policy for extensions, managed bookmarks, and homepage
+- `firefox-policies.template.json` — Firefox policy for extensions, managed bookmarks, homepage, and password saving
 - `fix-sharex-printscreen.ps1` — hands the PrtSc key back to ShareX
 - `setup-gh-auth.ps1` — asks you to log in with `gh auth login` if needed, then makes `git push` use that login
 - `zed/` + `configure-zed.ps1` — repo-managed Zed settings/keymap/tasks, copied to `%APPDATA%\Zed` on install
@@ -84,6 +84,7 @@ scoop export | Out-File -Encoding utf8 scoop.json
 | Firefox default browser | `firefox --setDefaultBrowser` runs after install (skipped if Firefox is already the http handler); Windows 11 may open Settings for confirmation, and a failure is non-fatal |
 | Bitwarden / mymind extensions | Both use Firefox `normal_installed` policies, so they install automatically but can still be disabled or removed. Bitwarden updates from AMO; mymind is pinned to the 2.0.2 XPI URL, so bump that URL when a newer version ships. Restart Firefox once after setup; check `about:policies` |
 | Firefox bookmarks / homepage | Managed bookmarks are locked by policy under a **skoopub** folder (Hacker News, mymind); the toolbar is shown on startup and the homepage/startup page is ChatGPT. Edit `firefox-policies.template.json` to change them |
+| Firefox saving passwords | `OfferToSaveLogins` and `OfferToSaveLoginsDefault` are both `false`, so Firefox never offers to save logins — Bitwarden handles passwords instead |
 | Tailscale | The installer starts the `Tailscale` service (and sets it to Automatic) when present, otherwise launches the Scoop `tailscaled` shim. Login still needs `tailscale up` in a terminal; the Scoop package does not install the Windows service by itself |
 | `git push` asks for a username | Being logged in to `gh` is not enough: git also needs `gh auth setup-git`. `setup-gh-auth.ps1` does both; re-run it any time, or use `-SkipGhLogin` for unattended runs |
 | UniKey preinstalled | Detected via process, uninstall registry and Scoop dir; the existing copy is kept unless `-ForceUniKey` is passed |
