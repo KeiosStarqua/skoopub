@@ -19,6 +19,8 @@
     - Starts Tailscale after the import (Windows service if present, otherwise
       the Scoop `tailscaled` shim); login is left to you (`tailscale up` or the
       tray icon - the CLI may be missing or unable to reach the daemon on Windows).
+    - Tags this device with `tag:public-client` in the tailnet via
+      apps/tailscale/configure.ps1 (idempotent, non-fatal when not signed in).
     - Offers a one-prompt Herdr remote setup via apps/herdr/setup-ssh.ps1: pick a
       machine from the tailnet list (or type its IP/MagicDNS name when the CLI
       is not usable), then save it in Herdr (`herdr machine add`) over Tailscale
@@ -542,7 +544,8 @@ if (-not $repoRoot) {
         'apps/sharex/fix-printscreen.ps1', 'apps/sharex/hotkeys.template.json',
         'apps/firefox/policies.template.json',
         'apps/github/setup-auth.ps1', 'apps/zed/configure.ps1',
-        'apps/herdr/setup-ssh.ps1', 'apps/git/setup-identity.ps1',
+        'apps/herdr/setup-ssh.ps1', 'apps/tailscale/configure.ps1',
+        'apps/git/setup-identity.ps1',
         'apps/vicinae/enable-autostart.ps1', 'apps/vicinae/configure.ps1',
         'apps/rio/configure.ps1', 'apps/komorebi/configure.ps1',
         'apps/yasb/configure.ps1', 'apps/nushell/setup.ps1',
@@ -571,6 +574,7 @@ $gitIdentity     = Join-Path $repoRoot 'apps\git\setup-identity.ps1'
 $zedConfig       = Join-Path $repoRoot 'apps\zed\configure.ps1'
 $rioConfig       = Join-Path $repoRoot 'apps\rio\configure.ps1'
 $herdrSsh        = Join-Path $repoRoot 'apps\herdr\setup-ssh.ps1'
+$tailscaleConfig = Join-Path $repoRoot 'apps\tailscale\configure.ps1'
 $vicinae         = Join-Path $repoRoot 'apps\vicinae\enable-autostart.ps1'
 $vicinaeConfig   = Join-Path $repoRoot 'apps\vicinae\configure.ps1'
 $komorebiConfig  = Join-Path $repoRoot 'apps\komorebi\configure.ps1'
@@ -581,6 +585,7 @@ Write-Ok "repo root: $repoRoot"
 
 if ($runMode -eq 'herdr') {
     Start-TailscaleDaemon
+    if (Test-Path $tailscaleConfig) { & $tailscaleConfig }
     Connect-HerdrRemote
     Write-Host ''
     Write-Host 'Done. Herdr machine saved - open Herdr and pick it from the sidebar; run the full setup to configure this machine.' -ForegroundColor Green
@@ -680,8 +685,9 @@ Write-Step "Importing $manifestToImport"
 & $scoop import $manifestToImport
 if ($LASTEXITCODE -ne 0) { throw "scoop import failed with exit code $LASTEXITCODE." }
 
-# --- 9. Start Tailscale ------------------------------------------------------
+# --- 9. Start Tailscale and tag this device in the tailnet -------------------
 Start-TailscaleDaemon
+if (Test-Path $tailscaleConfig) { & $tailscaleConfig }
 
 # --- 10. Tailnet machine selection + Herdr remote (interactive) -------------
 Connect-HerdrRemote

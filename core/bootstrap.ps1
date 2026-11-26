@@ -270,8 +270,14 @@ if (-not $ForceUniKey -and (Test-UniKeyInstalled)) {
 }
 scoop import $manifest
 
-# 6. Start Tailscale (daemon/service only; login stays manual).
+# 6. Start Tailscale (daemon/service only; login stays manual), then tag this
+#    device in the tailnet (idempotent and non-fatal when not signed in).
 Start-TailscaleDaemon
+$tailscaleConfig = Join-Path $repo 'apps\tailscale\configure.ps1'
+if (Test-Path $tailscaleConfig) {
+    try { & $tailscaleConfig }
+    catch { Write-Host "Tailnet tagging failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
 
 # 7. Offer a temporary SSH key + Herdr remote setup (interactive).
 $herdrSsh = Join-Path $repo 'apps\herdr\setup-ssh.ps1'

@@ -20,6 +20,7 @@ manager of its own — the files are the product.
 | `apps/github/setup-auth.ps1` | PowerShell utility | `gh auth login` + `gh auth setup-git`. |
 | `apps/git/setup-identity.ps1` | PowerShell utility | Global git author identity. |
 | `apps/herdr/setup-ssh.ps1` | PowerShell utility | Tailnet peer choice + `herdr machine add` over Tailscale SSH. |
+| `apps/tailscale/configure.ps1` | PowerShell utility | Advertises `tag:public-client` on this device (idempotent, non-fatal). |
 | `apps/nushell/setup.ps1` | PowerShell utility | cmd AutoRun doskey macro `n=nu`. |
 | `apps/starship/configure.ps1` + `apps/starship/starship.toml` | Config | Catppuccin Mocha prompt for PowerShell and cmd (via Clink). |
 | `apps/zed/configure.ps1` + `apps/zed/*.json` | Config | Zed settings, keymap and tasks. |
@@ -42,7 +43,7 @@ whkd (hotkey daemon for komorebi), rio (GPU-accelerated terminal).
 Apps — `nerd-fonts`: JetBrainsMono-NF (JetBrains Mono Nerd Font for Rio/Herdr TUI).
 Apps — `zeldrisho`: unikey (Vietnamese IME; third-party bucket).
 Apps — `lemon`: cava (audio visualizer for the YASB widget; third-party bucket).
-Apps — `kbots`: kbots (local workflow orchestrator; personal bucket, builds from a pinned source tag with bun/rustup/mingw already in `manifests/scoop.json`).
+Apps — `kbots`: kbots (local workflow orchestrator; personal bucket, builds from a pinned source commit with bun/rustup/mingw already in `manifests/scoop.json`).
 
 ## Conventions
 
@@ -57,7 +58,8 @@ Apps — `kbots`: kbots (local workflow orchestrator; personal bucket, builds fr
 - Do not add unnecessary directories, empty placeholder scripts or abstractions without a concrete requirement.
 - **Add or remove a package** by editing `manifests/scoop.json`; keep the `{ "Info": "", "Source": ..., "Name": ... }` shape and keep apps grouped by source. Real-world workflow: `scoop install <app>` then `scoop export | Out-File -Encoding utf8 manifests/scoop.json` (verify the diff before committing).
 - **Buckets must exist before their apps**; if you introduce a new bucket, add it to `buckets` and make sure `install.ps1`/`bootstrap.ps1` still import cleanly (buckets are git repos, hence the git step).
-- The `kbots` app builds from a pinned `deploy/YYYY.MM.DD.n` source tag; `bun`, `rustup`, `mingw` and `git` are already in `manifests/scoop.json`. Its install does not start the daemon — run `kbots daemon start` after setup.
+- The `kbots` app builds from a pinned source commit (no deploy tag needed); `bun`, `rustup`, `mingw` and `git` are already in `manifests/scoop.json`. Its install does not start the daemon — run `kbots daemon start` after setup.
+- Tailnet tagging: both bootstraps call `apps/tailscale/configure.ps1` after starting Tailscale. It advertises `tag:public-client` on the current device only when connected and the tag is not already advertised; failures are non-fatal. The tailnet ACL must allow the user to own that tag. `-SkipTag` opts out when the script is run directly.
 - **Scripts target Windows PowerShell 5.1+** with `$ErrorActionPreference = 'Stop'`, and must run without admin unless explicitly elevated. Avoid PowerShell 7-only syntax.
 - **Idempotence matters.** `install.ps1`/`bootstrap.ps1` and `shell/profile.ps1` may run repeatedly; check before appending to `$PROFILE` and guard optional commands with `Get-Command ... -ErrorAction SilentlyContinue`.
 - **Hook both profile editions:** PowerShell 5.1 (`Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`) and 7+ (`Documents\PowerShell\Microsoft.PowerShell_profile.ps1`) use separate files, and `install.ps1` re-launches into pwsh. `Get-ProfileTargets` returns the current `$PROFILE` plus the other edition's path (via `[Environment]::GetFolderPath('MyDocuments')`, so OneDrive redirection is respected), and `Install-ProfileHook` rewrites the dot-source line in each. Stale-hook detection matches the installer's marker comment plus the dot-source line after it (and any dot-source under the repo root), so an old path such as the pre-refactor `<repo>\profile.ps1` is replaced even when the repo folder is renamed. Compare hook text with `\r\n` normalised to `\n`, otherwise 5.1 and 7 rewrite each other's file on every run.
