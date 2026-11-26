@@ -64,6 +64,11 @@
                  {
                      "Info":  "",
                      "Source":  "main",
+                     "Name":  "nu"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
                      "Name":  "btop-lhm"
                  },
                  {

@@ -38,7 +38,7 @@ manager of its own — the files are the product.
 
 Buckets: `main`, `extras`, `nerd-fonts` (Scoop Nerd Fonts), `zeldrisho` (community bucket for Vietnamese IMEs), `lemon` (community bucket supplying cava, which is missing from `extras`), `kbots` (personal bucket in `KeiosStarqua/kbots`).
 
-Apps — `main`: git, pwsh, herdr, herdr-core, 7zip, charm-gum, btop-lhm, mise, uv, ripgrep, fd, bat, fzf, jq,
+Apps — `main`: git, pwsh, herdr, herdr-core, 7zip, charm-gum, nu, btop-lhm, mise, uv, ripgrep, fd, bat, fzf, jq,
 gh, less, starship, delta, zoxide, atuin, rustup, mingw, bun, cursor-cli,
 opencode.
 Apps — `extras`: firefox, vscode, lazygit, sharex, tailscale, zed, grok-bot, pear-desktop, vicinae, chatgpt,
