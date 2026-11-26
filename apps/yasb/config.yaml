@@ -1,7 +1,7 @@
 # YASB config for Komorebi.
 # Vendored from:
 #   https://github.com/SleepyCatHey/Ultimate-Win11-Setup/tree/main/Komorebi/YASB%20config%20for%20Komorebi
-# Deployed to ~/.config/yasb/config.yaml by configure-yasb.ps1.
+# Deployed to ~/.config/yasb/config.yaml by configure.ps1.
 # Secrets live in ~/.config/yasb/.env (see .env.example); never commit them.
 watch_stylesheet: true
 watch_config: true

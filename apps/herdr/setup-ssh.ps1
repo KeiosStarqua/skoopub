@@ -31,10 +31,10 @@
     SSH user to try first on the remote machine (otherwise auto-detected).
 
 .EXAMPLE
-    .\setup-herdr-ssh.ps1
+    .\apps/herdr/setup-ssh.ps1
 
 .EXAMPLE
-    .\setup-herdr-ssh.ps1 -Peer <machine-name>
+    .\apps/herdr/setup-ssh.ps1 -Peer <machine-name>
 #>
 [CmdletBinding()]
 param(

@@ -1,12 +1,12 @@
-# fix-sharex-printscreen.ps1
+# apps/sharex/fix-printscreen.ps1
 # Windows 10/11 reserve the PrtSc key for the Snipping Tool overlay, which
 # stops ShareX from owning it. Two more things can break it on a fresh setup:
 #   - the first-run welcome screen delays hotkey registration until dismissed;
 #   - Explorer caches the Snipping Tool setting until it is restarted.
 # This script handles all three, then restarts ShareX so it re-registers.
 #
-#   powershell -ExecutionPolicy Bypass -File .\fix-sharex-printscreen.ps1
-#   powershell -ExecutionPolicy Bypass -File .\fix-sharex-printscreen.ps1 -RestartExplorer
+#   powershell -ExecutionPolicy Bypass -File .\apps/sharex/fix-printscreen.ps1
+#   powershell -ExecutionPolicy Bypass -File .\apps/sharex/fix-printscreen.ps1 -RestartExplorer
 [CmdletBinding()]
 param(
     # Only change the setting/config, do not touch a running ShareX.
@@ -64,7 +64,7 @@ if ($scoopDir) {
     }
 
     $hotkeys  = Join-Path $personal 'HotkeysConfig.json'
-    $template = Join-Path $PSScriptRoot 'sharex-hotkeys.template.json'
+    $template = Join-Path $PSScriptRoot 'hotkeys.template.json'
     if (-not (Test-Path $hotkeys) -and (Test-Path $template)) {
         Copy-Item -LiteralPath $template -Destination $hotkeys
         Write-Host "Seeded $hotkeys (PrtSc -> full screen, Ctrl+PrtSc -> region)." -ForegroundColor Green

@@ -1,5 +1,5 @@
 # whkdrc - hotkeys for Komorebi (repo-managed).
-# Deployed to ~/.config/whkdrc by configure-komorebi.ps1.
+# Deployed to ~/.config/whkdrc by configure.ps1.
 # Win is the primary modifier, Hyprland-style:
 #   Win           focus / launch
 #   Win + Shift   move / modify

@@ -1,6 +1,6 @@
 # Starship prompt - managed by skoop.
-# Repo copy: starship/starship.toml; deployed to ~/.config/starship.toml by
-# configure-starship.ps1. Edit here, then re-run the script.
+# Repo copy: apps/starship/starship.toml; deployed to ~/.config/starship.toml by
+# configure.ps1. Edit here, then re-run the script.
 # Docs: https://starship.rs/config/
 "$schema" = 'https://starship.rs/config-schema.json'
 

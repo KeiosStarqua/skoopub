@@ -1,4 +1,4 @@
-# configure-starship.ps1
+# apps/starship/configure.ps1
 # Deploy the repo-managed Starship prompt for PowerShell and cmd.
 #
 # PowerShell: profile.ps1 runs `starship init powershell`, and this script puts
@@ -10,9 +10,9 @@
 # loads Clink (and therefore Starship) on start. Existing AutoRun entries such
 # as the Nushell `n` doskey macro are preserved - Clink appends its own command.
 #
-#   powershell -ExecutionPolicy Bypass -File .\configure-starship.ps1
-#   powershell -ExecutionPolicy Bypass -File .\configure-starship.ps1 -NoCmd
-#   powershell -ExecutionPolicy Bypass -File .\configure-starship.ps1 -NoBackup
+#   powershell -ExecutionPolicy Bypass -File .\apps/starship/configure.ps1
+#   powershell -ExecutionPolicy Bypass -File .\apps/starship/configure.ps1 -NoCmd
+#   powershell -ExecutionPolicy Bypass -File .\apps/starship/configure.ps1 -NoBackup
 [CmdletBinding()]
 param(
     [string]$SourceFile = '',
@@ -29,7 +29,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # $PSScriptRoot is not populated during parameter binding in PowerShell 5.1.
-if (-not $SourceFile) { $SourceFile = Join-Path $PSScriptRoot 'starship\starship.toml' }
+if (-not $SourceFile) { $SourceFile = Join-Path $PSScriptRoot 'starship.toml' }
 if (-not $ConfigDir) {
     $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
     $ConfigDir = Join-Path $homeDir '.config'
@@ -101,7 +101,7 @@ if ($NoCmd) {
         # The loader is the snippet from https://starship.rs/#cmd - Clink runs
         # every .lua file in its scripts folder when cmd.exe starts.
         $luaLines = @(
-            '-- skoop: Starship prompt for cmd.exe (managed by configure-starship.ps1).',
+            '-- skoop: Starship prompt for cmd.exe (managed by apps/starship/configure.ps1).',
             '-- Loads the Clink script that Starship prints for cmd.',
             "load(io.popen('starship init cmd'):read('*a'))()"
         )
@@ -130,7 +130,7 @@ if ($NoCmd) {
             $autoRun = (Get-ItemProperty -LiteralPath $autoRunKey -Name AutoRun -ErrorAction SilentlyContinue).AutoRun
             $nuLauncher = Join-Path $env:LOCALAPPDATA 'skoop\nu-autostart.cmd'
             if ((Test-Path -LiteralPath $nuLauncher) -and "$autoRun" -notmatch 'nu-autostart') {
-                Write-Host 'The Nushell doskey entry is missing from cmd AutoRun - re-run .\setup-nushell.ps1' -ForegroundColor Yellow
+                Write-Host 'The Nushell doskey entry is missing from cmd AutoRun - re-run .\apps\nushell\setup.ps1' -ForegroundColor Yellow
             }
         }
     }

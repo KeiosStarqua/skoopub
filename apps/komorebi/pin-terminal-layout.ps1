@@ -12,7 +12,7 @@ param(
     [int]$IntervalMs = 1000,
     # Fix the order once and exit (useful for testing and for a hotkey).
     [switch]$Once,
-    # Stop the background watcher started by configure-komorebi.ps1.
+    # Stop the background watcher started by configure.ps1.
     [switch]$Stop
 )
 

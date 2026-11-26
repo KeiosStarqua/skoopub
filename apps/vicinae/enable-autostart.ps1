@@ -24,10 +24,10 @@
     Herdr pane, so `herdr` refuses to start in it.
 
 .EXAMPLE
-    .\enable-vicinae-autostart.ps1
+    .\apps/vicinae/enable-autostart.ps1
 
 .EXAMPLE
-    .\enable-vicinae-autostart.ps1 -Remove
+    .\apps/vicinae/enable-autostart.ps1 -Remove
 #>
 [CmdletBinding()]
 param(

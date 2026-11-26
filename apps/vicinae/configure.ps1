@@ -27,10 +27,10 @@
     Stop and relaunch the Vicinae server so the new shortcut takes effect now.
 
 .EXAMPLE
-    .\configure-vicinae.ps1
+    .\apps/vicinae/configure.ps1
 
 .EXAMPLE
-    .\configure-vicinae.ps1 -Restart
+    .\apps/vicinae/configure.ps1 -Restart
 #>
 [CmdletBinding()]
 param(
@@ -43,7 +43,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # $PSScriptRoot is not populated during parameter binding in PowerShell 5.1.
-if (-not $SourceDir) { $SourceDir = Join-Path $PSScriptRoot 'vicinae' }
+if (-not $SourceDir) { $SourceDir = $PSScriptRoot }
 
 function Write-Step([string]$Message) { Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok([string]$Message)   { Write-Host "    $Message" -ForegroundColor DarkGray }

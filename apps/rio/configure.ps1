@@ -1,10 +1,10 @@
-# configure-rio.ps1
+# apps/rio/configure.ps1
 # Copy the repo-managed Rio config into the current user's Rio config folder.
 # Rio reads %LOCALAPPDATA%\rio\config.toml and hot-reloads it on change, so no
 # restart is needed. The config sets the font size (Rio's zoom) to 16.
 #
-#   powershell -ExecutionPolicy Bypass -File .\configure-rio.ps1
-#   powershell -ExecutionPolicy Bypass -File .\configure-rio.ps1 -NoBackup
+#   powershell -ExecutionPolicy Bypass -File .\apps/rio/configure.ps1
+#   powershell -ExecutionPolicy Bypass -File .\apps/rio/configure.ps1 -NoBackup
 [CmdletBinding()]
 param(
     [string]$SourceFile = '',
@@ -16,7 +16,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # $PSScriptRoot is not populated during parameter binding in PowerShell 5.1.
-if (-not $SourceFile) { $SourceFile = Join-Path $PSScriptRoot 'rio\config.toml' }
+if (-not $SourceFile) { $SourceFile = Join-Path $PSScriptRoot 'config.toml' }
 if (-not $ConfigDir) {
     if ($env:LOCALAPPDATA) { $ConfigDir = Join-Path $env:LOCALAPPDATA 'rio' }
     else { $ConfigDir = Join-Path $env:USERPROFILE 'AppData\Local\rio' }

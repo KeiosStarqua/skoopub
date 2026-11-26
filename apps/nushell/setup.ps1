@@ -1,11 +1,11 @@
-# setup-nushell.ps1
+# setup.ps1
 # Make Nushell easy to launch from cmd.exe, matching the `n` alias in profile.ps1.
 # Creates %LOCALAPPDATA%\skoop\nu-autostart.cmd (a doskey macro) and adds it to
 # HKCU\Software\Microsoft\Command Processor\AutoRun without replacing existing
 # AutoRun entries. `-Remove` undoes both.
 #
-#   powershell -ExecutionPolicy Bypass -File .\setup-nushell.ps1
-#   powershell -ExecutionPolicy Bypass -File .\setup-nushell.ps1 -Remove
+#   powershell -ExecutionPolicy Bypass -File .\setup.ps1
+#   powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Remove
 [CmdletBinding()]
 param(
     # Remove the cmd AutoRun entry and the helper .cmd file.
@@ -48,7 +48,7 @@ if ($Remove) {
 New-Item -ItemType Directory -Force -Path $launcherDir | Out-Null
 $lines = @(
     '@echo off',
-    'rem skoop: `n` starts Nushell in cmd.exe (managed by setup-nushell.ps1).',
+    'rem skoop: `n` starts Nushell in cmd.exe (managed by setup.ps1).',
     'doskey n=nu $*'
 )
 Set-Content -LiteralPath $launcher -Value $lines -Encoding ASCII

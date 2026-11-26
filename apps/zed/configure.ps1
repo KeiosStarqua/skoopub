@@ -1,19 +1,26 @@
-# configure-zed.ps1
+# apps/zed/configure.ps1
 # Copy the repo-managed Zed config into the current user's Zed config folder.
 # Settings/keymap/tasks/themes/snippets live in %APPDATA%\Zed; extensions are
 # installed by Zed itself into %LOCALAPPDATA%\Zed on the next start.
 #
-#   powershell -ExecutionPolicy Bypass -File .\configure-zed.ps1
-#   powershell -ExecutionPolicy Bypass -File .\configure-zed.ps1 -NoBackup
+#   powershell -ExecutionPolicy Bypass -File .\apps\zed\configure.ps1
+#   powershell -ExecutionPolicy Bypass -File .\apps\zed\configure.ps1 -NoBackup
 [CmdletBinding()]
 param(
-    [string]$SourceDir = (Join-Path $PSScriptRoot 'zed'),
+    # Resolved in the body: $PSScriptRoot is empty during param binding in PS 5.1.
+    [string]$SourceDir = '',
     [string]$ConfigDir = '',
     # Overwrite changed files directly instead of keeping a timestamped .bak.
     [switch]$NoBackup
 )
 
 $ErrorActionPreference = 'Stop'
+
+if (-not $SourceDir) {
+    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    if (-not $scriptDir) { $scriptDir = $PSScriptRoot }
+    $SourceDir = $scriptDir
+}
 
 if (-not $ConfigDir) {
     if ($env:APPDATA) { $ConfigDir = Join-Path $env:APPDATA 'Zed' }

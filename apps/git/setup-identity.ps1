@@ -19,10 +19,10 @@
     Write to the repository config instead of the global config.
 
 .EXAMPLE
-    .\setup-git-identity.ps1
+    .\apps/git/setup-identity.ps1
 
 .EXAMPLE
-    .\setup-git-identity.ps1 -Local
+    .\apps/git/setup-identity.ps1 -Local
 #>
 [CmdletBinding()]
 param(

@@ -1,11 +1,11 @@
-# setup-gh-auth.ps1
+# apps/github/setup-auth.ps1
 # Makes `git push` use your GitHub CLI login instead of prompting for a username.
 # Being logged in to `gh` is not enough: git needs gh registered as a credential
 # helper (`gh auth setup-git`). This script does both, and is safe to re-run.
 #
-#   .\setup-gh-auth.ps1
-#   .\setup-gh-auth.ps1 -SkipLogin     # non-interactive: only wire up an existing login
-#   .\setup-gh-auth.ps1 -ForceLogin    # re-authenticate even if already logged in
+#   .\apps/github/setup-auth.ps1
+#   .\apps/github/setup-auth.ps1 -SkipLogin     # non-interactive: only wire up an existing login
+#   .\apps/github/setup-auth.ps1 -ForceLogin    # re-authenticate even if already logged in
 [CmdletBinding()]
 param(
     # Do not launch `gh auth login`; if not logged in, print the command and stop.
@@ -63,7 +63,7 @@ if (-not $ForceLogin -and (Test-GhAuth)) {
     Write-Host 'GitHub CLI is not logged in to github.com yet.'
     $answer = Read-Host 'Run "gh auth login" now? [Y/n]'
     if ($answer -match '^(n|no)$') {
-        Write-Host 'Skipped login. Run "gh auth login" then ".\setup-gh-auth.ps1" when ready.' -ForegroundColor Yellow
+        Write-Host 'Skipped login. Run "gh auth login" then ".\apps/github/setup-auth.ps1" when ready.' -ForegroundColor Yellow
         return
     }
     Write-Step 'Running gh auth login (follow the prompts)'

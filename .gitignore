@@ -1,0 +1,9 @@
+# Local secrets and generated files (never commit these)
+apps/yasb/.env
+apps/yasb/yasb.log
+*.bak.*
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.tmp

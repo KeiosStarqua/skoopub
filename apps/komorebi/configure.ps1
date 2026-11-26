@@ -1,10 +1,10 @@
-# configure-komorebi.ps1
+# apps/komorebi/configure.ps1
 # Deploy the repo-managed whkdrc and komorebi.json to ~/.config, then start
 # (or reconfigure) Komorebi and start/reload whkd so hotkeys are active.
 #
-#   powershell -ExecutionPolicy Bypass -File .\configure-komorebi.ps1
-#   powershell -ExecutionPolicy Bypass -File .\configure-komorebi.ps1 -Restart
-#   powershell -ExecutionPolicy Bypass -File .\configure-komorebi.ps1 -NoStart
+#   powershell -ExecutionPolicy Bypass -File .\apps/komorebi/configure.ps1
+#   powershell -ExecutionPolicy Bypass -File .\apps/komorebi/configure.ps1 -Restart
+#   powershell -ExecutionPolicy Bypass -File .\apps/komorebi/configure.ps1 -NoStart
 [CmdletBinding()]
 param(
     # Resolved in the body: $PSScriptRoot is empty during param binding in PS 5.1.
@@ -27,7 +27,7 @@ $ErrorActionPreference = 'Stop'
 if (-not $SourceDir) {
     $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
     if (-not $scriptDir) { $scriptDir = $PSScriptRoot }
-    $SourceDir = Join-Path $scriptDir 'komorebi'
+    $SourceDir = $scriptDir
 }
 
 if (-not $ConfigDir) {
