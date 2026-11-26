@@ -6,9 +6,10 @@
 .DESCRIPTION
     Intended for public/shared PCs: run it before turning the machine off to leave
     no signed-in accounts behind. It copies every Firefox profile found in
-    profiles.ini plus Vicinae's config/data/state folders into local staging folders,
-    uploads them to the tailnet machine acer-ubuntu with scp, verifies the remote
-    copies over ssh, and only then removes local credentials:
+    profiles.ini, Vicinae's config/data/state folders and Atuin's config + data
+    (history/records/meta databases and the encryption key) into local staging
+    folders, uploads them to the tailnet machine acer-ubuntu with scp, verifies the
+    remote copies over ssh, and only then removes local credentials:
 
       - gh auth logout for github.com (plus the hosts.yml file as a fallback)
       - git's GitHub credential helper/username and ~/.git-credentials
@@ -19,12 +20,15 @@
       - Firefox logins.json / key4.db from the backed-up profiles
 
     The SSH user is asked for at runtime (pass -User to skip the prompt). Firefox
-    lands in ~/<RemotePath>/<timestamp>/firefox and Vicinae in
-    ~/<VicinaeRemotePath>/<timestamp>/vicinae on acer-ubuntu, so restore-backup.ps1
-    can pick the latest of each app independently. Nothing is deleted until each
-    remote copy has been verified; if verification fails, the staging copy is kept
-    and the script stops. -DryRun previews without changing anything. The script
-    never shuts the PC down.
+    lands in ~/<RemotePath>/<timestamp>/firefox, Vicinae in
+    ~/<VicinaeRemotePath>/<timestamp>/vicinae and Atuin in
+    ~/<AtuinRemotePath>/<timestamp>/atuin on acer-ubuntu, so restore-backup.ps1 can
+    pick the latest of each app independently. Nothing is deleted until each remote
+    copy has been verified; if verification fails, the staging copy is kept and the
+    script stops. Close active Atuin shells before running where possible: SQLite
+    WAL/SHM sidecars are copied alongside the databases, but a write during the copy
+    can still leave an inconsistent snapshot. -DryRun previews without changing
+    anything. The script never shuts the PC down.
 
 .PARAMETER User
     SSH user on acer-ubuntu. When omitted, the script prompts for it.
@@ -44,6 +48,17 @@
 
 .PARAMETER NoVicinae
     Skip the Vicinae snapshot and back up Firefox only.
+
+.PARAMETER AtuinRemotePath
+    Atuin destination folder relative to the remote home (default 'skoop-backups/atuin').
+
+.PARAMETER AtuinHome
+    Local Atuin data folder to back up (default: %USERPROFILE%\.atuin). config.toml,
+    server.toml (when present) and the whole data folder are copied, including the
+    encryption key; protect the remote backups accordingly.
+
+.PARAMETER NoAtuin
+    Skip the Atuin snapshot.
 
 .PARAMETER StagingDir
     Local folder used to assemble the backup before upload. Defaults to
@@ -82,9 +97,12 @@ param(
     [string] $RemotePath = 'skoop-backups/firefox',
     [string] $VicinaeRemotePath = 'skoop-backups/vicinae',
     [string] $VicinaeDataDir = (Join-Path $env:LOCALAPPDATA 'vicinae'),
+    [string] $AtuinRemotePath = 'skoop-backups/atuin',
+    [string] $AtuinHome = (Join-Path $env:USERPROFILE '.atuin'),
     [string] $StagingDir,
     [string] $LogPath,
     [switch] $NoVicinae,
+    [switch] $NoAtuin,
     [switch] $SkipBackup,
     [switch] $KeepFirefoxLogins,
     [switch] $BackupOnly,
@@ -216,6 +234,49 @@ function Copy-VicinaeData {
     $files = @(Get-ChildItem -LiteralPath $Destination -Recurse -File -ErrorAction SilentlyContinue)
     if ($files.Count -lt 1) {
         Write-Log 'Vicinae data had no files to back up; no snapshot will be uploaded'
+        return $false
+    }
+    return $true
+}
+
+function Copy-AtuinData {
+    param([string] $Source, [string] $Destination)
+
+    if (-not (Test-Path -LiteralPath $Source)) {
+        Write-Log ("Atuin data folder not found, skipping: " + $Source)
+        return $false
+    }
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+
+    foreach ($name in @('config.toml', 'server.toml')) {
+        $file = Join-Path $Source $name
+        if (Test-Path -LiteralPath $file) {
+            Copy-Item -LiteralPath $file -Destination (Join-Path $Destination $name) -Force
+            Write-Log ("staging atuin/" + $name)
+        }
+    }
+
+    $data = Join-Path $Source 'data'
+    if (Test-Path -LiteralPath $data) {
+        $target = Join-Path $Destination 'data'
+        Write-Log 'staging atuin/data (history/records/meta databases + key)'
+        if (Get-Command robocopy -ErrorAction SilentlyContinue) {
+            # Include the SQLite -wal/-shm sidecars: together with the .db files they
+            # form a consistent snapshot when no shell is writing during the copy.
+            $copyOutput = (& robocopy $data $target /E /COPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NP 2>&1 | Out-String)
+            $code = $LASTEXITCODE
+            foreach ($line in (@($copyOutput -split '\r?\n' | Where-Object { $_.Trim() }) | Select-Object -Last 10)) {
+                Write-Log ("robocopy: " + $line.Trim())
+            }
+            if ($code -ge 16) { throw "robocopy failed with code $code for $data" }
+            if ($code -ge 8) { Write-Log ("warning: robocopy skipped some files in " + $data) }
+        } else {
+            Copy-Item -LiteralPath $data -Destination $target -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath (Join-Path $Destination 'data\history.db'))) {
+        Write-Log 'Atuin history.db not found in staging; no snapshot will be uploaded'
         return $false
     }
     return $true
@@ -491,7 +552,7 @@ if (-not $SkipBackup) {
 
     $stagingRoot = Join-Path $logDir $stamp
     if ($DryRun) {
-        Write-Log 'DRYRUN would stage Firefox + Vicinae locally, upload each, verify over ssh, then delete staging'
+        Write-Log 'DRYRUN would stage Firefox + Vicinae + Atuin locally, upload each, verify over ssh, then delete staging'
     } else {
         $firefoxRoot = Join-Path $stagingRoot 'firefox'
         New-Item -ItemType Directory -Force -Path $firefoxRoot | Out-Null
@@ -518,6 +579,14 @@ if (-not $SkipBackup) {
             if (Copy-VicinaeData -Source $VicinaeDataDir -Destination $vicinaeRoot) {
                 $remoteBackups += Invoke-RemoteBackup -Source $vicinaeRoot -Stamp $stamp -SshUser $sshUser `
                     -RemotePath $VicinaeRemotePath -RequiredPaths @('config') -MinFiles 1
+            }
+        }
+
+        if (-not $NoAtuin) {
+            $atuinRoot = Join-Path $stagingRoot 'atuin'
+            if (Copy-AtuinData -Source $AtuinHome -Destination $atuinRoot) {
+                $remoteBackups += Invoke-RemoteBackup -Source $atuinRoot -Stamp $stamp -SshUser $sshUser `
+                    -RemotePath $AtuinRemotePath -RequiredPaths @('data/history.db') -MinFiles 2
             }
         }
         Write-Log 'remote backups verified - auth cleanup may proceed'

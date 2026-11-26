@@ -1,14 +1,14 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Restore the latest Firefox and/or Vicinae snapshot from acer-ubuntu onto a fresh machine.
+    Restore the latest Firefox, Vicinae and/or Atuin snapshot from acer-ubuntu onto a fresh machine.
 
 .DESCRIPTION
     Companion to core/cleanup-before-shutdown.ps1. The backup keeps one folder per
-    app on the tailnet host (~/skoop-backups/firefox/<timestamp>/firefox and
-    ~/skoop-backups/vicinae/<timestamp>/vicinae); this script picks the newest
-    timestamp for each app independently, downloads it with scp and merges it into
-    place:
+    app on the tailnet host (~/skoop-backups/firefox/<timestamp>/firefox,
+    ~/skoop-backups/vicinae/<timestamp>/vicinae and
+    ~/skoop-backups/atuin/<timestamp>/atuin); this script picks the newest timestamp
+    for each app independently, downloads it with scp and merges it into place:
 
       - Firefox: profiles.ini, installs.ini and every profile folder in the
         snapshot go back under %APPDATA%\Mozilla\Firefox. Existing folders are
@@ -17,9 +17,15 @@
       - Vicinae: the config, data and state folders in the snapshot are merged
         into %LOCALAPPDATA%\vicinae (the disposable cache is never restored). A
         running vicinae-server is stopped for the copy and restarted afterwards.
+      - Atuin: config.toml / server.toml and the data folder (history.db,
+        records.db, meta.db, key and SQLite sidecars) are merged into
+        %USERPROFILE%\.atuin. Stale .db-wal / .db-shm files already on this machine
+        are removed first so a restored database is not mixed with local journal
+        data. Close other shells with active Atuin sessions before using the
+        restored history; Atuin is per-shell so there is no service to stop.
 
     Nothing is uploaded or changed on the remote host. -List prints the newest
-    snapshot for each app, -Stamp pins both apps to one timestamp, -Only narrows
+    snapshot for each app, -Stamp pins all apps to one timestamp, -Only narrows
     the restore, and -DryRun prints the plan without changing anything. -NoBackup
     overwrites local config without keeping a .bak copy; -NoRestart leaves a
     stopped Vicinae server stopped. After a fresh machine's first install you can
@@ -38,12 +44,15 @@
 .PARAMETER VicinaeRemotePath
     Vicinae snapshot parent on the remote host (default 'skoop-backups/vicinae').
 
+.PARAMETER AtuinRemotePath
+    Atuin snapshot parent on the remote host (default 'skoop-backups/atuin').
+
 .PARAMETER Stamp
-    Use this timestamp for both apps instead of each app's latest. Fails if a
+    Use this timestamp for all apps instead of each app's latest. Fails if a
     requested app has no snapshot with that timestamp.
 
 .PARAMETER Only
-    Restrict the restore to firefox, vicinae, or both (default: both).
+    Restrict the restore to firefox, vicinae and/or atuin (default: all three).
 
 .PARAMETER List
     Print the newest snapshot timestamp per app and exit.
@@ -52,7 +61,8 @@
     Show what would be downloaded and restored; do not change any local files.
 
 .PARAMETER NoBackup
-    Overwrite profiles.ini / installs.ini and Vicinae folders without a .bak copy.
+    Overwrite profiles.ini / installs.ini, Vicinae folders and Atuin config/data
+    without a .bak copy.
 
 .PARAMETER NoRestart
     Do not relaunch vicinae-server after restoring (it is stopped first if running).
@@ -71,6 +81,9 @@
 
 .EXAMPLE
     .\core\restore-backup.ps1 -User keios -Only vicinae -DryRun
+
+.EXAMPLE
+    .\core\restore-backup.ps1 -User keios -Only atuin
 #>
 [CmdletBinding()]
 param(
@@ -78,9 +91,10 @@ param(
     [string] $TargetHost = 'acer-ubuntu',
     [string] $FirefoxRemotePath = 'skoop-backups/firefox',
     [string] $VicinaeRemotePath = 'skoop-backups/vicinae',
+    [string] $AtuinRemotePath = 'skoop-backups/atuin',
     [string] $Stamp,
-    [ValidateSet('firefox', 'vicinae')]
-    [string[]] $Only = @('firefox', 'vicinae'),
+    [ValidateSet('firefox', 'vicinae', 'atuin')]
+    [string[]] $Only = @('firefox', 'vicinae', 'atuin'),
     [switch] $List,
     [switch] $DryRun,
     [switch] $NoBackup,
@@ -256,6 +270,53 @@ function Restore-Vicinae {
     }
 }
 
+function Restore-Atuin {
+    param([string] $StageRoot, [string] $TheStamp)
+
+    $atuinHome = Join-Path $env:USERPROFILE '.atuin'
+    $srcRoot = Join-Path $StageRoot 'atuin'
+    if (-not (Test-Path -LiteralPath $srcRoot)) {
+        throw 'Downloaded snapshot has no atuin folder; cannot restore Atuin.'
+    }
+    if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $atuinHome | Out-Null }
+
+    foreach ($name in @('config.toml', 'server.toml')) {
+        $src = Join-Path $srcRoot $name
+        if (-not (Test-Path -LiteralPath $src)) { continue }
+        $dest = Join-Path $atuinHome $name
+        if (-not $DryRun -and (Test-Path -LiteralPath $dest) -and -not $NoBackup) {
+            $bak = '{0}.bak.{1}' -f $dest, $TheStamp
+            Copy-Item -LiteralPath $dest -Destination $bak -Force
+            Write-Log ("backed up " + $dest + " -> " + $bak)
+        }
+        Write-Log ("restore atuin/" + $name + " -> " + $dest)
+        if (-not $DryRun) { Copy-Item -LiteralPath $src -Destination $dest -Force }
+    }
+
+    $srcData = Join-Path $srcRoot 'data'
+    if (-not (Test-Path -LiteralPath $srcData)) { return }
+    $destData = Join-Path $atuinHome 'data'
+    if (-not $DryRun) {
+        New-Item -ItemType Directory -Force -Path $destData | Out-Null
+        if ((Test-Path -LiteralPath $destData) -and -not $NoBackup) {
+            $bak = '{0}.bak.{1}' -f $destData, $TheStamp
+            Copy-Item -LiteralPath $destData -Destination $bak -Recurse -Force
+            Write-Log ("backed up " + $destData + " -> " + $bak)
+        }
+        # Drop local journal sidecars first: replaying a stale WAL against the
+        # restored databases would corrupt the history.
+        $sidecars = @(Get-ChildItem -LiteralPath $destData -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like '*.db-wal' -or $_.Name -like '*.db-shm' })
+        foreach ($sidecar in $sidecars) {
+            Remove-Item -LiteralPath $sidecar.FullName -Force
+            Write-Log ("removed stale SQLite sidecar: " + $sidecar.FullName)
+        }
+    }
+    Write-Log ("restore atuin/data -> " + $destData)
+    if (-not $DryRun) { Copy-Tree -Source $srcData -Destination $destData }
+    Write-Warn 'Close other shells with active Atuin sessions before using the restored history.'
+}
+
 function Start-VicinaeServer {
     $roots = @($env:SCOOP, (Join-Path $env:USERPROFILE 'scoop'), (Join-Path $env:ProgramData 'scoop'))
     $server = $roots | Where-Object { $_ } | ForEach-Object {
@@ -307,22 +368,27 @@ Write-Log ("remote home: " + $remoteHome)
 if ($Stamp) {
     $ffStamps = @($Stamp)
     $vcStamps = @($Stamp)
+    $atStamps = @($Stamp)
 } else {
     $ffStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $FirefoxRemotePath)
     $vcStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $VicinaeRemotePath)
+    $atStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $AtuinRemotePath)
 }
 $ffStamp = if ($ffStamps.Count) { $ffStamps[0] } else { $null }
 $vcStamp = if ($vcStamps.Count) { $vcStamps[0] } else { $null }
+$atStamp = if ($atStamps.Count) { $atStamps[0] } else { $null }
 
 if ($List) {
     Write-Log ("Firefox  latest: " + $(if ($ffStamp) { $ffStamp } else { '(none)' }) + "  (" + $FirefoxRemotePath + ")")
     Write-Log ("Vicinae  latest: " + $(if ($vcStamp) { $vcStamp } else { '(none)' }) + "  (" + $VicinaeRemotePath + ")")
-    if (-not $ffStamp -and -not $vcStamp) { Write-Warn 'No snapshots found; check -TargetHost / -User / remote paths.' }
+    Write-Log ("Atuin    latest: " + $(if ($atStamp) { $atStamp } else { '(none)' }) + "  (" + $AtuinRemotePath + ")")
+    if (-not $ffStamp -and -not $vcStamp -and -not $atStamp) { Write-Warn 'No snapshots found; check -TargetHost / -User / remote paths.' }
     return
 }
 
 $doFirefox = $Only -contains 'firefox'
 $doVicinae = $Only -contains 'vicinae'
+$doAtuin = $Only -contains 'atuin'
 if ($doFirefox -and -not $ffStamp) {
     Write-Warn 'No Firefox snapshot found; skipping Firefox.'
     $doFirefox = $false
@@ -331,7 +397,11 @@ if ($doVicinae -and -not $vcStamp) {
     Write-Warn 'No Vicinae snapshot found; skipping Vicinae.'
     $doVicinae = $false
 }
-if (-not $doFirefox -and -not $doVicinae) {
+if ($doAtuin -and -not $atStamp) {
+    Write-Warn 'No Atuin snapshot found; skipping Atuin.'
+    $doAtuin = $false
+}
+if (-not $doFirefox -and -not $doVicinae -and -not $doAtuin) {
     throw 'Nothing to restore. Run -List to see the available snapshots.'
 }
 
@@ -346,7 +416,7 @@ if ($doVicinae -and $vicRunning.Count -gt 0 -and -not $DryRun) {
     Start-Sleep -Seconds 2
 }
 
-$restoreStamp = if ($doFirefox) { $ffStamp } else { $vcStamp }
+$restoreStamp = @($ffStamp, $vcStamp, $atStamp) | Where-Object { $_ } | Select-Object -First 1
 $stage = Join-Path $restoreRoot $restoreStamp
 if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $stage | Out-Null }
 
@@ -370,6 +440,16 @@ try {
             throw 'Downloaded Vicinae snapshot is empty.'
         }
         Restore-Vicinae -StageRoot $stage -TheStamp $vcStamp
+    }
+
+    if ($doAtuin) {
+        $remoteFolder = Get-SnapshotRemotePath -BasePath $AtuinRemotePath -FolderName 'atuin' -TheStamp $atStamp
+        Write-Log ("restoring Atuin from " + $peer + ':' + $remoteFolder)
+        if (-not $DryRun) { Save-Snapshot -RemoteFolder $remoteFolder -StageRoot $stage -FolderName 'atuin' }
+        if (-not $DryRun -and -not (Test-Path -LiteralPath (Join-Path $stage 'atuin\data\history.db'))) {
+            throw 'Downloaded Atuin snapshot has no data/history.db.'
+        }
+        Restore-Atuin -StageRoot $stage -TheStamp $atStamp
     }
 
     if ($DryRun) {
