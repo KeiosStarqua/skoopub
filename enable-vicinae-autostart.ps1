@@ -17,6 +17,12 @@
 .PARAMETER Remove
     Remove the Startup shortcut. Does not stop an already running server.
 
+.PARAMETER Restart
+    Stop a running server and start it again with a clean environment. Use this
+    when the server was launched from inside a Herdr pane: it inherited the
+    HERDR_* variables, and every terminal opened from Vicinae then looks like a
+    Herdr pane, so `herdr` refuses to start in it.
+
 .EXAMPLE
     .\enable-vicinae-autostart.ps1
 
@@ -26,13 +32,26 @@
 [CmdletBinding()]
 param(
     [switch]$NoLaunch,
-    [switch]$Remove
+    [switch]$Remove,
+    [switch]$Restart
 )
 
 $ErrorActionPreference = 'Stop'
 
 function Write-Step([string]$Message) { Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok([string]$Message)   { Write-Host "    $Message" -ForegroundColor DarkGray }
+
+function Clear-HerdrEnv {
+    # Vicinae is often started by install.ps1 from inside a Herdr pane. The
+    # HERDR_* variables would then be inherited by every app Vicinae launches,
+    # making Alacritty/WezTerm shells look like a nested Herdr session.
+    foreach ($name in @(
+        'HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID',
+        'HERDR_WORKSPACE_ID', 'HERDR_SOCKET_PATH', 'HERDR_BIN_PATH'
+    )) {
+        Remove-Item "Env:$name" -ErrorAction SilentlyContinue
+    }
+}
 
 function Get-VicinaeServer {
     # Prefer the stable `current` folder; a shortcut into a versioned folder
@@ -99,11 +118,27 @@ if ($NoLaunch) {
     return
 }
 
+if ($Restart) {
+    $running = Get-Process -Name 'vicinae-server' -ErrorAction SilentlyContinue
+    if ($running) {
+        Write-Step 'Restarting the Vicinae server with a clean environment'
+        $running | Stop-Process -Force
+        # Give the server a moment to release its socket/named pipe.
+        Start-Sleep -Seconds 2
+    }
+}
+
 if (Get-Process -Name 'vicinae-server' -ErrorAction SilentlyContinue) {
     Write-Ok 'Vicinae server is already running'
+    if ($env:HERDR_ENV -eq '1') {
+        Write-Host '    It was started with HERDR_* set; run this script with -Restart so' -ForegroundColor Yellow
+        Write-Host '    terminals opened from Vicinae do not think they are inside Herdr.' -ForegroundColor Yellow
+    }
 } else {
     Write-Step 'Starting the Vicinae server'
     try {
+        # Never pass Herdr pane markers on to a long-lived launcher process.
+        Clear-HerdrEnv
         Start-Process -FilePath $exe -WindowStyle Hidden
         Start-Sleep -Seconds 2
         if (Get-Process -Name 'vicinae-server' -ErrorAction SilentlyContinue) {
