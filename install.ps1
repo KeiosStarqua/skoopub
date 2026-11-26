@@ -415,28 +415,45 @@ function Install-FirefoxPolicies {
     }
 }
 
+function Get-ProfileTargets {
+    # Windows PowerShell 5.1 and PowerShell 7+ keep separate profile files, and
+    # the bootstraps may run under either edition (install.ps1 re-launches into
+    # pwsh when it is available). Hook both so zoxide, atuin, Starship and the
+    # `n` alias work no matter which one is opened.
+    $targets = @($PROFILE)
+    $documents = [Environment]::GetFolderPath('MyDocuments')
+    if ($documents) {
+        $other = if ($PSVersionTable.PSEdition -eq 'Desktop') { 'PowerShell' } else { 'WindowsPowerShell' }
+        $targets += Join-Path (Join-Path $documents $other) 'Microsoft.PowerShell_profile.ps1'
+    }
+    return @($targets | Where-Object { $_ } | Select-Object -Unique)
+}
+
 function Install-ProfileHook {
-    # Wire the repo-managed profile into $PROFILE. Run early so zoxide/atuin are
-    # configured even if a later (optional) step fails and aborts the bootstrap.
-    Write-Step 'Wiring profile.ps1 into your PowerShell profile'
-    $hook = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$profileScript`""
+    # Wire the repo-managed profile into $PROFILE early so zoxide/atuin are
+    # configured even if a later (optional) step fails.
+    Write-Step 'Wiring profile.ps1 into your PowerShell profiles'
+    $hook = "# Load the repo-managed shell config. Edit that file, not this one.`r`n. `"$profileScript`""
+    $normalize = { param([string]$Text) ($Text -replace "`r`n", "`n").TrimEnd() }
 
-    New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null
-    $lines = if (Test-Path $PROFILE) { @(Get-Content -Path $PROFILE) } else { @() }
+    foreach ($target in Get-ProfileTargets) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
+        $lines = if (Test-Path $target) { @(Get-Content -Path $target) } else { @() }
 
-    # Replace any earlier hook instead of trusting it: a stale one can point at a
-    # profile.ps1 that no longer exists (e.g. ~\skoop\profile.ps1) and then silently
-    # load nothing, which looks like the packages are missing.
-    $stale   = 'skoop[\\/]profile\.ps1|\$skoopProfile|^# Load the repo-managed shell config|' + [regex]::Escape($profileScript)
-    $body    = (($lines | Where-Object { $_ -notmatch $stale }) -join "`r`n").TrimEnd()
-    $desired = if ($body) { "$body`r`n$hook" } else { $hook }
+        # Replace any earlier hook instead of trusting it: a stale one can point at
+        # a profile.ps1 that no longer exists (e.g. ~\skoop\profile.ps1) and then
+        # silently load nothing, which looks like the packages are missing.
+        $stale   = 'skoop[\\/]profile\.ps1|\$skoopProfile|^# Load the repo-managed shell config|' + [regex]::Escape($profileScript)
+        $body    = (($lines | Where-Object { $_ -notmatch $stale }) -join "`r`n").TrimEnd()
+        $desired = if ($body) { "$body`r`n$hook" } else { $hook }
 
-    $existing = if (Test-Path $PROFILE) { Get-Content -Raw -Path $PROFILE } else { '' }
-    if ($existing.TrimEnd() -eq $desired) {
-        Write-Ok "already present in $PROFILE"
-    } else {
-        Set-Content -Path $PROFILE -Value $desired -Encoding UTF8
-        Write-Ok "wired into $PROFILE"
+        $existing = if (Test-Path $target) { Get-Content -Raw -Path $target } else { '' }
+        if ((& $normalize $existing) -eq (& $normalize $desired)) {
+            Write-Ok "already present in $target"
+        } else {
+            Set-Content -Path $target -Value $desired -Encoding UTF8
+            Write-Ok "wired into $target"
+        }
     }
 }
 

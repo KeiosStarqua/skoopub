@@ -84,22 +84,37 @@ function Install-FirefoxPolicies {
     }
 }
 
+function Get-ProfileTargets {
+    # PowerShell 5.1 and 7+ use separate profile files; hook both so the shell
+    # config works in either edition, not just the one running this script.
+    $targets = @($PROFILE)
+    $documents = [Environment]::GetFolderPath('MyDocuments')
+    if ($documents) {
+        $other = if ($PSVersionTable.PSEdition -eq 'Desktop') { 'PowerShell' } else { 'WindowsPowerShell' }
+        $targets += Join-Path (Join-Path $documents $other) 'Microsoft.PowerShell_profile.ps1'
+    }
+    return @($targets | Where-Object { $_ } | Select-Object -Unique)
+}
+
 function Install-ProfileHook {
-    # Wire the repo-managed profile into $PROFILE early so zoxide/atuin are
+    # Wire the repo-managed profile into both profiles early so zoxide/atuin are
     # configured even if a later (optional) step fails.
     $loader = Join-Path $repo 'profile.ps1'
-    $hook = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$loader`""
+    $hook = "# Load the repo-managed shell config. Edit that file, not this one.`r`n. `"$loader`""
+    $normalize = { param([string]$Text) ($Text -replace "`r`n", "`n").TrimEnd() }
 
-    New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null
-    $lines = if (Test-Path $PROFILE) { @(Get-Content -Path $PROFILE) } else { @() }
-    $stale   = 'skoop[\\/]profile\.ps1|\$skoopProfile|^# Load the repo-managed shell config|' + [regex]::Escape($loader)
-    $body    = (($lines | Where-Object { $_ -notmatch $stale }) -join "`r`n").TrimEnd()
-    $desired = if ($body) { "$body`r`n$hook" } else { $hook }
+    foreach ($target in Get-ProfileTargets) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
+        $lines = if (Test-Path $target) { @(Get-Content -Path $target) } else { @() }
+        $stale   = 'skoop[\\/]profile\.ps1|\$skoopProfile|^# Load the repo-managed shell config|' + [regex]::Escape($loader)
+        $body    = (($lines | Where-Object { $_ -notmatch $stale }) -join "`r`n").TrimEnd()
+        $desired = if ($body) { "$body`r`n$hook" } else { $hook }
 
-    $existing = if (Test-Path $PROFILE) { Get-Content -Raw -Path $PROFILE } else { '' }
-    if ($existing.TrimEnd() -ne $desired) {
-        Set-Content -Path $PROFILE -Value $desired -Encoding UTF8
-        Write-Host "Wired profile.ps1 into $PROFILE"
+        $existing = if (Test-Path $target) { Get-Content -Raw -Path $target } else { '' }
+        if ((& $normalize $existing) -ne (& $normalize $desired)) {
+            Set-Content -Path $target -Value $desired -Encoding UTF8
+            Write-Host "Wired profile.ps1 into $target"
+        }
     }
 }
 

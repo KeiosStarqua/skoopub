@@ -75,7 +75,7 @@ cd skoop
 
 ## What the script does
 
-1. Wires `profile.ps1` into your `$PROFILE` (idempotent) **before anything that can fail**, so `z`/`atuin` are configured even if a later step breaks. An older hook pointing at a `profile.ps1` that no longer exists is rewritten, which is what silently breaks `z` after the repo moves.
+1. Wires `profile.ps1` into **both** PowerShell profiles — Windows PowerShell 5.1 (`Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`) and PowerShell 7+ (`Documents\PowerShell\Microsoft.PowerShell_profile.ps1`) — **before anything that can fail**, so `z`/`atuin`/Starship/`n` work in either edition even if a later step breaks. An older hook pointing at a `profile.ps1` that no longer exists is rewritten, which is what silently breaks `z` after the repo moves.
 2. Enables **Task Manager** by setting `DisableTaskMgr=0` for the current user; when run elevated, the machine-wide policy is cleared as well. A locked key is reported but does not abort setup.
 3. Installs **Scoop** if it is missing.
 4. Ensures **git** is available (Scoop buckets are git repos).
@@ -169,7 +169,7 @@ scoop export | Out-File -Encoding utf8 scoop.json
 | gum picker falls back to the numbered list | gum draws its UI on **stderr** and only writes the answer to stdout. Capturing it with `2>&1` left it without a terminal, so it returned nothing; letting PowerShell inherit stderr instead turns the TUI into a `NativeCommandError` under `$ErrorActionPreference='Stop'`. The pickers now start gum through `System.Diagnostics.Process` with **only stdout redirected**, so the TUI stays on the console and the answer is captured — this works in Rio, WezTerm, Windows Terminal and Herdr. If a terminal still cannot draw it, pass `-NoGum` or set `$env:SKOOP_NO_GUM=1` |
 | `herdr` says "nested herdr"/inception | A long-lived launcher (often Vicinae) inherited `HERDR_ENV=1` from a Herdr pane and passes it to new terminals. Run `.\enable-vicinae-autostart.ps1 -Restart`, then close and reopen Rio/WezTerm. `profile.ps1` already clears the variables for new PowerShell sessions. `setup-herdr-ssh.ps1` uses `herdr machine add`, so it does not start a nested client at all |
 | Rust toolchain | GNU is set as default only when no toolchain is active; switch with `rustup default stable-x86_64-pc-windows-msvc` (needs MSVC Build Tools) |
-| `z` / `atuin` not found | The profile hook is missing or points at a missing `profile.ps1`, or the window predates the install. Check `Get-Content $PROFILE`; re-run `install.ps1` to rewrite it, then open a new PowerShell window |
+| `z` / `atuin` not found | The profile hook is missing or points at a missing `profile.ps1`, or the window predates the install. `install.ps1` hooks both editions (Windows PowerShell 5.1 and PowerShell 7+ profiles are separate files); check `Get-Content $PROFILE` **in the shell that is missing the command** (pwsh reads `Documents\PowerShell\...`, 5.1 reads `Documents\WindowsPowerShell\...`); re-run `install.ps1` to rewrite both, then open a new window |
 | kbots daemon | The Scoop package installs the `kbots`, `kb`, `kbots-tui` and `kbots-gui` shims but deliberately does not start the daemon; run `kbots daemon start`, then `kb status`. The daemon binds authenticated TCP on `127.0.0.1:7878` |
 
 Requires Windows 10/11 (or Server 2016+) with PowerShell 5.1+ and internet access.
