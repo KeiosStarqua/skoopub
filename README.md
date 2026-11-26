@@ -20,6 +20,8 @@ PowerShell profile, restored from a single manifest.
 
 ## Install with one command
 
+`.\install.ps1 --help` (or `-Help`) prints the CLI options without changing anything.
+
 `install.ps1` is an interactive CLI: with **gum** (`charm-gum`) installed you get a menu — *Full setup + connect Herdr*, *Configure only (skip Herdr)*, *Connect Herdr only*, or *Quit*. Without gum it falls back to a numbered prompt; pass `-NoMenu` (or `$env:SKOOP_NO_MENU=1`) to skip it entirely.
 
 Run this in PowerShell (no admin required):

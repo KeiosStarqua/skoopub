@@ -98,11 +98,30 @@ param(
     [string]$HerdrPeer = "$env:SKOOP_HERDR_PEER",
     [string]$HerdrUser = "$env:SKOOP_HERDR_USER",
     [switch]$SkipHerdrConnect,
-    [switch]$NoMenu
+    [switch]$NoMenu,
+    [switch]$Help
 )
 
 # Env vars let the piped (`irm ... | iex`) form pass the same options.
 if ($env:SKOOP_SKIP_HERDR -eq '1') { $SkipHerdrConnect = $true }
+
+# `--help` arrives in $args with CmdletBinding; handle it before any side effect.
+if ($Help -or ($args | Where-Object { $_ -in @('--help', '-h', '/?', 'help') })) {
+    Write-Host @'
+skoop install.ps1 - interactive Windows setup
+
+Usage:
+  .\install.ps1                          # menu: Full / Configure only / Herdr only / Quit
+  .\install.ps1 -NoMenu                  # skip the menu, run everything
+  .\install.ps1 -HerdrPeer <machine> -HerdrUser <user>
+  .\install.ps1 -SkipHerdrConnect        # configure only
+  irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
+
+Options: -ForceUniKey -SkipGhLogin -HerdrPeer -HerdrUser -SkipHerdrConnect -NoMenu -Help
+Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_NO_MENU
+'@
+    return
+}
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
@@ -127,12 +146,23 @@ function Invoke-SetupMenu {
 
     $gum = Get-Command gum -ErrorAction SilentlyContinue
     if ($gum) {
+        # cmd /c merges stderr (PS 5.1 otherwise turns gum's output into a
+        # terminating NativeCommandError under $ErrorActionPreference='Stop').
         Write-Host 'Choose an action:' -ForegroundColor Cyan
-        $labels = @($items.Label)
-        $choice = (& gum choose --header 'skoop setup' @labels 2>$null | Out-String).Trim()
-        if ($LASTEXITCODE -ne 0 -or -not $choice) { return 'quit' }
-        foreach ($item in $items) { if ($choice -eq $item.Label) { return $item.Key } }
-        return 'full'
+        $labels  = @($items.Label | ForEach-Object { '"' + $_ + '"' }) -join ' '
+        $cmdLine = '"{0}" choose --header "skoop setup" {1} 2>&1' -f $gum.Source, $labels
+        try {
+            $raw = (& cmd /c $cmdLine | Out-String)
+            $choice = ($raw -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
+            $choice = $choice -replace "`e\[[0-9;?]*[a-zA-Z]", ''
+            if ($LASTEXITCODE -eq 0 -and $choice) {
+                foreach ($item in $items) { if ($choice -eq $item.Label) { return $item.Key } }
+                return 'full'
+            }
+            Write-Ok 'gum menu did not return a choice - using the numbered prompt'
+        } catch {
+            Write-Ok "gum menu failed ($($_.Exception.Message)) - using the numbered prompt"
+        }
     }
 
     Write-Host 'Choose an action (install gum for a nicer menu):' -ForegroundColor Cyan
