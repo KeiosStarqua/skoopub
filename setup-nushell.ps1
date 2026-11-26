@@ -29,7 +29,7 @@ function Get-AutoRun {
 if ($Remove) {
     $existing = Get-AutoRun
     if ($existing) {
-        $kept = @($existing -split '\s+&\s+' | Where-Object { $_ -and $_ -notlike "*$launcher*" })
+        $kept = @($existing -split '\s*&\s*' | Where-Object { $_ -and $_ -notlike "*$launcher*" })
         if ($kept.Count) {
             New-ItemProperty -LiteralPath $keyPath -Name $valueName -PropertyType String -Value ($kept -join ' & ') -Force | Out-Null
             Write-Host "Removed Nushell helper from $valueName; kept: $($kept -join ' & ')"

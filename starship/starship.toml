@@ -1,0 +1,75 @@
+# Starship prompt - managed by skoop.
+# Repo copy: starship/starship.toml; deployed to ~/.config/starship.toml by
+# configure-starship.ps1. Edit here, then re-run the script.
+# Docs: https://starship.rs/config/
+"$schema" = 'https://starship.rs/config-schema.json'
+
+# Blank line between prompts, and a short scan timeout so big repos stay snappy.
+add_newline = true
+scan_timeout = 10
+
+# Catppuccin Mocha, matching the YASB bar. The standard colour names are
+# remapped, so Starship's default module styles pick these up automatically;
+# the extra names (mauve, peach, teal, overlay) are for the overrides below.
+palette = 'catppuccin_mocha'
+
+[palettes.catppuccin_mocha]
+black = '#45475a'
+red = '#f38ba8'
+green = '#a6e3a1'
+yellow = '#f9e2af'
+blue = '#89b4fa'
+purple = '#cba6f7'
+cyan = '#94e2d5'
+white = '#bac2de'
+mauve = '#cba6f7'
+peach = '#fab387'
+teal = '#94e2d5'
+overlay = '#7f849c'
+
+# Prompt character: green after success, red after an error.
+[character]
+success_symbol = '[❯](bold green)'
+error_symbol = '[❯](bold red)'
+
+# Keep the path readable in deep repos (Rust/Zed/komorebi clones).
+[directory]
+truncation_length = 4
+style = 'bold blue'
+
+[git_branch]
+style = 'bold mauve'
+
+[git_status]
+style = 'bold red'
+
+# `git diff` on large repos is not worth the prompt latency.
+[git_metrics]
+disabled = true
+
+[cmd_duration]
+min_time = 2_000
+format = 'took [$duration](bold yellow) '
+
+[status]
+disabled = false
+style = 'bold red'
+
+[time]
+disabled = false
+format = 'at [$time](bold overlay) '
+time_format = '%H:%M'
+
+# Only show the user when it matters (root, or a different account over SSH).
+[username]
+show_always = false
+style_user = 'bold yellow'
+style_root = 'bold red'
+
+[hostname]
+ssh_only = true
+style = 'bold green'
+
+# Scoop already tells us about packages; the module only adds noise.
+[package]
+disabled = true

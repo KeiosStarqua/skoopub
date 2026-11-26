@@ -54,3 +54,13 @@ if (Get-Command nu -ErrorAction SilentlyContinue) {
         Set-Alias -Name n -Value nu -Scope Global
     }
 }
+
+# Starship prompt for PowerShell (cmd.exe uses the same config through Clink).
+# Skip when the prompt is already Starship, so sourcing this file twice in one
+# session does not stack initialisations.
+$starshipPrompt = @(Get-Command prompt -CommandType Function -ErrorAction SilentlyContinue) |
+    Select-Object -First 1
+if ((Get-Command starship -ErrorAction SilentlyContinue) -and
+    (-not $starshipPrompt -or $starshipPrompt.Source -ne 'starship')) {
+    Invoke-Expression (& { (starship init powershell | Out-String) })
+}

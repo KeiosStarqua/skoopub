@@ -441,6 +441,7 @@ if (-not $repoRoot) {
         'enable-vicinae-autostart.ps1', 'configure-vicinae.ps1',
         'configure-rio.ps1', 'configure-komorebi.ps1', 'configure-yasb.ps1',
         'setup-nushell.ps1',
+        'configure-starship.ps1', 'starship/starship.toml',
         'zed/settings.json', 'zed/keymap.json', 'zed/tasks.json',
         'vicinae/keybinds.json', 'rio/config.toml', 'komorebi/whkdrc',
         'komorebi/komorebi.json', 'komorebi/pin-terminal-layout.ps1',
@@ -469,6 +470,7 @@ $vicinaeConfig   = Join-Path $repoRoot 'configure-vicinae.ps1'
 $komorebiConfig  = Join-Path $repoRoot 'configure-komorebi.ps1'
 $yasbConfig      = Join-Path $repoRoot 'configure-yasb.ps1'
 $nuSetup         = Join-Path $repoRoot 'setup-nushell.ps1'
+$starshipConfig  = Join-Path $repoRoot 'configure-starship.ps1'
 Write-Ok "repo root: $repoRoot"
 
 if ($runMode -eq 'herdr') {
@@ -725,6 +727,19 @@ if (Test-Path $nuSetup) {
     Write-Ok 'setup-nushell.ps1 not found - skipping'
 }
 
+# --- 22. Deploy the Starship prompt for PowerShell and cmd --------------------
+if (Test-Path $starshipConfig) {
+    Write-Step 'Deploying the Starship prompt for PowerShell and cmd'
+    try {
+        & $starshipConfig
+    } catch {
+        # Prompt config: never let it abort the bootstrap.
+        Write-Host "    Starship setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Ok 'configure-starship.ps1 not found - skipping'
+}
+
 Write-Host ''
 Write-Host 'Done. Open a new PowerShell window, then try: z ..' -ForegroundColor Green
 Write-Host 'git push will use your gh login (no username prompt).' -ForegroundColor Green
@@ -735,3 +750,4 @@ Write-Host 'Start Zed once to install its extensions (PowerShell, HTML, Dockerfi
 Write-Host 'Komorebi hotkeys are ready (see komorebi/whkdrc).' -ForegroundColor Green
 Write-Host 'YASB status bar is configured; fill ~/.config/yasb/.env for weather/wallpapers.' -ForegroundColor Green
 Write-Host 'Type `n` in PowerShell or cmd to open Nushell.' -ForegroundColor Green
+Write-Host 'Starship is the prompt in new PowerShell and cmd windows.' -ForegroundColor Green

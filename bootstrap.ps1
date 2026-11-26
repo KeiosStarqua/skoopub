@@ -333,6 +333,13 @@ if (Test-Path $nuSetup) {
     catch { Write-Host "Nushell shortcut setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
+# 19. Deploy the Starship prompt (config for PowerShell, Clink loader for cmd).
+$starshipConfig = Join-Path $repo 'configure-starship.ps1'
+if (Test-Path $starshipConfig) {
+    try { & $starshipConfig }
+    catch { Write-Host "Starship setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+
 Write-Host "Done. Open a new PowerShell window, then try: z .." -ForegroundColor Green
 Write-Host "git push will use your gh login (no username prompt)." -ForegroundColor Green
 Write-Host "Commits will be authored as Keios <git@taquangkhoi.com>." -ForegroundColor Green
@@ -341,4 +348,5 @@ Write-Host "Rio font size / zoom is 16." -ForegroundColor Green
 Write-Host "Komorebi hotkeys are ready (see komorebi\whkdrc)." -ForegroundColor Green
 Write-Host "YASB status bar is configured; fill ~\.config\yasb\.env for weather/wallpapers." -ForegroundColor Green
 Write-Host "Type 'n' in PowerShell or cmd to open Nushell." -ForegroundColor Green
+Write-Host "Starship is the prompt in new PowerShell and cmd windows." -ForegroundColor Green
 Write-Host "Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL)." -ForegroundColor Green
