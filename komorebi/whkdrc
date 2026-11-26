@@ -1,0 +1,69 @@
+# whkdrc - hotkeys for Komorebi (repo-managed).
+# Deployed to ~/.config/whkdrc by configure-komorebi.ps1.
+# Use PowerShell so commands work without requiring pwsh on PATH.
+.shell powershell
+
+# --- Reload -------------------------------------------------------------------
+alt + o                       : Stop-Process -Name whkd -Force -ErrorAction SilentlyContinue; Start-Process whkd -WindowStyle hidden
+alt + shift + o               : komorebic reload-configuration
+alt + i                       : komorebic toggle-shortcuts
+
+# --- Windows ------------------------------------------------------------------
+alt + q                       : komorebic close
+alt + m                       : komorebic minimize
+alt + shift + return          : komorebic promote
+
+# Focus windows
+alt + h                       : komorebic focus left
+alt + j                       : komorebic focus down
+alt + k                       : komorebic focus up
+alt + l                       : komorebic focus right
+
+# Move windows
+alt + shift + h               : komorebic move left
+alt + shift + j               : komorebic move down
+alt + shift + k               : komorebic move up
+alt + shift + l               : komorebic move right
+
+# Stack windows (Alt+arrows is reserved by Zed's subword navigation)
+alt + ctrl + h                : komorebic stack left
+alt + ctrl + j                : komorebic stack down
+alt + ctrl + k                : komorebic stack up
+alt + ctrl + l                : komorebic stack right
+alt + ctrl + oem_1            : komorebic unstack
+alt + ctrl + oem_4            : komorebic cycle-stack previous
+alt + ctrl + oem_6            : komorebic cycle-stack next
+
+# Resize
+alt + ctrl + oem_plus         : komorebic resize-axis horizontal increase
+alt + ctrl + oem_minus        : komorebic resize-axis horizontal decrease
+alt + ctrl + shift + oem_plus : komorebic resize-axis vertical increase
+alt + ctrl + shift + oem_minus : komorebic resize-axis vertical decrease
+
+# Window modes and layouts
+alt + t                       : komorebic toggle-float
+alt + shift + f               : komorebic toggle-monocle
+alt + shift + r               : komorebic retile
+alt + p                       : komorebic toggle-pause
+alt + x                       : komorebic flip-layout horizontal
+alt + y                       : komorebic flip-layout vertical
+
+# Workspaces (Ctrl is added to avoid browser Alt+1..8 tab switching)
+alt + ctrl + 1                : komorebic focus-workspace 0
+alt + ctrl + 2                : komorebic focus-workspace 1
+alt + ctrl + 3                : komorebic focus-workspace 2
+alt + ctrl + 4                : komorebic focus-workspace 3
+alt + ctrl + 5                : komorebic focus-workspace 4
+alt + ctrl + 6                : komorebic focus-workspace 5
+alt + ctrl + 7                : komorebic focus-workspace 6
+alt + ctrl + 8                : komorebic focus-workspace 7
+
+# Move the focused window to a workspace
+alt + ctrl + shift + 1        : komorebic move-to-workspace 0
+alt + ctrl + shift + 2        : komorebic move-to-workspace 1
+alt + ctrl + shift + 3        : komorebic move-to-workspace 2
+alt + ctrl + shift + 4        : komorebic move-to-workspace 3
+alt + ctrl + shift + 5        : komorebic move-to-workspace 4
+alt + ctrl + shift + 6        : komorebic move-to-workspace 5
+alt + ctrl + shift + 7        : komorebic move-to-workspace 6
+alt + ctrl + shift + 8        : komorebic move-to-workspace 7

@@ -37,6 +37,8 @@
       now, so the Vicinae global shortcut works after every sign-in.
     - Sets the Vicinae global toggle shortcut to Ctrl+Space via a repo-managed
       config import (existing Vicinae settings are preserved).
+    - Deploys a conflict-free whkdrc to ~/.config/whkdrc via configure-komorebi.ps1
+      and starts/reloads whkd (and Komorebi when needed) so tiling hotkeys work.
 
     Works two ways:
       Local :  .\install.ps1
@@ -257,9 +259,9 @@ if (-not $repoRoot) {
         'setup-gh-auth.ps1', 'configure-zed.ps1', 'setup-herdr-ssh.ps1',
         'setup-git-identity.ps1',
         'enable-vicinae-autostart.ps1', 'configure-vicinae.ps1',
-        'configure-rio.ps1',
+        'configure-rio.ps1', 'configure-komorebi.ps1',
         'zed/settings.json', 'zed/keymap.json', 'zed/tasks.json',
-        'vicinae/keybinds.json', 'rio/config.toml'
+        'vicinae/keybinds.json', 'rio/config.toml', 'komorebi/whkdrc'
     )
     foreach ($file in $repoFiles) {
         $dest = Join-Path $repoRoot $file
@@ -281,6 +283,7 @@ $rioConfig       = Join-Path $repoRoot 'configure-rio.ps1'
 $herdrSsh        = Join-Path $repoRoot 'setup-herdr-ssh.ps1'
 $vicinae         = Join-Path $repoRoot 'enable-vicinae-autostart.ps1'
 $vicinaeConfig   = Join-Path $repoRoot 'configure-vicinae.ps1'
+$komorebiConfig  = Join-Path $repoRoot 'configure-komorebi.ps1'
 Write-Ok "repo root: $repoRoot"
 
 # --- 2. Hook the repo-managed profile into $PROFILE --------------------------
@@ -449,6 +452,7 @@ if (Test-Path $gitIdentity) {
 } else {
     Write-Ok 'setup-git-identity.ps1 not found - skipping'
 }
+
 # --- 15. Apply the repo-managed Zed config ----------------------------------
 if (Test-Path $zedConfig) {
     Write-Step 'Applying Zed settings, keymap and tasks'
@@ -498,6 +502,19 @@ if (Test-Path $vicinaeConfig) {
     Write-Ok 'configure-vicinae.ps1 not found - skipping'
 }
 
+# --- 19. Apply the repo-managed Komorebi hotkeys -------------------------------
+if (Test-Path $komorebiConfig) {
+    Write-Step 'Deploying the Komorebi whkdrc and starting the hotkey daemon'
+    try {
+        & $komorebiConfig
+    } catch {
+        # Cosmetic/convenience step: never let it abort the bootstrap.
+        Write-Host "    Komorebi hotkey setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Ok 'configure-komorebi.ps1 not found - skipping'
+}
+
 Write-Host ''
 Write-Host 'Done. Open a new PowerShell window, then try: z ..' -ForegroundColor Green
 Write-Host 'git push will use your gh login (no username prompt).' -ForegroundColor Green
@@ -505,3 +522,4 @@ Write-Host 'Commits will be authored as Keios <git@taquangkhoi.com>.' -Foregroun
 Write-Host 'Vicinae starts at login; press Ctrl+Space to open the launcher.' -ForegroundColor Green
 Write-Host 'Rio font size / zoom is 16.' -ForegroundColor Green
 Write-Host 'Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL).' -ForegroundColor Green
+Write-Host 'Komorebi hotkeys are ready (see komorebi/whkdrc).' -ForegroundColor Green

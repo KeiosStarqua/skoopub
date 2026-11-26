@@ -8,6 +8,7 @@
 # After Tailscale starts, setup-herdr-ssh.ps1 offers a temporary SSH key + Herdr remote.
 # Also registers Vicinae to start at login via enable-vicinae-autostart.ps1
 # and sets its global shortcut to Ctrl+Space via configure-vicinae.ps1.
+# Deploys ~/.config/whkdrc and starts Komorebi/whkd via configure-komorebi.ps1.
 [CmdletBinding()]
 param(
     [switch]$ForceUniKey,
@@ -257,6 +258,7 @@ if (Test-Path $gitIdentity) {
     try { & $gitIdentity }
     catch { Write-Host "Git identity setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
+
 # 12. Apply the repo-managed Zed config (settings/keymap/tasks).
 $zedConfig = Join-Path $repo 'configure-zed.ps1'
 if (Test-Path $zedConfig) {
@@ -285,9 +287,17 @@ if (Test-Path $vicinaeConfig) {
     catch { Write-Host "Vicinae shortcut setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
+# 16. Deploy ~/.config/whkdrc and start/reload Komorebi's hotkey daemon.
+$komorebiConfig = Join-Path $repo 'configure-komorebi.ps1'
+if (Test-Path $komorebiConfig) {
+    try { & $komorebiConfig }
+    catch { Write-Host "Komorebi hotkey setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+
 Write-Host "Done. Open a new PowerShell window, then try: z .." -ForegroundColor Green
 Write-Host "git push will use your gh login (no username prompt)." -ForegroundColor Green
 Write-Host "Commits will be authored as Keios <git@taquangkhoi.com>." -ForegroundColor Green
 Write-Host "Vicinae starts at login; press Ctrl+Space to open the launcher." -ForegroundColor Green
 Write-Host "Rio font size / zoom is 16." -ForegroundColor Green
+Write-Host "Komorebi hotkeys are ready (see komorebi\whkdrc)." -ForegroundColor Green
 Write-Host "Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL)." -ForegroundColor Green
