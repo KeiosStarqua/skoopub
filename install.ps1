@@ -7,9 +7,10 @@
     - Installs Scoop if it is missing (per-user, or system-wide when run elevated).
     - Makes sure git is available, then installs Firefox before WezTerm and asks
       Firefox to become the default browser (Windows may ask you to confirm).
-    - Installs a Firefox policy: auto-installs the Bitwarden and mymind extensions,
-      shows the bookmarks toolbar, adds a skoopub bookmarks folder, sets ChatGPT
-      as the homepage, and disables Firefox's save-password prompt.
+    - Installs a Firefox policy: auto-installs Bitwarden, mymind and
+      "I still don't care about cookies", shows the bookmarks toolbar, adds a
+      skoopub bookmarks folder (Hacker News, mymind, Scoop, OpenCode), sets ChatGPT as the
+      homepage, and disables Firefox's save-password prompt.
     - Runs `scoop import scoop.json` (buckets + apps).
     - Starts Tailscale after the import (Windows service if present, otherwise
       the Scoop `tailscaled` shim); the interactive `tailscale up` login is left to you.

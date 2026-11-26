@@ -8,13 +8,19 @@
       "{eb9e2174-ecaa-4a8f-8dc5-d7076687ac3f}": {
         "installation_mode": "normal_installed",
         "install_url": "https://mymind.com/wp-content/uploads/2021/11/mymind_an_extension_for_your_mind-2.0.2-fx.xpi"
+      },
+      "idcac-pub@guus.ninja": {
+        "installation_mode": "normal_installed",
+        "install_url": "https://addons.mozilla.org/firefox/downloads/latest/istilldontcareaboutcookies/latest.xpi"
       }
     },
     "DisplayBookmarksToolbar": "always",
     "ManagedBookmarks": [
       { "toplevel_name": "skoopub" },
       { "name": "Hacker News", "url": "https://news.ycombinator.com/" },
-      { "name": "mymind", "url": "https://mymind.com/browser-extensions" }
+      { "name": "mymind", "url": "https://mymind.com/browser-extensions" },
+      { "name": "Scoop", "url": "https://scoop.sh/" },
+      { "name": "OpenCode", "url": "https://opencode.ai/console" }
     ],
     "Homepage": {
       "URL": "https://chatgpt.com/",
