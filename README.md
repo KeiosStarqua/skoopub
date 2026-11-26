@@ -6,7 +6,7 @@ PowerShell profile, restored from a single manifest.
 - `scoop.json` — buckets + apps (`scoop export` format, replayed with `scoop import`)
 - `profile.ps1` — shell config (`zoxide` + `atuin` history search), dot-sourced from your `$PROFILE`
 - `install.ps1` — one-shot bootstrap for a fresh machine
-- `firefox-policies.template.json` — Firefox policy that auto-installs Bitwarden and mymind
+- `firefox-policies.template.json` — Firefox policy for extensions, managed bookmarks, and homepage
 - `fix-sharex-printscreen.ps1` — hands the PrtSc key back to ShareX
 - `setup-gh-auth.ps1` — asks you to log in with `gh auth login` if needed, then makes `git push` use that login
 - `zed/` + `configure-zed.ps1` — repo-managed Zed settings/keymap/tasks, copied to `%APPDATA%\Zed` on install
@@ -39,7 +39,7 @@ cd skoop
 2. Enables **Task Manager** by setting `DisableTaskMgr=0` for the current user; when run elevated, the machine-wide policy is cleared as well. A locked key is reported but does not abort setup.
 3. Installs **Scoop** if it is missing.
 4. Ensures **git** is available (Scoop buckets are git repos).
-5. Installs **Firefox** first, then **WezTerm**, then **Herdr** (adds the `extras` bucket if needed). Firefox is made the default browser and `firefox-policies.template.json` is copied into Firefox's `distribution` folder so the Bitwarden and mymind extensions install automatically on the next start. On Windows 11, confirm the default-browser change in Settings if it opens there.
+5. Installs **Firefox** first, then **WezTerm**, then **Herdr** (adds the `extras` bucket if needed). Firefox is made the default browser and `firefox-policies.template.json` is copied into Firefox's `distribution` folder. On the next start it installs the Bitwarden and mymind extensions, shows the bookmarks toolbar, adds a **skoopub** bookmark folder (Hacker News + mymind), and opens ChatGPT as the homepage. On Windows 11, confirm the default-browser change in Settings if it opens there.
 6. Runs `scoop import scoop.json` — adds the `main` / `extras` / `zeldrisho` buckets and every listed app. If UniKey is already installed (common on public PCs), that one app is skipped so you do not end up with two IMEs; pass `-ForceUniKey` to install the Scoop copy anyway.
 7. Starts **Tailscale**: enables/starts the Windows service if it exists, otherwise launches the Scoop `tailscaled` binary. Run `tailscale up` yourself afterwards to sign in.
 8. Sets the default Rust toolchain to `stable-x86_64-pc-windows-gnu` if none is configured (no Visual Studio Build Tools needed). The check tolerates a fresh `rustup`'s stderr so it cannot abort the bootstrap.
@@ -78,11 +78,12 @@ scoop export | Out-File -Encoding utf8 scoop.json
 |---|---|
 | Normal (non-elevated) shell | Scoop installs per-user under `%USERPROFILE%\scoop` |
 | Elevated shell | Scoop installs system-wide under `C:\ProgramData\scoop` |
-| Piped via `irm \| iex` | `scoop.json`, `profile.ps1`, `fix-sharex-printscreen.ps1`, `setup-gh-auth.ps1`, `configure-zed.ps1` and `zed/*.json` are fetched to `%LOCALAPPDATA%\skoop` |
+| Piped via `irm \| iex` | `scoop.json`, `profile.ps1`, `firefox-policies.template.json`, `fix-sharex-printscreen.ps1`, `setup-gh-auth.ps1`, `configure-zed.ps1` and `zed/*.json` are fetched to `%LOCALAPPDATA%\skoop` |
 | Task Manager disabled by policy | `DisableTaskMgr` is set to `0` for the current user; elevated runs also clear the machine-wide value. A domain policy may reapply it on the next refresh |
 | From a clone | The files next to `install.ps1` are used, so edits apply directly |
 | Firefox default browser | `firefox --setDefaultBrowser` runs after install (skipped if Firefox is already the http handler); Windows 11 may open Settings for confirmation, and a failure is non-fatal |
 | Bitwarden / mymind extensions | Both use Firefox `normal_installed` policies, so they install automatically but can still be disabled or removed. Bitwarden updates from AMO; mymind is pinned to the 2.0.2 XPI URL, so bump that URL when a newer version ships. Restart Firefox once after setup; check `about:policies` |
+| Firefox bookmarks / homepage | Managed bookmarks are locked by policy under a **skoopub** folder (Hacker News, mymind); the toolbar is shown on startup and the homepage/startup page is ChatGPT. Edit `firefox-policies.template.json` to change them |
 | Tailscale | The installer starts the `Tailscale` service (and sets it to Automatic) when present, otherwise launches the Scoop `tailscaled` shim. Login still needs `tailscale up` in a terminal; the Scoop package does not install the Windows service by itself |
 | `git push` asks for a username | Being logged in to `gh` is not enough: git also needs `gh auth setup-git`. `setup-gh-auth.ps1` does both; re-run it any time, or use `-SkipGhLogin` for unattended runs |
 | UniKey preinstalled | Detected via process, uninstall registry and Scoop dir; the existing copy is kept unless `-ForceUniKey` is passed |

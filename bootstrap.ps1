@@ -69,7 +69,7 @@ function Install-FirefoxPolicies {
     $distDir = Join-Path $firefoxDir 'distribution'
     New-Item -ItemType Directory -Force -Path $distDir | Out-Null
     Copy-Item -LiteralPath $Template -Destination (Join-Path $distDir 'policies.json') -Force
-    Write-Host 'Bitwarden policy installed (restart Firefox to apply it).'
+    Write-Host 'Firefox policy installed (restart Firefox to apply it).'
     if (Get-Process -Name firefox -ErrorAction SilentlyContinue) {
         Write-Host 'Firefox is running - close and reopen it to load the policy.'
     }

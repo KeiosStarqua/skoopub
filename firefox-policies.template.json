@@ -9,6 +9,16 @@
         "installation_mode": "normal_installed",
         "install_url": "https://mymind.com/wp-content/uploads/2021/11/mymind_an_extension_for_your_mind-2.0.2-fx.xpi"
       }
+    },
+    "DisplayBookmarksToolbar": "always",
+    "ManagedBookmarks": [
+      { "toplevel_name": "skoopub" },
+      { "name": "Hacker News", "url": "https://news.ycombinator.com/" },
+      { "name": "mymind", "url": "https://mymind.com/browser-extensions" }
+    ],
+    "Homepage": {
+      "URL": "https://chatgpt.com/",
+      "StartPage": "homepage"
     }
   }
 }

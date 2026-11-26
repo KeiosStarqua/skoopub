@@ -7,7 +7,9 @@
     - Installs Scoop if it is missing (per-user, or system-wide when run elevated).
     - Makes sure git is available, then installs Firefox before WezTerm and asks
       Firefox to become the default browser (Windows may ask you to confirm).
-    - Installs a Firefox policy that auto-installs the Bitwarden extension.
+    - Installs a Firefox policy: auto-installs the Bitwarden and mymind extensions,
+      shows the bookmarks toolbar, adds a skoopub bookmarks folder, and sets ChatGPT
+      as the homepage.
     - Runs `scoop import scoop.json` (buckets + apps).
     - Starts Tailscale after the import (Windows service if present, otherwise
       the Scoop `tailscaled` shim); the interactive `tailscale up` login is left to you.
@@ -164,7 +166,7 @@ function Install-FirefoxPolicies {
     $distDir = Join-Path $firefoxDir 'distribution'
     New-Item -ItemType Directory -Force -Path $distDir | Out-Null
     Copy-Item -LiteralPath $Template -Destination (Join-Path $distDir 'policies.json') -Force
-    Write-Ok 'Bitwarden policy installed (restart Firefox to apply it)'
+    Write-Ok 'Firefox policy installed (restart Firefox to apply it)'
     if (Get-Process -Name firefox -ErrorAction SilentlyContinue) {
         Write-Ok 'Firefox is running - close and reopen it to load the policy'
     }
