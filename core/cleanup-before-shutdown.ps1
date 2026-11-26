@@ -1,12 +1,13 @@
 <#
 .SYNOPSIS
-    Back up Firefox profiles to Google Drive with rclone, then remove local auth state.
+    Back up Firefox profiles to acer-ubuntu over Tailscale SSH, then remove local auth state.
 
 .DESCRIPTION
     Intended for public/shared PCs: run it before turning the machine off to leave
     no signed-in accounts behind. It copies every Firefox profile found in
-    profiles.ini into a local staging folder, uploads it with `rclone copy`, and
-    verifies the remote copy before removing local credentials:
+    profiles.ini into a local staging folder, uploads it to the tailnet machine
+    acer-ubuntu with scp, verifies the remote copy over ssh, and only then removes
+    local credentials:
 
       - gh auth logout for github.com (plus the hosts.yml file as a fallback)
       - git's GitHub credential helper/username and ~/.git-credentials
@@ -14,18 +15,20 @@
       - SSH private keys under ~/.ssh and the temporary Herdr key folder
       - Firefox logins.json / key4.db from the backed-up profiles
 
-    Configure the remote once with `rclone config` (e.g. name it gdrive). Nothing is
-    deleted until the upload has been verified; if verification fails, the staging
+    The SSH user is asked for at runtime (pass -User to skip the prompt). Backups
+    land in ~/<RemotePath>/<timestamp>/firefox on acer-ubuntu. Nothing is deleted
+    until the remote copy has been verified; if verification fails, the staging
     copy is kept and the script stops. -DryRun previews without changing anything.
     The script never shuts the PC down.
 
-.PARAMETER Remote
-    rclone remote to upload to, e.g. 'gdrive:' (default). A trailing ':' is added
-    when omitted.
+.PARAMETER User
+    SSH user on acer-ubuntu. When omitted, the script prompts for it.
+
+.PARAMETER TargetHost
+    Tailnet hostname/IP of the backup machine (default 'acer-ubuntu').
 
 .PARAMETER RemotePath
-    Folder on the remote (default 'skoop-cleanup'). Backups land in
-    <Remote><RemotePath>/<timestamp>/firefox/.
+    Destination folder relative to the remote home (default 'skoop-backups/firefox').
 
 .PARAMETER StagingDir
     Local folder used to assemble the backup before upload. Defaults to
@@ -48,12 +51,13 @@
     .\core\cleanup-before-shutdown.ps1 -DryRun
 
 .EXAMPLE
-    .\core\cleanup-before-shutdown.ps1 -Remote gdrive: -RemotePath skoop-cleanup
+    .\core\cleanup-before-shutdown.ps1 -User khoi0941
 #>
 [CmdletBinding()]
 param(
-    [string] $Remote = 'gdrive:',
-    [string] $RemotePath = 'skoop-cleanup',
+    [string] $User,
+    [string] $TargetHost = 'acer-ubuntu',
+    [string] $RemotePath = 'skoop-backups/firefox',
     [string] $StagingDir,
     [switch] $SkipBackup,
     [switch] $KeepFirefoxLogins,
@@ -68,30 +72,17 @@ function Write-Log {
     Write-Host ("[cleanup] " + $Message)
 }
 
-function Get-RcloneDestination {
-    param([string] $Stamp)
-
-    $name = $Remote
-    if ($name -notmatch ':$') { $name += ':' }
-    return ($name + $RemotePath.Trim('/') + '/' + $Stamp + '/firefox')
-}
-
-function Assert-RcloneReady {
-    $cli = Get-Command rclone -ErrorAction SilentlyContinue
-    if (-not $cli) {
-        throw 'rclone is not installed. Install it with: scoop install main/rclone'
+function Resolve-SshUser {
+    if ($User) { return $User.Trim() }
+    if ($DryRun) { return 'USER' }
+    if (-not [Environment]::UserInteractive) {
+        throw 'SSH user is required in a non-interactive shell. Re-run with -User <username>.'
     }
-    if ($DryRun) {
-        Write-Log 'DRYRUN skipping rclone remote check'
-        return $cli.Source
+    $answer = Read-Host ("SSH user for " + $TargetHost)
+    if (-not $answer -or -not $answer.Trim()) {
+        throw 'SSH user cannot be empty.'
     }
-
-    $name = $Remote -replace ':$', ''
-    $configured = @(& rclone listremotes 2>$null | ForEach-Object { $_ -replace ':$', '' })
-    if ($configured -notcontains $name) {
-        throw ("rclone remote '$name' is not configured. Run: rclone config (then re-run this script).")
-    }
-    return $cli.Source
+    return $answer.Trim()
 }
 
 function Get-FirefoxProfilePaths {
@@ -147,29 +138,52 @@ function Copy-Profile {
     }
 }
 
-function Invoke-RcloneUpload {
-    param([string] $Source, [string] $Destination)
+function Invoke-RemoteBackup {
+    param([string] $Source, [string] $Stamp, [string] $SshUser)
 
-    & rclone copy $Source $Destination 2>&1 | ForEach-Object { Write-Log $_ }
-    if ($LASTEXITCODE -ne 0) {
-        throw "rclone copy failed with exit code $LASTEXITCODE"
+    foreach ($tool in @('ssh', 'scp')) {
+        if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+            throw "$tool is not installed (enable Windows OpenSSH Client)."
+        }
     }
 
-    $sizeJson = & rclone size --json $Destination 2>$null | Out-String
+    $sshArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10', ($SshUser + '@' + $TargetHost))
+    $peer = $SshUser + '@' + $TargetHost
+
+    $homeOutput = & ssh @sshArgs 'printf %s "$HOME"' 2>&1
     if ($LASTEXITCODE -ne 0) {
-        throw 'rclone size could not verify the uploaded backup'
+        throw ("ssh to " + $peer + " failed: " + ($homeOutput | Out-String))
     }
-    try {
-        $size = $sizeJson | ConvertFrom-Json
-    } catch {
-        throw 'rclone size returned unreadable JSON; upload verification failed'
+    $remoteHome = ($homeOutput | Select-Object -Last 1).ToString().Trim()
+    if (-not $remoteHome) {
+        throw 'Could not determine the remote home directory.'
     }
-    $files = 0
-    if ($size.PSObject.Properties.Name -contains 'count') { $files = [int] $size.count }
-    if ($files -lt 1) {
-        throw 'Uploaded backup is empty; refusing to remove any auth state'
+
+    $remoteDir = $remoteHome.TrimEnd('/') + '/' + $RemotePath.Trim('/') + '/' + $Stamp
+    $scpArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10', '-r', $Source, ($peer + ':' + $remoteDir + '/'))
+
+    Write-Log ("remote destination: " + $peer + ':' + $remoteDir)
+    & ssh @sshArgs ("mkdir -p '" + $remoteDir + "'") 2>&1 | ForEach-Object { Write-Log $_ }
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Could not create the remote backup folder.'
     }
-    Write-Log ("upload verified: " + $Destination + " (" + $files + " files)")
+
+    & scp @scpArgs 2>&1 | ForEach-Object { Write-Log $_ }
+    if ($LASTEXITCODE -ne 0) {
+        throw 'scp upload failed.'
+    }
+
+    $check = & ssh @sshArgs ("test -f '" + $remoteDir + "/firefox/prefs.js' && find '" + $remoteDir + "/firefox' -type f | wc -l") 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Remote backup verification failed.'
+    }
+    $countLine = ($check | Select-Object -Last 1).ToString().Trim()
+    $count = 0
+    if (-not [int]::TryParse($countLine, [ref] $count) -or $count -lt 1) {
+        throw 'Remote backup is empty or unreadable; refusing to remove any auth state.'
+    }
+    Write-Log ("upload verified: " + $count + " files at " + $peer + ':' + $remoteDir)
+    return ($peer + ':' + $remoteDir + '/firefox')
 }
 
 function Remove-Path {
@@ -267,22 +281,21 @@ function Remove-SshKeys {
 $profiles = @()
 $stamp = Get-Date -Format 'yyyy-MM-dd-HHmmss'
 $stagingRoot = $null
-$remoteTarget = $null
+$remoteBackup = $null
 
 if ($SkipBackup -and -not $DryRun -and -not $Force) {
     throw 'Refusing to remove auth without a verified backup. Re-run with -Force or omit -SkipBackup.'
 }
 
 if (-not $SkipBackup) {
-    Assert-RcloneReady | Out-Null
-    $remoteTarget = Get-RcloneDestination $stamp
-    Write-Log ("rclone destination: " + $remoteTarget)
+    $sshUser = Resolve-SshUser
+    Write-Log ("backup target: " + $sshUser + '@' + $TargetHost)
     $profiles = @(Get-FirefoxProfilePaths)
 
     $stagingBase = if ($StagingDir) { $StagingDir } else { Join-Path $env:LOCALAPPDATA 'skoop\backup' }
     $stagingRoot = Join-Path $stagingBase $stamp
     if ($DryRun) {
-        Write-Log 'DRYRUN would stage profiles locally, upload with rclone, verify, then delete staging'
+        Write-Log 'DRYRUN would stage profiles locally, upload via scp, verify over ssh, then delete staging'
     } else {
         $firefoxRoot = Join-Path $stagingRoot 'firefox'
         New-Item -ItemType Directory -Force -Path $firefoxRoot | Out-Null
@@ -296,8 +309,8 @@ if (-not $SkipBackup) {
             Copy-Profile -Source $profile -Destination $target
         }
         Write-Log 'local staging complete'
-        Invoke-RcloneUpload -Source $firefoxRoot -Destination $remoteTarget
-        Write-Log 'upload verified - auth cleanup may proceed'
+        $remoteBackup = Invoke-RemoteBackup -Source $firefoxRoot -Stamp $stamp -SshUser $sshUser
+        Write-Log 'remote backup verified - auth cleanup may proceed'
         Remove-Path $stagingRoot -Recurse
     }
 }
@@ -319,5 +332,5 @@ if (Get-Process -Name firefox -ErrorAction SilentlyContinue) {
 if ($DryRun) {
     Write-Log 'DRYRUN complete; nothing was changed'
 } else {
-    Write-Log ("done. Remote backup: " + $(if ($remoteTarget) { $remoteTarget } else { '(none)' }))
+    Write-Log ("done. Remote backup: " + $(if ($remoteBackup) { $remoteBackup } else { '(none)' }))
 }

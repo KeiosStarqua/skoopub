@@ -50,11 +50,6 @@
                  {
                      "Info":  "",
                      "Source":  "main",
-                     "Name":  "rclone"
-                 },
-                 {
-                     "Info":  "",
-                     "Source":  "main",
                      "Name":  "pwsh"
                  },
                  {
