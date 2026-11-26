@@ -15,6 +15,10 @@
                     {
                         "Name":  "zeldrisho",
                         "Source":  "https://github.com/zeldrisho/scoop-bucket"
+                    },
+                    {
+                        "Name":  "lemon",
+                        "Source":  "https://github.com/hoilc/scoop-lemon"
                     }
                 ],
     "apps":  [
@@ -217,6 +221,11 @@
                      "Info":  "",
                      "Source":  "extras",
                      "Name":  "rio"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "lemon",
+                     "Name":  "cava"
                  },
                  {
                      "Info":  "",
