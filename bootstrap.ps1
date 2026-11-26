@@ -47,6 +47,31 @@ function Set-FirefoxDefaultBrowser {
     }
 }
 
+function Install-FirefoxPolicies {
+    param([string]$Template)
+
+    # Scoop persists Firefox's distribution folder, so policies.json survives
+    # Firefox updates. Firefox reads it at startup (about:policies shows it).
+    $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE 'scoop' }
+    $firefoxDir = Join-Path $scoopRoot 'apps\firefox\current'
+    if (-not (Test-Path (Join-Path $firefoxDir 'firefox.exe'))) {
+        Write-Host 'Scoop Firefox install not found - skipping extension policy.'
+        return
+    }
+    if (-not (Test-Path $Template)) {
+        Write-Host 'firefox-policies.template.json not found - skipping extension policy.'
+        return
+    }
+
+    $distDir = Join-Path $firefoxDir 'distribution'
+    New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+    Copy-Item -LiteralPath $Template -Destination (Join-Path $distDir 'policies.json') -Force
+    Write-Host 'Bitwarden policy installed (restart Firefox to apply it).'
+    if (Get-Process -Name firefox -ErrorAction SilentlyContinue) {
+        Write-Host 'Firefox is running - close and reopen it to load the policy.'
+    }
+}
+
 function Install-ProfileHook {
     # Wire the repo-managed profile into $PROFILE early so zoxide/atuin are
     # configured even if a later (optional) step fails.
@@ -108,14 +133,19 @@ Install-ProfileHook
 # 3. Clear the Task Manager policy.
 Enable-TaskManager
 
-# 4. Install Firefox before WezTerm, then make Firefox the default browser.
+# 4. Install Firefox, then WezTerm, then Herdr.
 $extrasBucket = scoop bucket list 2>$null | Select-String -Pattern '^\s*extras\b' -Quiet
 if (-not $extrasBucket) { scoop bucket add extras }
 $firefoxInstalled = scoop list 2>$null | Select-String -Pattern '^\s*firefox\b' -Quiet
 if (-not $firefoxInstalled) { scoop install extras/firefox } else { Write-Host 'Firefox already installed.' }
+Install-FirefoxPolicies (Join-Path $repo 'firefox-policies.template.json')
 Set-FirefoxDefaultBrowser
 $weztermInstalled = scoop list 2>$null | Select-String -Pattern '^\s*wezterm\b' -Quiet
 if (-not $weztermInstalled) { scoop install wezterm } else { Write-Host 'WezTerm already installed.' }
+foreach ($app in @('herdr', 'herdr-core')) {
+    $installed = scoop list 2>$null | Select-String -Pattern ("^\s*" + [regex]::Escape($app) + '\b') -Quiet
+    if (-not $installed) { scoop install $app } else { Write-Host "$app already installed." }
+}
 
 # 5. Restore buckets + apps declared in scoop.json.
 $manifest = Join-Path $repo 'scoop.json'

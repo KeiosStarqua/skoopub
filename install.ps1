@@ -7,6 +7,7 @@
     - Installs Scoop if it is missing (per-user, or system-wide when run elevated).
     - Makes sure git is available, then installs Firefox before WezTerm and asks
       Firefox to become the default browser (Windows may ask you to confirm).
+    - Installs a Firefox policy that auto-installs the Bitwarden extension.
     - Runs `scoop import scoop.json` (buckets + apps).
     - Keeps a UniKey that is already installed (e.g. on a public PC) instead of
       adding a second copy; -ForceUniKey installs the Scoop build anyway.
@@ -94,6 +95,30 @@ function Set-FirefoxDefaultBrowser {
     }
 }
 
+function Install-FirefoxPolicies {
+    param([string]$Template)
+
+    # Scoop persists Firefox's distribution folder, so policies.json survives
+    # Firefox updates. Firefox reads it at startup (about:policies shows it).
+    $firefoxDir = Join-Path $env:SCOOP 'apps\firefox\current'
+    if (-not (Test-Path (Join-Path $firefoxDir 'firefox.exe'))) {
+        Write-Ok 'Scoop Firefox install not found - skipping extension policy'
+        return
+    }
+    if (-not (Test-Path $Template)) {
+        Write-Ok 'firefox-policies.template.json not found - skipping extension policy'
+        return
+    }
+
+    $distDir = Join-Path $firefoxDir 'distribution'
+    New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+    Copy-Item -LiteralPath $Template -Destination (Join-Path $distDir 'policies.json') -Force
+    Write-Ok 'Bitwarden policy installed (restart Firefox to apply it)'
+    if (Get-Process -Name firefox -ErrorAction SilentlyContinue) {
+        Write-Ok 'Firefox is running - close and reopen it to load the policy'
+    }
+}
+
 function Install-ProfileHook {
     # Wire the repo-managed profile into $PROFILE. Run early so zoxide/atuin are
     # configured even if a later (optional) step fails and aborts the bootstrap.
@@ -161,7 +186,7 @@ if (-not $repoRoot) {
     Write-Step 'No local checkout found - downloading repo files'
     $repoRoot = Join-Path $env:LOCALAPPDATA 'skoop'
     New-Item -ItemType Directory -Force -Path $repoRoot | Out-Null
-    foreach ($file in 'scoop.json', 'profile.ps1', 'fix-sharex-printscreen.ps1', 'sharex-hotkeys.template.json') {
+    foreach ($file in 'scoop.json', 'profile.ps1', 'fix-sharex-printscreen.ps1', 'sharex-hotkeys.template.json', 'firefox-policies.template.json') {
         $dest = Join-Path $repoRoot $file
         Invoke-WebRequest -UseBasicParsing -Uri "$RepoRawBase/$file" -OutFile $dest
         Unblock-File $dest
@@ -169,9 +194,10 @@ if (-not $repoRoot) {
     }
 }
 
-$manifest      = Join-Path $repoRoot 'scoop.json'
-$profileScript = Join-Path $repoRoot 'profile.ps1'
-$sharexFix     = Join-Path $repoRoot 'fix-sharex-printscreen.ps1'
+$manifest       = Join-Path $repoRoot 'scoop.json'
+$profileScript  = Join-Path $repoRoot 'profile.ps1'
+$sharexFix      = Join-Path $repoRoot 'fix-sharex-printscreen.ps1'
+$firefoxPolicies = Join-Path $repoRoot 'firefox-policies.template.json'
 Write-Ok "repo root: $repoRoot"
 
 # --- 2. Hook the repo-managed profile into $PROFILE --------------------------
@@ -215,8 +241,8 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     & $scoop install git
 }
 
-# --- 7. Install Firefox before WezTerm -------------------------------------
-Write-Step 'Installing Firefox before WezTerm'
+# --- 7. Install Firefox, then WezTerm, then Herdr --------------------------
+Write-Step 'Installing Firefox first'
 $extrasBucket = & $scoop bucket list 2>$null | Select-String -Pattern '^\s*extras\b' -Quiet
 if (-not $extrasBucket) {
     & $scoop bucket add extras
@@ -229,13 +255,27 @@ if (-not $firefoxInstalled) {
 } else {
     Write-Ok 'Firefox already installed'
 }
+Install-FirefoxPolicies $firefoxPolicies
 Set-FirefoxDefaultBrowser
+
+Write-Step 'Installing WezTerm'
 $weztermInstalled = & $scoop list 2>$null | Select-String -Pattern '^\s*wezterm\b' -Quiet
 if (-not $weztermInstalled) {
     & $scoop install wezterm
     if ($LASTEXITCODE -ne 0) { throw "scoop install wezterm failed with exit code $LASTEXITCODE." }
 } else {
     Write-Ok 'WezTerm already installed'
+}
+
+Write-Step 'Installing Herdr'
+foreach ($app in @('herdr', 'herdr-core')) {
+    $installed = & $scoop list 2>$null | Select-String -Pattern ("^\s*" + [regex]::Escape($app) + '\b') -Quiet
+    if (-not $installed) {
+        & $scoop install $app
+        if ($LASTEXITCODE -ne 0) { throw "scoop install $app failed with exit code $LASTEXITCODE." }
+    } else {
+        Write-Ok "$app already installed"
+    }
 }
 
 # --- 8. Restore buckets + apps ----------------------------------------------
