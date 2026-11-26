@@ -39,8 +39,9 @@
       now, so the Vicinae global shortcut works after every sign-in.
     - Sets the Vicinae global toggle shortcut to Ctrl+Space via a repo-managed
       config import (existing Vicinae settings are preserved).
-    - Deploys a conflict-free whkdrc to ~/.config/whkdrc via configure-komorebi.ps1
-      and starts/reloads whkd (and Komorebi when needed) so tiling hotkeys work.
+    - Deploys a conflict-free whkdrc and a Komorebi config (tight 4px workspace /
+      2px container padding) to ~/.config via configure-komorebi.ps1, then
+      starts/reloads whkd (and Komorebi when needed) so tiling hotkeys work.
     - Deploys the repo-managed YASB status bar (config.yaml, styles.css and a .env
       template) via configure-yasb.ps1 and starts YASB for the Komorebi UI.
 
@@ -308,6 +309,7 @@ if (-not $repoRoot) {
         'configure-rio.ps1', 'configure-komorebi.ps1', 'configure-yasb.ps1',
         'zed/settings.json', 'zed/keymap.json', 'zed/tasks.json',
         'vicinae/keybinds.json', 'rio/config.toml', 'komorebi/whkdrc',
+        'komorebi/komorebi.json',
         'yasb/config.yaml', 'yasb/styles.css', 'yasb/.env.example'
     )
     foreach ($file in $repoFiles) {

@@ -70,6 +70,6 @@ win + ctrl + r               : komorebic change-layout rows
 win + ctrl + v               : komorebic change-layout vertical-stack
 
 # --- Application launchers -----------------------------------------------------
-win + return                 : Start-Process alacritty
+win + return                 : Start-Process rio
 win + shift + w              : Start-Process firefox
 win + shift + z              : Start-Process zed
