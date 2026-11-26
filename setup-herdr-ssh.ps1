@@ -14,7 +14,10 @@
       - Silently probes a few SSH user names (from your git identity, the
         Windows user and root) to find one Tailscale SSH permits. No prompt,
         no password and no generated keys.
-      - Runs `herdr --remote ssh://<user>@<machine>` to attach immediately.
+      - Runs `herdr --remote ssh://<user>@<machine>` to attach immediately. If
+        this script runs inside a Herdr pane, the inherited HERDR_* markers are
+        hidden for the attach; otherwise herdr refuses with "nested herdr is
+        disabled by default" and the remote attach never starts.
 
     Nothing about a particular machine is stored in this repo: no name, no
     tailnet IP and no private key.
@@ -288,7 +291,35 @@ if (-not $herdr) {
 }
 
 Write-Step "Attaching Herdr to $hostName"
-& herdr --remote ("ssh://{0}@{1}" -f $sshUser, $hostName)
+$target = "ssh://{0}@{1}" -f $sshUser, $hostName
+
+# herdr refuses to start from inside another herdr pane ("nested herdr is
+# disabled by default"). The inherited HERDR_* markers describe this pane, not
+# the remote client, so hide them for the attach and restore them afterwards so
+# the calling shell keeps its own state.
+$herdrEnvNames = @(
+    'HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID',
+    'HERDR_WORKSPACE_ID', 'HERDR_SOCKET_PATH', 'HERDR_BIN_PATH'
+)
+$savedHerdrEnv = @{}
+foreach ($name in $herdrEnvNames) {
+    $value = [Environment]::GetEnvironmentVariable($name, 'Process')
+    if ($null -ne $value) { $savedHerdrEnv[$name] = $value }
+}
+if ($savedHerdrEnv.ContainsKey('HERDR_ENV') -and $savedHerdrEnv['HERDR_ENV'] -eq '1') {
+    Write-Ok 'running inside a Herdr pane - attaching with a clean environment (nested herdr is off by default)'
+}
+
+try {
+    foreach ($name in $herdrEnvNames) { [Environment]::SetEnvironmentVariable($name, $null, 'Process') }
+    & herdr --remote $target
+} finally {
+    foreach ($name in $herdrEnvNames) {
+        if ($savedHerdrEnv.ContainsKey($name)) {
+            [Environment]::SetEnvironmentVariable($name, $savedHerdrEnv[$name], 'Process')
+        }
+    }
+}
 if ($LASTEXITCODE -ne 0) {
-    Write-Warn "herdr --remote failed (non-fatal); retry with: herdr --remote ssh://$sshUser@$hostName"
+    Write-Warn "herdr --remote failed (non-fatal); retry with: herdr --remote $target"
 }
