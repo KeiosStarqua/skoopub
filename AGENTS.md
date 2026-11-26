@@ -10,8 +10,8 @@ manager of its own — the files are the product.
 | Path | Type | Purpose |
 |---|---|---|
 | `scoop.json` | Manifest (JSON) | Single source of truth: `buckets` (main, extras, zeldrisho) + `apps` (name/source pairs) in `scoop export` format. Replayed with `scoop import scoop.json`. |
-| `install.ps1` | PowerShell 5.1 script | Primary one-shot bootstrap. Works locally (`.\install.ps1`) or piped (`irm ... \| iex`); downloads the manifest when there is no checkout, installs Scoop (per-user or system-wide when elevated), ensures git, installs WezTerm first, runs `scoop import`, sets GNU as the default Rust toolchain if none is active, applies the ShareX PrtSc fix, then hooks `profile.ps1` into `$PROFILE`. Skips UniKey if one is already installed unless `-ForceUniKey`. |
-| `bootstrap.ps1` | PowerShell script | Older/simpler equivalent of `install.ps1`: install Scoop, install WezTerm first, `scoop import scoop.json`, set GNU Rust default when no toolchain is active, apply the ShareX PrtSc fix, append the profile dot-source line. Also skips an existing UniKey unless `-ForceUniKey`. Kept for `-File` usage from a clone. |
+| `install.ps1` | PowerShell 5.1 script | Primary one-shot bootstrap. Works locally (`.\install.ps1`) or piped (`irm ... \| iex`); downloads the manifest when there is no checkout, hooks `profile.ps1` into `$PROFILE` early (so `z`/`atuin` load even if a later step fails), clears the Task Manager `DisableTaskMgr` policy (HKCU, plus HKLM when elevated; failures non-fatal), installs Scoop (per-user or system-wide when elevated), ensures git, installs Firefox before WezTerm and requests Firefox as the default browser, runs `scoop import`, sets GNU as the default Rust toolchain if none is active, then applies the ShareX PrtSc fix (failures are non-fatal). Skips UniKey if one is already installed unless `-ForceUniKey`. |
+| `bootstrap.ps1` | PowerShell script | Older/simpler equivalent of `install.ps1`: install Scoop, hook the profile dot-source line early, clear the Task Manager `DisableTaskMgr` policy (HKCU, plus HKLM when elevated; failures non-fatal), install Firefox before WezTerm and request Firefox as the default browser, `scoop import scoop.json`, set GNU Rust default when no toolchain is active, apply the ShareX PrtSc fix (non-fatal). Also skips an existing UniKey unless `-ForceUniKey`. Kept for `-File` usage from a clone. |
 | `profile.ps1` | PowerShell profile fragment | Shell config dot-sourced from `$PROFILE`. Must stay idempotent; initialises `zoxide` and `atuin` (imports PSReadLine first and skips quietly if it is unavailable). |
 | `fix-sharex-printscreen.ps1` | PowerShell utility | Disables the Windows "Print screen opens Snipping Tool" setting (`PrintScreenKeyForSnippingEnabled = 0`), optionally restarts Explorer (`-RestartExplorer`), seeds ShareX config so hotkeys register without the first-run welcome screen, then restarts ShareX unless `-NoRestart`. Run by `install.ps1`/`bootstrap.ps1` after the import; safe to run standalone. |
 | `sharex-hotkeys.template.json` | JSON template | Default ShareX hotkey set (PrtSc, Ctrl/PrtSc, Alt/PrtSc, Shift/PrtSc, Ctrl+Shift/PrtSc) copied on first run when `HotkeysConfig.json` is missing. |
@@ -26,7 +26,7 @@ Buckets: `main`, `extras`, `zeldrisho` (community bucket for Vietnamese IMEs).
 Apps — `main`: git, herdr, herdr-core, 7zip, mise, uv, ripgrep, fd, bat, fzf, jq,
 gh, less, starship, delta, zoxide, atuin, rustup, mingw, bun, cursor-cli,
 opencode.
-Apps — `extras`: vscode, lazygit, wezterm, sharex, tailscale, zed, grok-bot, pear-desktop, vicinae, chatgpt,
+Apps — `extras`: firefox, vscode, lazygit, wezterm, sharex, tailscale, zed, grok-bot, pear-desktop, vicinae, chatgpt,
 blender.
 Apps — `zeldrisho`: unikey (Vietnamese IME; third-party bucket).
 
@@ -56,4 +56,5 @@ Apps — `zeldrisho`: unikey (Vietnamese IME; third-party bucket).
 - `zeldrisho/scoop-bucket` is third-party: the UniKey manifest installs the official `unikey.org` archive with a pinned SHA-256 hash. Verify the diff when bumping versions.
 - Public PCs may already have UniKey installed outside Scoop. Both bootstraps detect it (running `UniKeyNT`, uninstall registry, existing Scoop app dir) and import a temporary manifest without `unikey`; `-ForceUniKey` overrides.
 - Rust: `rustup` installs the toolchain into `persist\rustup`; the bootstraps only set GNU as default when `rustup show active-toolchain` fails, so an existing MSVC choice survives. Cargo's bin is on the user PATH via the Scoop manifest.
+- Firefox: the bootstraps call `firefox --setDefaultBrowser` after installing it (skipped when http is already handled by Firefox). Direct `UserChoice` registry writes are blocked on modern Windows, and Windows 11 may open Settings for confirmation; failures are non-fatal.
 - Zed's in-app auto-update should be disabled; otherwise it installs outside Scoop and the pinned version in `scoop.json` stops matching reality. `innounp` is pulled in automatically as the installer dependency.

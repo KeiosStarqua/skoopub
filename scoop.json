@@ -127,6 +127,11 @@
     {
       "Info": "",
       "Source": "extras",
+      "Name": "firefox"
+    },
+    {
+      "Info": "",
+      "Source": "extras",
       "Name": "vscode"
     },
     {

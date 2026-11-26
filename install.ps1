@@ -5,12 +5,17 @@
 
 .DESCRIPTION
     - Installs Scoop if it is missing (per-user, or system-wide when run elevated).
-    - Makes sure git is available, then installs WezTerm first so the terminal is ready early.
+    - Makes sure git is available, then installs Firefox before WezTerm and asks
+      Firefox to become the default browser (Windows may ask you to confirm).
     - Runs `scoop import scoop.json` (buckets + apps).
     - Keeps a UniKey that is already installed (e.g. on a public PC) instead of
       adding a second copy; -ForceUniKey installs the Scoop build anyway.
-    - Applies fix-sharex-printscreen.ps1 so ShareX owns the PrtSc key.
-    - Adds a dot-source line for profile.ps1 to your PowerShell $PROFILE.
+    - Adds a dot-source line for profile.ps1 to your PowerShell $PROFILE early on,
+      so zoxide/atuin are configured even if a later, optional step fails.
+    - Enables Task Manager by clearing DisableTaskMgr for the current user (and
+      machine-wide when elevated); a failure is reported but does not abort.
+    - Applies fix-sharex-printscreen.ps1 so ShareX owns the PrtSc key; a failure
+      there is reported but does not abort the bootstrap.
 
     Works two ways:
       Local :  .\install.ps1
@@ -41,6 +46,78 @@ $ProgressPreference    = 'SilentlyContinue'
 
 function Write-Step([string]$Message) { Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok([string]$Message)   { Write-Host "    $Message" -ForegroundColor DarkGray }
+
+function Enable-TaskManager {
+    # Locked-down/public PCs can disable Task Manager with a policy. Clear it
+    # for this user; HKLM is only touched when the shell is already elevated.
+    Write-Step 'Enabling Task Manager (clearing DisableTaskMgr)'
+    $elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+    $paths = @('HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System')
+    if ($elevated) {
+        $paths += 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+    } else {
+        Write-Ok 'not elevated - HKCU only (re-run elevated to clear the machine-wide policy)'
+    }
+
+    foreach ($path in $paths) {
+        try {
+            if (-not (Test-Path -LiteralPath $path)) { New-Item -Path $path -Force | Out-Null }
+            New-ItemProperty -LiteralPath $path -Name 'DisableTaskMgr' -PropertyType DWord -Value 0 -Force | Out-Null
+            Write-Ok "DisableTaskMgr=0 at $path"
+        } catch {
+            # Best-effort: a locked key should not abort the rest of the setup.
+            Write-Host "    Could not update $path - $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+}
+
+function Set-FirefoxDefaultBrowser {
+    # Firefox owns its UserChoice hashes; writing them by hand is blocked on
+    # modern Windows, so let Firefox set http/https/.htm/.html itself. Windows 11
+    # may still open Settings for confirmation - that is fine, not a bootstrap error.
+    $firefox = Get-Command firefox -ErrorAction SilentlyContinue
+    if (-not $firefox) { Write-Ok 'firefox not on PATH - skipping default browser step'; return }
+
+    $httpChoice = 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice'
+    $progId = (Get-ItemProperty -Path $httpChoice -ErrorAction SilentlyContinue).ProgId
+    if ($progId -match '^Firefox') {
+        Write-Ok 'Firefox is already the default browser'
+        return
+    }
+
+    try {
+        Start-Process -FilePath $firefox.Source -ArgumentList '--setDefaultBrowser' | Out-Null
+        Write-Ok 'requested Firefox as default browser (confirm in Settings if prompted)'
+    } catch {
+        Write-Host "    Could not set Firefox as default browser (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+function Install-ProfileHook {
+    # Wire the repo-managed profile into $PROFILE. Run early so zoxide/atuin are
+    # configured even if a later (optional) step fails and aborts the bootstrap.
+    Write-Step 'Wiring profile.ps1 into your PowerShell profile'
+    $hook = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$profileScript`""
+
+    New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null
+    $lines = if (Test-Path $PROFILE) { @(Get-Content -Path $PROFILE) } else { @() }
+
+    # Replace any earlier hook instead of trusting it: a stale one can point at a
+    # profile.ps1 that no longer exists (e.g. ~\skoop\profile.ps1) and then silently
+    # load nothing, which looks like the packages are missing.
+    $stale   = 'skoop[\\/]profile\.ps1|\$skoopProfile|^# Load the repo-managed shell config|' + [regex]::Escape($profileScript)
+    $body    = (($lines | Where-Object { $_ -notmatch $stale }) -join "`r`n").TrimEnd()
+    $desired = if ($body) { "$body`r`n$hook" } else { $hook }
+
+    $existing = if (Test-Path $PROFILE) { Get-Content -Raw -Path $PROFILE } else { '' }
+    if ($existing.TrimEnd() -eq $desired) {
+        Write-Ok "already present in $PROFILE"
+    } else {
+        Set-Content -Path $PROFILE -Value $desired -Encoding UTF8
+        Write-Ok "wired into $PROFILE"
+    }
+}
 
 function Test-UniKeyInstalled {
     # Public PCs often ship a manually installed UniKey; installing the Scoop
@@ -97,7 +174,14 @@ $profileScript = Join-Path $repoRoot 'profile.ps1'
 $sharexFix     = Join-Path $repoRoot 'fix-sharex-printscreen.ps1'
 Write-Ok "repo root: $repoRoot"
 
-# --- 2. Install Scoop if its shims are missing -------------------------------
+# --- 2. Hook the repo-managed profile into $PROFILE --------------------------
+# Done before anything that can fail, so `z`/`atuin` are always configured.
+Install-ProfileHook
+
+# --- 3. Clear the Task Manager policy ---------------------------------------
+Enable-TaskManager
+
+# --- 4. Install Scoop if its shims are missing -------------------------------
 $shimDir = Find-ScoopShims
 if (-not $shimDir) {
     Write-Step 'Installing Scoop'
@@ -119,25 +203,33 @@ if (-not $shimDir) {
 
 if (-not $shimDir) { throw 'Scoop installed but its shims directory was not found.' }
 
-# --- 3. Put the shims on PATH for this process -------------------------------
+# --- 5. Put the shims on PATH for this process -------------------------------
 $env:SCOOP = Split-Path $shimDir -Parent
 $env:Path  = "$shimDir;$env:Path"
 $scoop     = Join-Path $shimDir 'scoop.cmd'
 Write-Ok "shims: $shimDir"
 
-# --- 4. Buckets are git repos, so git must exist before scoop import ---------
+# --- 6. Buckets are git repos, so git must exist before scoop import ---------
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Step 'Installing git (required for Scoop buckets)'
     & $scoop install git
 }
 
-# --- 5. Install WezTerm first -----------------------------------------------
-Write-Step 'Installing WezTerm first'
+# --- 7. Install Firefox before WezTerm -------------------------------------
+Write-Step 'Installing Firefox before WezTerm'
 $extrasBucket = & $scoop bucket list 2>$null | Select-String -Pattern '^\s*extras\b' -Quiet
 if (-not $extrasBucket) {
     & $scoop bucket add extras
     if ($LASTEXITCODE -ne 0) { throw "scoop bucket add extras failed with exit code $LASTEXITCODE." }
 }
+$firefoxInstalled = & $scoop list 2>$null | Select-String -Pattern '^\s*firefox\b' -Quiet
+if (-not $firefoxInstalled) {
+    & $scoop install extras/firefox
+    if ($LASTEXITCODE -ne 0) { throw "scoop install extras/firefox failed with exit code $LASTEXITCODE." }
+} else {
+    Write-Ok 'Firefox already installed'
+}
+Set-FirefoxDefaultBrowser
 $weztermInstalled = & $scoop list 2>$null | Select-String -Pattern '^\s*wezterm\b' -Quiet
 if (-not $weztermInstalled) {
     & $scoop install wezterm
@@ -146,7 +238,7 @@ if (-not $weztermInstalled) {
     Write-Ok 'WezTerm already installed'
 }
 
-# --- 6. Restore buckets + apps ----------------------------------------------
+# --- 8. Restore buckets + apps ----------------------------------------------
 $manifestToImport = $manifest
 if (-not $ForceUniKey -and (Test-UniKeyInstalled)) {
     Write-Step 'UniKey already installed - keeping the existing copy'
@@ -161,7 +253,7 @@ Write-Step "Importing $manifestToImport"
 & $scoop import $manifestToImport
 if ($LASTEXITCODE -ne 0) { throw "scoop import failed with exit code $LASTEXITCODE." }
 
-# --- 7. Default Rust toolchain: GNU (no Visual Studio Build Tools needed) ----
+# --- 9. Default Rust toolchain: GNU (no Visual Studio Build Tools needed) ----
 $cargoBin = Join-Path $env:SCOOP 'persist\rustup\.cargo\bin'
 if (Test-Path $cargoBin) { $env:Path = "$cargoBin;$env:Path" }
 if (Get-Command rustup -ErrorAction SilentlyContinue) {
@@ -174,34 +266,17 @@ if (Get-Command rustup -ErrorAction SilentlyContinue) {
     }
 }
 
-# --- 8. Let ShareX own the PrtSc key -----------------------------------------
+# --- 10. Let ShareX own the PrtSc key ----------------------------------------
 if (Test-Path $sharexFix) {
     Write-Step 'Applying ShareX PrtSc fix'
-    & $sharexFix
+    try {
+        & $sharexFix
+    } catch {
+        # Cosmetic fix: never let it abort the bootstrap (z/atuin are already wired).
+        Write-Host "    ShareX fix failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
 } else {
     Write-Ok 'fix-sharex-printscreen.ps1 not found - skipping'
-}
-
-# --- 9. Hook the repo-managed profile into $PROFILE --------------------------
-Write-Step 'Wiring profile.ps1 into your PowerShell profile'
-$hook = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$profileScript`""
-
-New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null
-$lines = if (Test-Path $PROFILE) { @(Get-Content -Path $PROFILE) } else { @() }
-
-# Replace any earlier hook instead of trusting it: a stale one can point at a
-# profile.ps1 that no longer exists (e.g. ~\skoop\profile.ps1) and then silently
-# load nothing, which looks like the packages are missing.
-$stale   = 'skoop[\\/]profile\.ps1|\$skoopProfile|^# Load the repo-managed shell config|' + [regex]::Escape($profileScript)
-$body    = (($lines | Where-Object { $_ -notmatch $stale }) -join "`r`n").TrimEnd()
-$desired = if ($body) { "$body`r`n$hook" } else { $hook }
-
-$existing = if (Test-Path $PROFILE) { Get-Content -Raw -Path $PROFILE } else { '' }
-if ($existing.TrimEnd() -eq $desired) {
-    Write-Ok "already present in $PROFILE"
-} else {
-    Set-Content -Path $PROFILE -Value $desired -Encoding UTF8
-    Write-Ok "wired into $PROFILE"
 }
 
 Write-Host ''

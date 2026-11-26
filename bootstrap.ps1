@@ -29,6 +29,68 @@ function Test-UniKeyInstalled {
     return $false
 }
 
+function Set-FirefoxDefaultBrowser {
+    # Let Firefox set its own UserChoice entries; direct registry writes are
+    # blocked on modern Windows. Windows 11 may still open Settings to confirm.
+    $firefox = Get-Command firefox -ErrorAction SilentlyContinue
+    if (-not $firefox) { Write-Host 'Firefox not on PATH - skipping default browser step.'; return }
+
+    $httpChoice = 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice'
+    $progId = (Get-ItemProperty -Path $httpChoice -ErrorAction SilentlyContinue).ProgId
+    if ($progId -match '^Firefox') { Write-Host 'Firefox is already the default browser.'; return }
+
+    try {
+        Start-Process -FilePath $firefox.Source -ArgumentList '--setDefaultBrowser' | Out-Null
+        Write-Host 'Requested Firefox as default browser (confirm in Settings if prompted).'
+    } catch {
+        Write-Host "Could not set Firefox as default browser (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+function Install-ProfileHook {
+    # Wire the repo-managed profile into $PROFILE early so zoxide/atuin are
+    # configured even if a later (optional) step fails.
+    $loader = Join-Path $repo 'profile.ps1'
+    $hook = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$loader`""
+
+    New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null
+    $lines = if (Test-Path $PROFILE) { @(Get-Content -Path $PROFILE) } else { @() }
+    $stale   = 'skoop[\\/]profile\.ps1|\$skoopProfile|^# Load the repo-managed shell config|' + [regex]::Escape($loader)
+    $body    = (($lines | Where-Object { $_ -notmatch $stale }) -join "`r`n").TrimEnd()
+    $desired = if ($body) { "$body`r`n$hook" } else { $hook }
+
+    $existing = if (Test-Path $PROFILE) { Get-Content -Raw -Path $PROFILE } else { '' }
+    if ($existing.TrimEnd() -ne $desired) {
+        Set-Content -Path $PROFILE -Value $desired -Encoding UTF8
+        Write-Host "Wired profile.ps1 into $PROFILE"
+    }
+}
+
+function Enable-TaskManager {
+    # Locked-down/public PCs can disable Task Manager with a policy. Clear it
+    # for this user; HKLM is only touched when the shell is already elevated.
+    Write-Host 'Enabling Task Manager (clearing DisableTaskMgr)...'
+    $elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+    $paths = @('HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System')
+    if ($elevated) {
+        $paths += 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+    } else {
+        Write-Host 'Not elevated - HKCU only; run elevated to clear the machine-wide policy.'
+    }
+
+    foreach ($path in $paths) {
+        try {
+            if (-not (Test-Path -LiteralPath $path)) { New-Item -Path $path -Force | Out-Null }
+            New-ItemProperty -LiteralPath $path -Name 'DisableTaskMgr' -PropertyType DWord -Value 0 -Force | Out-Null
+            Write-Host "  DisableTaskMgr=0 at $path"
+        } catch {
+            # Best-effort: a locked key should not abort the bootstrap.
+            Write-Host "Could not update $path (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+}
+
 # 1. Install Scoop if it is missing (no admin needed unless already elevated).
 if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
     $installer = Join-Path $env:TEMP 'install-scoop.ps1'
@@ -40,13 +102,22 @@ if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
 }
 $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
 
-# 2. Install WezTerm first.
+# 2. Hook the repo-managed profile into $PROFILE before anything can fail.
+Install-ProfileHook
+
+# 3. Clear the Task Manager policy.
+Enable-TaskManager
+
+# 4. Install Firefox before WezTerm, then make Firefox the default browser.
 $extrasBucket = scoop bucket list 2>$null | Select-String -Pattern '^\s*extras\b' -Quiet
 if (-not $extrasBucket) { scoop bucket add extras }
+$firefoxInstalled = scoop list 2>$null | Select-String -Pattern '^\s*firefox\b' -Quiet
+if (-not $firefoxInstalled) { scoop install extras/firefox } else { Write-Host 'Firefox already installed.' }
+Set-FirefoxDefaultBrowser
 $weztermInstalled = scoop list 2>$null | Select-String -Pattern '^\s*wezterm\b' -Quiet
 if (-not $weztermInstalled) { scoop install wezterm } else { Write-Host 'WezTerm already installed.' }
 
-# 3. Restore buckets + apps declared in scoop.json.
+# 5. Restore buckets + apps declared in scoop.json.
 $manifest = Join-Path $repo 'scoop.json'
 if (-not $ForceUniKey -and (Test-UniKeyInstalled)) {
     Write-Host 'UniKey already installed - keeping the existing copy (-ForceUniKey overrides).'
@@ -57,7 +128,7 @@ if (-not $ForceUniKey -and (Test-UniKeyInstalled)) {
 }
 scoop import $manifest
 
-# 4. Default the Rust toolchain to GNU when none is configured yet.
+# 6. Default the Rust toolchain to GNU when none is configured yet.
 $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE 'scoop' }
 $cargoBin = Join-Path $scoopRoot 'persist\rustup\.cargo\bin'
 if (Test-Path $cargoBin) { $env:Path = "$cargoBin;$env:Path" }
@@ -71,26 +142,14 @@ if (Get-Command rustup -ErrorAction SilentlyContinue) {
     }
 }
 
-# 5. Let ShareX own PrtSc: Windows otherwise hands the key to the Snipping Tool.
+# 7. Let ShareX own PrtSc: Windows otherwise hands the key to the Snipping Tool.
 $sharexFix = Join-Path $repo 'fix-sharex-printscreen.ps1'
-if (Test-Path $sharexFix) { & $sharexFix }
-
-# 6. Make PowerShell load the repo-managed shell config on startup.
-#    Any earlier hook is rewritten: a stale path (e.g. ~\skoop\profile.ps1 from an
-#    old layout) would point at a missing file and silently load nothing.
-$loader = Join-Path $repo 'profile.ps1'
-$hook = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$loader`""
-
-New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null
-$lines = if (Test-Path $PROFILE) { @(Get-Content -Path $PROFILE) } else { @() }
-$stale   = 'skoop[\\/]profile\.ps1|\$skoopProfile|^# Load the repo-managed shell config|' + [regex]::Escape($loader)
-$body    = (($lines | Where-Object { $_ -notmatch $stale }) -join "`r`n").TrimEnd()
-$desired = if ($body) { "$body`r`n$hook" } else { $hook }
-
-$existing = if (Test-Path $PROFILE) { Get-Content -Raw -Path $PROFILE } else { '' }
-if ($existing.TrimEnd() -ne $desired) {
-    Set-Content -Path $PROFILE -Value $desired -Encoding UTF8
-    Write-Host "Wired profile.ps1 into $PROFILE"
+if (Test-Path $sharexFix) {
+    try { & $sharexFix }
+    catch {
+        # Cosmetic fix: never let it abort the bootstrap (z/atuin are already wired).
+        Write-Host "ShareX fix failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
 }
 
 Write-Host "Done. Open a new PowerShell window, then try: z .." -ForegroundColor Green
