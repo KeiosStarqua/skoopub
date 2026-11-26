@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Register a per-user scheduled task that runs the Firefox/Vicinae backup and local sign-in cleanup on shutdown/logoff.
+    Register a per-user scheduled task that runs the Firefox/Vicinae/Atuin backup and local sign-in cleanup on shutdown/logoff.
 
 .DESCRIPTION
     Triggers on Windows event 1074 (shutdown initiated) in the System log and, when

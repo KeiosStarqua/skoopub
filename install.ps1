@@ -56,7 +56,7 @@
     - Adds an `n` alias for Nushell in PowerShell (profile.ps1) and a cmd.exe
       AutoRun doskey macro via apps/nushell/setup.ps1, preserving existing AutoRun entries.
     - Registers a per-user scheduled task (SkoopCleanupOnShutdown) via
-      core/install-shutdown-hook.ps1 so the Firefox/Vicinae backup and local
+      core/install-shutdown-hook.ps1 so the Firefox/Vicinae/Atuin backup and local
       sign-in cleanup (GitHub, Tailscale, Pear Desktop, Firefox) run automatically
       on shutdown/logoff; -BackupUser / SKOOP_BACKUP_USER supplies the SSH user,
       and -SkipShutdownHook opts out.
@@ -886,5 +886,5 @@ Write-Host 'YASB status bar is configured; fill ~/.config/yasb/.env for weather/
 Write-Host 'Type `n` in PowerShell or cmd to open Nushell.' -ForegroundColor Green
 Write-Host 'Starship is the prompt in new PowerShell and cmd windows.' -ForegroundColor Green
 if (-not $SkipShutdownHook) {
-    Write-Host 'Shutdown cleanup is registered: Firefox/Vicinae back up to acer-ubuntu and local sign-ins (GitHub, Tailscale, Pear Desktop, Firefox) are cleared on shutdown/logoff.' -ForegroundColor Green
+    Write-Host 'Shutdown cleanup is registered: Firefox/Vicinae/Atuin back up to acer-ubuntu and local sign-ins (GitHub, Tailscale, Pear Desktop, Firefox) are cleared on shutdown/logoff.' -ForegroundColor Green
 }
