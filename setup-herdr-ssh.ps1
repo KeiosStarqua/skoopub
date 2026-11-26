@@ -28,6 +28,11 @@
 .PARAMETER SkipMachineAdd
     Only set up SSH/config; do not run `herdr machine add`.
 
+.PARAMETER Attach
+    After registering the machine, open the remote session with
+    `herdr --remote <alias>` immediately. Without this switch the script asks
+    first (default No), so it never blocks an unattended bootstrap.
+
 .PARAMETER Revoke
     Undo the setup: remove the temporary public key from the remote, delete the
     local key pair and remove the marked Host block from ~/.ssh/config.
@@ -43,6 +48,7 @@ param(
     [string]$Alias,
     [string]$KeyDir = (Join-Path $env:TEMP 'skoop-herdr-ssh'),
     [switch]$SkipMachineAdd,
+    [switch]$Attach,
     [switch]$Revoke
 )
 
@@ -270,6 +276,21 @@ if (-not $SkipMachineAdd) {
         & herdr machine add $name
         if ($LASTEXITCODE -ne 0) {
             Write-Warn "herdr machine add failed (non-fatal); run it yourself: herdr machine add $name"
+        }
+    }
+}
+
+# --- Attach to the chosen Herdr machine (opt-in) ----------------------------
+if (($Attach -or -not $SkipMachineAdd) -and (Get-Command herdr -ErrorAction SilentlyContinue)) {
+    if (-not $Attach -and [Environment]::UserInteractive) {
+        $attachAnswer = Read-Host "Attach to $name with 'herdr --remote' now? [y/N]"
+        if ($attachAnswer -match '^(y|yes)$') { $Attach = $true }
+    }
+    if ($Attach) {
+        Write-Step "Attaching to $name"
+        & herdr --remote $name
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "herdr --remote failed (non-fatal); retry with: herdr --remote $name"
         }
     }
 }
