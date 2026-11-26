@@ -27,6 +27,9 @@
       there is reported but does not abort the bootstrap.
     - Copies the repo-managed Zed settings/keymap/tasks into %APPDATA%\Zed (old
       files are backed up); Zed installs its declared extensions on next start.
+    - Copies alacritty/alacritty.toml into %APPDATA%\alacritty (old file is backed
+      up): JetBrainsMono NF at 12pt for Herdr TUI glyphs, plus right-click paste
+      and hide-when-typing mouse behavior. TUI mouse reporting is on by default.
     - Offers to run `gh auth login` (only when needed) and runs `gh auth setup-git`
       so `git push` uses the GitHub CLI token instead of prompting for a username.
 

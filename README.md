@@ -48,7 +48,7 @@ cd skoop
 10. Disables Windows' "Print screen opens Snipping Tool" so **ShareX** can bind PrtSc. A failure here is reported but does not abort the setup.
 11. Checks GitHub CLI auth. If you are not logged in, it asks whether to run `gh auth login` for you (HTTPS, no SSH key prompt), then runs `gh auth setup-git` so `git push` uses your gh token instead of prompting for a username. Pass `-SkipGhLogin` to skip the interactive prompt on unattended runs.
 12. Copies `zed/settings.json`, `zed/keymap.json` and `zed/tasks.json` into `%APPDATA%\Zed` via `configure-zed.ps1` (existing files are backed up first). Zed installs the declared extensions on its first start: **PowerShell**, HTML, Dockerfile, Docker Compose, TOML, Nix and SQL. PowerShell support needs `pwsh` (added to `scoop.json`); Rust is supported natively in Zed via `rust-analyzer`, so there is no Rust extension to install.
-13. Copies `alacritty/alacritty.toml` into `%APPDATA%\alacritty` via `configure-alacritty.ps1` (existing config is backed up). It sets **JetBrainsMono NF** at 12pt with `builtin_box_drawing` and small padding so Nerd Font icons and Herdr TUI borders render correctly. Restart Alacritty if it was already open.
+13. Copies `alacritty/alacritty.toml` into `%APPDATA%\alacritty` via `configure-alacritty.ps1` (existing config is backed up). It sets **JetBrainsMono NF** at 12pt with `builtin_box_drawing` and small padding so Nerd Font icons and Herdr TUI borders render correctly. It also hides the mouse pointer while typing and maps right-click to **Paste**; mouse reporting to TUIs (Herdr, lazygit, etc.) is already on by default. Restart Alacritty if it was already open.
 
 Then open a new PowerShell window and try:
 
@@ -95,7 +95,7 @@ scoop export | Out-File -Encoding utf8 scoop.json
 | UniKey preinstalled | Detected via process, uninstall registry and Scoop dir; the existing copy is kept unless `-ForceUniKey` is passed |
 | Zed config | `configure-zed.ps1` copies `zed/*.json` to `%APPDATA%\Zed` and backs up changed originals as `.bak.<timestamp>`; use `-NoBackup` to overwrite directly, or `-ConfigDir` to target another folder |
 | Zed extensions | Zed installs `auto_install_extensions` when it starts, so launch it once after setup; the PowerShell extension uses `pwsh` from Scoop, and Rust language support is built in (`rust-analyzer`) rather than an extension |
-| Alacritty font | `configure-alacritty.ps1` copies `alacritty/alacritty.toml` to `%APPDATA%\alacritty` (backing up a changed original). It uses **JetBrainsMono NF** from the `nerd-fonts` bucket at 12pt, with `builtin_box_drawing` for Herdr TUI borders; restart Alacritty after the first setup |
+| Alacritty font / mouse | `configure-alacritty.ps1` copies `alacritty/alacritty.toml` to `%APPDATA%\alacritty` (backing up a changed original). It uses **JetBrainsMono NF** from the `nerd-fonts` bucket at 12pt, with `builtin_box_drawing` for Herdr TUI borders. `hide_when_typing = true` and a right-click **Paste** binding are configured; default left-click selection, double/triple-click, scroll and Shift+click TUI bypass still work. Restart Alacritty after setup |
 | Rust toolchain | GNU is set as default only when no toolchain is active; switch with `rustup default stable-x86_64-pc-windows-msvc` (needs MSVC Build Tools) |
 | `z` / `atuin` not found | The profile hook is missing or points at a missing `profile.ps1`, or the window predates the install. Check `Get-Content $PROFILE`; re-run `install.ps1` to rewrite it, then open a new PowerShell window |
 
