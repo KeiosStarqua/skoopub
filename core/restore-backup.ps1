@@ -214,6 +214,10 @@ function Restore-Firefox {
     $firefoxBase = Join-Path $env:APPDATA 'Mozilla\Firefox'
     $srcIni = Join-Path (Join-Path $StageRoot 'firefox') 'profiles.ini'
     if (-not (Test-Path -LiteralPath $srcIni)) {
+        if ($DryRun) {
+            Write-Log 'DRYRUN would restore Firefox profiles from the downloaded snapshot'
+            return
+        }
         throw 'Downloaded snapshot has no profiles.ini; cannot restore Firefox.'
     }
     $sections = @(Get-ProfilesIniSections -Path $srcIni)
@@ -276,6 +280,10 @@ function Restore-Atuin {
     $atuinHome = Join-Path $env:USERPROFILE '.atuin'
     $srcRoot = Join-Path $StageRoot 'atuin'
     if (-not (Test-Path -LiteralPath $srcRoot)) {
+        if ($DryRun) {
+            Write-Log 'DRYRUN would restore Atuin config/data from the downloaded snapshot'
+            return
+        }
         throw 'Downloaded snapshot has no atuin folder; cannot restore Atuin.'
     }
     if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $atuinHome | Out-Null }
