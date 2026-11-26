@@ -412,4 +412,21 @@ if ($DryRun) {
 } else {
     Write-Log ("done. Remote backup: " + $(if ($remoteBackup) { $remoteBackup } else { '(none)' }))
     Write-Log ("log saved: " + $script:LogPath)
+
+    if (-not $BackupOnly) {
+        # The shutdown guard uses this stamp to skip a duplicate cleanup when a
+        # full run already finished a few minutes ago.
+        $stampPath = Join-Path $logDir 'last-cleanup.json'
+        $marker = [ordered] @{
+            timestamp = (Get-Date).ToString('o')
+            backups   = @($remoteBackup)
+            log       = $script:LogPath
+            host      = $env:COMPUTERNAME
+        }
+        [System.IO.File]::WriteAllText($stampPath, ($marker | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
+        Write-Log ("last cleanup stamp: " + $stampPath)
+
+        $history = Join-Path $logDir 'cleanup-history.log'
+        Add-Content -LiteralPath $history -Value ((Get-Date -Format 'o') + "`tOK`tauth-removed`tbackups=" + $remoteBackup) -Encoding UTF8
+    }
 }

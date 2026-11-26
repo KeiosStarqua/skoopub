@@ -33,12 +33,14 @@ param(
     [string] $User = "$env:SKOOP_BACKUP_USER",
     [string] $TaskName = 'SkoopCleanupOnShutdown',
     [string] $ScriptPath,
+    [int] $MaxAgeMinutes = 10,
+    [switch] $Force,
     [switch] $Remove
 )
 
 $ErrorActionPreference = 'Stop'
 
-if (-not $ScriptPath) { $ScriptPath = Join-Path $PSScriptRoot 'cleanup-before-shutdown.ps1' }
+if (-not $ScriptPath) { $ScriptPath = Join-Path $PSScriptRoot 'shutdown-cleanup-guard.ps1' }
 
 if ($Remove) {
     $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -80,7 +82,8 @@ try {
 
 $powershell = (Get-Command powershell.exe -ErrorAction SilentlyContinue).Source
 if (-not $powershell) { $powershell = (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') }
-$arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $ScriptPath + '" -User "' + $User + '"'
+$arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $ScriptPath + '" -User "' + $User + '" -MaxAgeMinutes ' + $MaxAgeMinutes
+if ($Force) { $arguments += ' -Force' }
 $action = New-ScheduledTaskAction -Execute $powershell -Argument $arguments
 
 $account = $env:USERDOMAIN + '\' + $env:USERNAME
@@ -92,5 +95,5 @@ $settings = New-ScheduledTaskSettingsSet `
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $triggers `
     -Principal $principal -Settings $settings -Force | Out-Null
 
-Write-Host "Registered '$TaskName': runs cleanup-before-shutdown.ps1 -User $User on shutdown/logoff." -ForegroundColor Green
+Write-Host "Registered '$TaskName': runs shutdown-cleanup-guard.ps1 -User $User on shutdown/logoff (skip when last cleanup < $MaxAgeMinutes min old)." -ForegroundColor Green
 Write-Host 'Note: a shutdown can terminate the task before a slow upload finishes; the script deletes auth only after the backup verifies.' -ForegroundColor Yellow
