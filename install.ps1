@@ -41,10 +41,13 @@
       config import (existing Vicinae settings are preserved).
     - Deploys a conflict-free whkdrc and a Komorebi config (tight 4px workspace /
       2px container padding plus initial-workspace rules: Rio/Firefox on 1,
-      Zed/VS Code/Pear Desktop on 2, etc.) to ~/.config via configure-komorebi.ps1,
-      then starts/reloads whkd (and Komorebi when needed) so tiling hotkeys work.
+      Zed/VS Code/Pear Desktop on 2, Columns on workspace 1) to ~/.config via
+      configure-komorebi.ps1, then starts/reloads whkd (and Komorebi when needed)
+      and a watcher that keeps Rio left / Firefox right in the Terminal workspace.
     - Deploys the repo-managed YASB status bar (config.yaml, styles.css and a .env
       template) via configure-yasb.ps1 and starts YASB for the Komorebi UI.
+    - Adds an `n` alias for Nushell in PowerShell (profile.ps1) and a cmd.exe
+      AutoRun doskey macro via setup-nushell.ps1, preserving existing AutoRun entries.
 
     Interactive CLI: when gum (charm-gum) is available, the script opens a menu
     to choose Full setup / Configure only / Connect Herdr only / Quit. It falls
@@ -435,9 +438,10 @@ if (-not $repoRoot) {
         'setup-git-identity.ps1',
         'enable-vicinae-autostart.ps1', 'configure-vicinae.ps1',
         'configure-rio.ps1', 'configure-komorebi.ps1', 'configure-yasb.ps1',
+        'setup-nushell.ps1',
         'zed/settings.json', 'zed/keymap.json', 'zed/tasks.json',
         'vicinae/keybinds.json', 'rio/config.toml', 'komorebi/whkdrc',
-        'komorebi/komorebi.json',
+        'komorebi/komorebi.json', 'komorebi/pin-terminal-layout.ps1',
         'yasb/config.yaml', 'yasb/styles.css', 'yasb/.env.example'
     )
     foreach ($file in $repoFiles) {
@@ -462,6 +466,7 @@ $vicinae         = Join-Path $repoRoot 'enable-vicinae-autostart.ps1'
 $vicinaeConfig   = Join-Path $repoRoot 'configure-vicinae.ps1'
 $komorebiConfig  = Join-Path $repoRoot 'configure-komorebi.ps1'
 $yasbConfig      = Join-Path $repoRoot 'configure-yasb.ps1'
+$nuSetup         = Join-Path $repoRoot 'setup-nushell.ps1'
 Write-Ok "repo root: $repoRoot"
 
 if ($runMode -eq 'herdr') {
@@ -705,6 +710,19 @@ if (Test-Path $yasbConfig) {
     Write-Ok 'configure-yasb.ps1 not found - skipping'
 }
 
+# --- 21. Set up the Nushell shortcut for PowerShell and cmd -------------------
+if (Test-Path $nuSetup) {
+    Write-Step 'Adding the Nushell `n` shortcut for PowerShell and cmd'
+    try {
+        & $nuSetup
+    } catch {
+        # Convenience step: never let it abort the bootstrap.
+        Write-Host "    Nushell shortcut setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Ok 'setup-nushell.ps1 not found - skipping'
+}
+
 Write-Host ''
 Write-Host 'Done. Open a new PowerShell window, then try: z ..' -ForegroundColor Green
 Write-Host 'git push will use your gh login (no username prompt).' -ForegroundColor Green
@@ -714,3 +732,4 @@ Write-Host 'Rio font size / zoom is 16.' -ForegroundColor Green
 Write-Host 'Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL).' -ForegroundColor Green
 Write-Host 'Komorebi hotkeys are ready (see komorebi/whkdrc).' -ForegroundColor Green
 Write-Host 'YASB status bar is configured; fill ~/.config/yasb/.env for weather/wallpapers.' -ForegroundColor Green
+Write-Host 'Type `n` in PowerShell or cmd to open Nushell.' -ForegroundColor Green

@@ -15,7 +15,11 @@ param(
     # Deploy files only; do not start or restart komorebi/whkd.
     [switch]$NoStart,
     # Restart whkd and reapply the Komorebi config even when files did not change.
-    [switch]$Restart
+    [switch]$Restart,
+    # Do not deploy/start the watcher that keeps Rio left and Firefox right.
+    [switch]$NoPin,
+    # Restart the background pin watcher.
+    [switch]$RestartPin
 )
 
 $ErrorActionPreference = 'Stop'
@@ -68,6 +72,11 @@ function Deploy-File {
 $hotkeysChanged = Deploy-File (Join-Path $SourceDir 'whkdrc') (Join-Path $ConfigDir 'whkdrc')
 $komorebiConfig = Join-Path $ConfigDir 'komorebi.json'
 $configChanged = Deploy-File (Join-Path $SourceDir 'komorebi.json') $komorebiConfig
+$pinScript = Join-Path $ConfigDir 'komorebi-pin.ps1'
+$pinChanged = $false
+if (-not $NoPin) {
+    $pinChanged = Deploy-File (Join-Path $SourceDir 'pin-terminal-layout.ps1') $pinScript
+}
 
 function Resolve-Tool {
     param([string]$Name)
@@ -79,6 +88,48 @@ function Resolve-Tool {
         if (Test-Path -LiteralPath $shim) { return $shim }
     }
     return $null
+}
+
+function Get-PinWatcherProcesses {
+    return @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*-File*komorebi-pin.ps1*' })
+}
+
+function Start-PinWatcher {
+    param([switch]$Force)
+    if (-not (Test-Path -LiteralPath $pinScript)) { return }
+    $existing = Get-PinWatcherProcesses
+    if ($existing.Count -gt 0) {
+        if (-not $Force) {
+            Write-Host 'Terminal layout watcher is already running.'
+        } else {
+            $existing | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            Start-Sleep -Milliseconds 400
+        }
+    }
+    if ($Force -or $existing.Count -eq 0) {
+        $powershellExe = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path -LiteralPath $powershellExe)) { $powershellExe = 'powershell.exe' }
+        $arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $pinScript
+        Start-Process -FilePath $powershellExe -ArgumentList $arguments -WindowStyle Hidden
+        Write-Host 'Started Terminal layout watcher (Rio left, Firefox right).'
+    }
+
+    $startup = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
+    New-Item -ItemType Directory -Force -Path $startup | Out-Null
+    $shortcut = Join-Path $startup 'Skoop Komorebi Pin.lnk'
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $link = $shell.CreateShortcut($shortcut)
+        $link.TargetPath = $powershellExe
+        $link.Arguments = $arguments
+        $link.WorkingDirectory = Split-Path -Parent $pinScript
+        $link.WindowStyle = 7
+        $link.Description = 'Keep Rio on the left and Firefox on the right in Komorebi Terminal'
+        $link.Save()
+    } catch {
+        Write-Host "    Pin watcher autostart shortcut failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
 }
 
 if ($NoStart) {
@@ -101,7 +152,7 @@ if (-not (Get-Process -Name komorebi -ErrorAction SilentlyContinue)) {
 } elseif ($komorebic -and (Test-Path -LiteralPath $komorebiConfig)) {
     # Reapply on every run: the config may differ from a session started before
     # this repo managed it. It is safe/idempotent and keeps padding consistent.
-    Write-Host 'Applying Komorebi config (workspace/container padding)...'
+    Write-Host 'Applying Komorebi config (padding, layout, workspace rules)...'
     & $komorebic replace-configuration $komorebiConfig 2>&1 | ForEach-Object { Write-Host "    $_" }
 }
 
@@ -123,4 +174,8 @@ if (-not (Get-Process -Name whkd -ErrorAction SilentlyContinue)) {
     Write-Host 'whkd did not stay running - check ~/.config/whkdrc for syntax errors.' -ForegroundColor Yellow
 } else {
     Write-Host "Komorebi hotkeys are active (whkdrc: $(Join-Path $ConfigDir 'whkdrc'))." -ForegroundColor Green
+}
+
+if (-not $NoPin) {
+    Start-PinWatcher -Force:($RestartPin -or $pinChanged)
 }

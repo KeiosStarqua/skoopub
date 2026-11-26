@@ -46,3 +46,11 @@ if (Get-Command atuin -ErrorAction SilentlyContinue) {
         Invoke-Expression (& { (atuin init powershell | Out-String) })
     }
 }
+
+# Nushell: `n` starts Nushell from PowerShell; the `nu` shim also works directly.
+# Guarded so a machine without nu (or with its own `n` alias) stays untouched.
+if (Get-Command nu -ErrorAction SilentlyContinue) {
+    if (-not (Get-Alias -Name n -ErrorAction SilentlyContinue)) {
+        Set-Alias -Name n -Value nu -Scope Global
+    }
+}
