@@ -149,6 +149,7 @@ scoop export | Out-File -Encoding utf8 scoop.json
 | Task Manager disabled by policy | `DisableTaskMgr` is set to `0` for the current user; elevated runs also clear the machine-wide value. A domain policy may reapply it on the next refresh |
 | From a clone | The files next to `install.ps1` are used, so edits apply directly |
 | Firefox default browser | `firefox --setDefaultBrowser` runs after install (skipped if Firefox is already the http handler); Windows 11 may open Settings for confirmation, and a failure is non-fatal |
+| Firefox version | `scoop.json` marks Firefox as `Held package`, so `scoop import` runs `scoop hold` and updates skip it. Use `scoop unhold firefox` when you want to upgrade |
 | Firefox extensions | Bitwarden, mymind and "I still don't care about cookies" use `normal_installed` policies, so they install automatically but can still be disabled or removed. Bitwarden and "I still don't care about cookies" update from AMO; mymind is pinned to the 2.0.2 XPI URL, so bump that URL when a newer version ships. Restart Firefox once after setup; check `about:policies` |
 | Firefox bookmarks / homepage | Managed bookmarks are locked by policy under a **skoopub** folder (Hacker News, mymind, Scoop, OpenCode, YouTube to Transcript); the toolbar is shown on startup and the homepage/startup page is ChatGPT. Edit `firefox-policies.template.json` to change them |
 | Firefox saving passwords | `OfferToSaveLogins` and `OfferToSaveLoginsDefault` are both `false`, so Firefox never offers to save logins — Bitwarden handles passwords instead |

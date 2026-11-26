@@ -7,6 +7,8 @@
     - Installs Scoop if it is missing (per-user, or system-wide when run elevated).
     - Makes sure git is available, then installs Firefox before WezTerm and asks
       Firefox to become the default browser (Windows may ask you to confirm).
+      Firefox is marked "Held package" in scoop.json, so `scoop import` holds it
+      and updates skip it; run `scoop unhold firefox` to allow upgrades.
     - Installs a Firefox policy: auto-installs Bitwarden, mymind and
       "I still don't care about cookies", shows the bookmarks toolbar, adds a
       skoopub bookmarks folder (Hacker News, mymind, Scoop, OpenCode,

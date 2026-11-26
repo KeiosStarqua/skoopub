@@ -27,7 +27,7 @@
                 ],
     "apps":  [
                  {
-                     "Info":  "",
+                     "Info":  "Held package",
                      "Source":  "extras",
                      "Name":  "firefox"
                  },
