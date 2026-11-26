@@ -3,7 +3,7 @@
 Declarative Windows dev setup: [Scoop](https://scoop.sh) packages plus a repo-managed
 PowerShell profile, restored from a single manifest.
 
-- `scoop.json` — buckets + apps (`scoop export` format, replayed with `scoop import`)
+- `scoop.json` — buckets + apps (`scoop export` format, replayed with `scoop import`), including the personal `kbots` bucket
 - `profile.ps1` — shell config (`zoxide` + `atuin` history search), dot-sourced from your `$PROFILE`; also drops inherited `HERDR_*` variables so a fresh shell is not mistaken for a nested Herdr pane
 - `install.ps1` — one-shot bootstrap for a fresh machine
 - `firefox-policies.template.json` — Firefox policy for extensions, managed bookmarks, homepage, and password saving
@@ -75,7 +75,7 @@ cd skoop
 3. Installs **Scoop** if it is missing.
 4. Ensures **git** is available (Scoop buckets are git repos).
 5. Installs **Firefox** first, then **WezTerm**, then **Herdr** (adds the `extras` bucket if needed). Firefox is made the default browser and `firefox-policies.template.json` is copied into Firefox's `distribution` folder. On the next start it installs Bitwarden, mymind and "I still don't care about cookies", shows the bookmarks toolbar, adds a **skoopub** bookmark folder (Hacker News, mymind, Scoop, OpenCode), and opens ChatGPT as the homepage. On Windows 11, confirm the default-browser change in Settings if it opens there.
-6. Runs `scoop import scoop.json` — adds the `main` / `extras` / `nerd-fonts` / `zeldrisho` / `lemon` buckets and every listed app, including **JetBrainsMono-NF** for Rio and the Herdr TUI and **cava** for the YASB audio visualizer (`lemon` is used because Scoop's `extras` bucket has no cava manifest). If UniKey is already installed (common on public PCs), that one app is skipped so you do not end up with two IMEs; pass `-ForceUniKey` to install the Scoop copy anyway.
+6. Runs `scoop import scoop.json` — adds the `main` / `extras` / `nerd-fonts` / `zeldrisho` / `lemon` / `kbots` buckets and every listed app, including **JetBrainsMono-NF** for Rio and the Herdr TUI, **cava** for the YASB audio visualizer (`lemon` is used because Scoop's `extras` bucket has no cava manifest), and **kbots** from the personal bucket (`KeiosStarqua/kbots`; it builds from a pinned source tag using the `bun` / `rustup` / `mingw` already in this manifest). If UniKey is already installed (common on public PCs), that one app is skipped so you do not end up with two IMEs; pass `-ForceUniKey` to install the Scoop copy anyway.
 7. Starts **Tailscale**: enables/starts the Windows service if it exists, otherwise launches the Scoop `tailscaled` binary. Sign in from the Tailscale tray icon or with `tailscale up`. If the CLI is missing or cannot reach the daemon, the installer says so and still leaves Tailscale running — the CLI is only needed to list machines.
 8. Offers the **Herdr remote setup** (`setup-herdr-ssh.ps1`): it lists your tailnet machines and asks you to choose one (the only prompt). It then finds an SSH user Tailscale SSH permits by probing a few candidates derived from your git identity/Windows user — no password and no generated keys — and runs `herdr --remote ssh://<user>@<machine>` to attach. If `tailscale status --json` cannot be used on Windows, it says why and asks for the machine's Tailscale IP or MagicDNS name; `-Peer <ip|name>` skips the listing, and `-User <name>` skips user probing. Requires Tailscale SSH (`tailscale set --ssh=true`) on the target machine and a matching tailnet SSH policy. Skips itself when there are no tailnet machines or the shell is not interactive. No machine name or IP is committed to this repo.
 9. Sets the default Rust toolchain to `stable-x86_64-pc-windows-gnu` if none is configured (no Visual Studio Build Tools needed). The check tolerates a fresh `rustup`'s stderr so it cannot abort the bootstrap.
@@ -160,5 +160,6 @@ scoop export | Out-File -Encoding utf8 scoop.json
 | `herdr` says "nested herdr"/inception | A long-lived launcher (often Vicinae) inherited `HERDR_ENV=1` from a Herdr pane and passes it to new terminals. Run `.\enable-vicinae-autostart.ps1 -Restart`, then close and reopen Rio/WezTerm. `profile.ps1` already clears the variables for new PowerShell sessions |
 | Rust toolchain | GNU is set as default only when no toolchain is active; switch with `rustup default stable-x86_64-pc-windows-msvc` (needs MSVC Build Tools) |
 | `z` / `atuin` not found | The profile hook is missing or points at a missing `profile.ps1`, or the window predates the install. Check `Get-Content $PROFILE`; re-run `install.ps1` to rewrite it, then open a new PowerShell window |
+| kbots daemon | The Scoop package installs the `kbots`, `kb`, `kbots-tui` and `kbots-gui` shims but deliberately does not start the daemon; run `kbots daemon start`, then `kb status`. The daemon binds authenticated TCP on `127.0.0.1:7878` |
 
 Requires Windows 10/11 (or Server 2016+) with PowerShell 5.1+ and internet access.

@@ -19,6 +19,10 @@
                     {
                         "Name":  "lemon",
                         "Source":  "https://github.com/hoilc/scoop-lemon"
+                    },
+                    {
+                        "Name":  "kbots",
+                        "Source":  "https://github.com/KeiosStarqua/kbots"
                     }
                 ],
     "apps":  [
@@ -236,6 +240,11 @@
                      "Info":  "",
                      "Source":  "zeldrisho",
                      "Name":  "unikey"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "kbots",
+                     "Name":  "kbots"
                  }
              ]
 }
