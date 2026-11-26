@@ -20,7 +20,8 @@
       { "name": "Hacker News", "url": "https://news.ycombinator.com/" },
       { "name": "mymind", "url": "https://mymind.com/browser-extensions" },
       { "name": "Scoop", "url": "https://scoop.sh/" },
-      { "name": "OpenCode", "url": "https://opencode.ai/console" }
+      { "name": "OpenCode", "url": "https://opencode.ai/console" },
+      { "name": "YouTube to Transcript", "url": "https://youtubetotranscript.com/" }
     ],
     "Homepage": {
       "URL": "https://chatgpt.com/",

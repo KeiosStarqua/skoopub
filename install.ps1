@@ -9,7 +9,8 @@
       Firefox to become the default browser (Windows may ask you to confirm).
     - Installs a Firefox policy: auto-installs Bitwarden, mymind and
       "I still don't care about cookies", shows the bookmarks toolbar, adds a
-      skoopub bookmarks folder (Hacker News, mymind, Scoop, OpenCode), sets ChatGPT as the
+      skoopub bookmarks folder (Hacker News, mymind, Scoop, OpenCode,
+      YouTube to Transcript), sets ChatGPT as the
       homepage, and disables Firefox's save-password prompt.
     - Runs `scoop import scoop.json` (buckets + apps).
     - Starts Tailscale after the import (Windows service if present, otherwise
