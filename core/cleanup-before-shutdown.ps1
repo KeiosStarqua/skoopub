@@ -14,7 +14,9 @@
       - gh auth logout for github.com (plus the hosts.yml file as a fallback)
       - git's GitHub credential helper/username and ~/.git-credentials
       - GitHub entries in Windows Credential Manager
-      - SSH private keys under ~/.ssh and the temporary Herdr key folder
+      - SSH keys (private + public) under ~/.ssh, known_hosts and temporary Herdr keys
+      - saved Herdr machines (herdr machine remove for every profile)
+      - OpenCode credentials (opencode auth logout + auth.json fallback)
       - Tailscale login (tailscale logout), so the PC is no longer on the tailnet
       - Pear Desktop / YouTube Music user data (saved Google login and cache)
       - Firefox logins.json / key4.db from the backed-up profiles
@@ -459,15 +461,71 @@ function Remove-GitHubAuth {
 function Remove-SshKeys {
     $sshDir = Join-Path $env:USERPROFILE '.ssh'
     if (Test-Path -LiteralPath $sshDir) {
+        # Private keys, public keys and certs: leave no reusable key material.
         Get-ChildItem -LiteralPath $sshDir -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -match '(?i)(^id_|\.ppk$|\.pem$)' -and $_.Extension -ne '.pub' } |
+            Where-Object { $_.Name -match '(?i)(^id_|^key|^\w+_[a-z0-9]+$|\.ppk$|\.pem$|\.pub$|-cert\.pub$)' } |
             ForEach-Object { Remove-Path $_.FullName }
+        Remove-Path (Join-Path $sshDir 'known_hosts')
     }
     foreach ($dir in @(
         (Join-Path $env:TEMP 'skoop-herdr-ssh'),
         (Join-Path $env:LOCALAPPDATA 'skoop-herdr-ssh')
     )) {
         Remove-Path $dir -Recurse
+    }
+}
+
+function Remove-HerdrMachines {
+    $herdr = Get-Command herdr -ErrorAction SilentlyContinue
+    if (-not $herdr) {
+        Write-Log 'herdr not found - skipping saved-machine removal'
+        return
+    }
+    if ($DryRun) {
+        Write-Log 'DRYRUN would remove every saved herdr machine'
+        return
+    }
+    $machines = @(& herdr machine list 2>$null)
+    foreach ($line in $machines) {
+        $id = ($line -split "`t")[0].Trim()
+        if (-not $id -or $id -match '(?i)^profile|^id') { continue }
+        try {
+            & herdr machine remove $id 2>&1 | ForEach-Object { Write-Log $_ }
+            Write-Log ("removed herdr machine: " + $id)
+        } catch {
+            Write-Log ("could not remove herdr machine $id : " + $_.Exception.Message)
+        }
+    }
+}
+
+function Remove-OpenCodeAuth {
+    $opencode = Get-Command opencode -ErrorAction SilentlyContinue
+    if ($opencode) {
+        if ($DryRun) {
+            Write-Log 'DRYRUN would log out all opencode credentials'
+        } else {
+            $accounts = @(& opencode auth list 2>$null)
+            foreach ($line in $accounts) {
+                $parts = @($line -split '\s{2,}') | Where-Object { $_.Trim() }
+                if ($parts.Count -lt 2) { continue }
+                $integration = $parts[0].Trim()
+                $credential = $parts[1].Trim()
+                try {
+                    & opencode auth logout $integration $credential 2>&1 | ForEach-Object { Write-Log $_ }
+                    Write-Log ("opencode logout: " + $integration + ' / ' + $credential)
+                } catch {
+                    Write-Log ("opencode logout failed for $integration/$credential : " + $_.Exception.Message)
+                }
+            }
+        }
+    }
+    # Fallback for credential files used by older/alternate opencode builds.
+    foreach ($file in @(
+        (Join-Path $env:USERPROFILE '.config\opencode\auth.json'),
+        (Join-Path $env:USERPROFILE '.local\share\opencode\auth.json'),
+        (Join-Path $env:LOCALAPPDATA 'opencode\auth.json')
+    )) {
+        Remove-Path $file
     }
 }
 
@@ -599,6 +657,8 @@ if ($BackupOnly) {
 } else {
     Remove-GitHubAuth
     Remove-SshKeys
+    Remove-HerdrMachines
+    Remove-OpenCodeAuth
     Remove-TailscaleAuth
     Remove-PearDesktopData
 
