@@ -1,5 +1,5 @@
 # Repo-managed Alacritty config. Installed by configure-alacritty.ps1.
-# JetBrainsMono Nerd Font Mono keeps Nerd Font icons/Powerline glyphs readable
+# JetBrainsMono NF keeps Nerd Font icons/Powerline glyphs readable
 # in Herdr TUI while matching WezTerm's default JetBrains Mono look.
 
 [font]
@@ -7,19 +7,19 @@ size = 12.0
 builtin_box_drawing = true
 
 [font.normal]
-family = "JetBrainsMono Nerd Font Mono"
+family = "JetBrainsMono NF"
 style = "Regular"
 
 [font.bold]
-family = "JetBrainsMono Nerd Font Mono"
+family = "JetBrainsMono NF"
 style = "Bold"
 
 [font.italic]
-family = "JetBrainsMono Nerd Font Mono"
+family = "JetBrainsMono NF"
 style = "Italic"
 
 [font.bold_italic]
-family = "JetBrainsMono Nerd Font Mono"
+family = "JetBrainsMono NF"
 style = "Bold Italic"
 
 # A small offset adds breathing room without changing the glyph size.
