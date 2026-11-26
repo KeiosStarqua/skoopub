@@ -5,7 +5,8 @@
 
 .DESCRIPTION
     - Installs Scoop if it is missing (per-user, or system-wide when run elevated).
-    - Makes sure git is available, then runs `scoop import scoop.json` (buckets + apps).
+    - Makes sure git is available, then installs WezTerm first so the terminal is ready early.
+    - Runs `scoop import scoop.json` (buckets + apps).
     - Keeps a UniKey that is already installed (e.g. on a public PC) instead of
       adding a second copy; -ForceUniKey installs the Scoop build anyway.
     - Applies fix-sharex-printscreen.ps1 so ShareX owns the PrtSc key.
@@ -130,7 +131,22 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     & $scoop install git
 }
 
-# --- 5. Restore buckets + apps ----------------------------------------------
+# --- 5. Install WezTerm first -----------------------------------------------
+Write-Step 'Installing WezTerm first'
+$extrasBucket = & $scoop bucket list 2>$null | Select-String -Pattern '^\s*extras\b' -Quiet
+if (-not $extrasBucket) {
+    & $scoop bucket add extras
+    if ($LASTEXITCODE -ne 0) { throw "scoop bucket add extras failed with exit code $LASTEXITCODE." }
+}
+$weztermInstalled = & $scoop list 2>$null | Select-String -Pattern '^\s*wezterm\b' -Quiet
+if (-not $weztermInstalled) {
+    & $scoop install wezterm
+    if ($LASTEXITCODE -ne 0) { throw "scoop install wezterm failed with exit code $LASTEXITCODE." }
+} else {
+    Write-Ok 'WezTerm already installed'
+}
+
+# --- 6. Restore buckets + apps ----------------------------------------------
 $manifestToImport = $manifest
 if (-not $ForceUniKey -and (Test-UniKeyInstalled)) {
     Write-Step 'UniKey already installed - keeping the existing copy'
@@ -145,7 +161,7 @@ Write-Step "Importing $manifestToImport"
 & $scoop import $manifestToImport
 if ($LASTEXITCODE -ne 0) { throw "scoop import failed with exit code $LASTEXITCODE." }
 
-# --- 6. Default Rust toolchain: GNU (no Visual Studio Build Tools needed) ----
+# --- 7. Default Rust toolchain: GNU (no Visual Studio Build Tools needed) ----
 $cargoBin = Join-Path $env:SCOOP 'persist\rustup\.cargo\bin'
 if (Test-Path $cargoBin) { $env:Path = "$cargoBin;$env:Path" }
 if (Get-Command rustup -ErrorAction SilentlyContinue) {
@@ -158,7 +174,7 @@ if (Get-Command rustup -ErrorAction SilentlyContinue) {
     }
 }
 
-# --- 7. Let ShareX own the PrtSc key -----------------------------------------
+# --- 8. Let ShareX own the PrtSc key -----------------------------------------
 if (Test-Path $sharexFix) {
     Write-Step 'Applying ShareX PrtSc fix'
     & $sharexFix
@@ -166,7 +182,7 @@ if (Test-Path $sharexFix) {
     Write-Ok 'fix-sharex-printscreen.ps1 not found - skipping'
 }
 
-# --- 8. Hook the repo-managed profile into $PROFILE --------------------------
+# --- 9. Hook the repo-managed profile into $PROFILE --------------------------
 Write-Step 'Wiring profile.ps1 into your PowerShell profile'
 $hook = "# Load the repo-managed shell config. Edit that file, not this one.`n. `"$profileScript`""
 

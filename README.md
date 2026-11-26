@@ -34,10 +34,11 @@ cd skoop
 
 1. Installs **Scoop** if it is missing.
 2. Ensures **git** is available (Scoop buckets are git repos).
-3. Runs `scoop import scoop.json` — adds the `main` / `extras` / `zeldrisho` buckets and every listed app. If UniKey is already installed (common on public PCs), that one app is skipped so you do not end up with two IMEs; pass `-ForceUniKey` to install the Scoop copy anyway.
-4. Sets the default Rust toolchain to `stable-x86_64-pc-windows-gnu` if none is configured (no Visual Studio Build Tools needed).
-5. Disables Windows' "Print screen opens Snipping Tool" so **ShareX** can bind PrtSc.
-6. Wires `profile.ps1` into your `$PROFILE` (idempotent). An older hook pointing at a `profile.ps1` that no longer exists is rewritten, which is what silently breaks `z` after the repo moves.
+3. Installs **WezTerm** first (adds the `extras` bucket if needed), so the terminal is available early in the bootstrap.
+4. Runs `scoop import scoop.json` — adds the `main` / `extras` / `zeldrisho` buckets and every listed app. If UniKey is already installed (common on public PCs), that one app is skipped so you do not end up with two IMEs; pass `-ForceUniKey` to install the Scoop copy anyway.
+5. Sets the default Rust toolchain to `stable-x86_64-pc-windows-gnu` if none is configured (no Visual Studio Build Tools needed).
+6. Disables Windows' "Print screen opens Snipping Tool" so **ShareX** can bind PrtSc.
+7. Wires `profile.ps1` into your `$PROFILE` (idempotent). An older hook pointing at a `profile.ps1` that no longer exists is rewritten, which is what silently breaks `z` after the repo moves.
 
 Then open a new PowerShell window and try:
 

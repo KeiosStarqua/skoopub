@@ -40,7 +40,13 @@ if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
 }
 $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
 
-# 2. Restore buckets + apps declared in scoop.json.
+# 2. Install WezTerm first.
+$extrasBucket = scoop bucket list 2>$null | Select-String -Pattern '^\s*extras\b' -Quiet
+if (-not $extrasBucket) { scoop bucket add extras }
+$weztermInstalled = scoop list 2>$null | Select-String -Pattern '^\s*wezterm\b' -Quiet
+if (-not $weztermInstalled) { scoop install wezterm } else { Write-Host 'WezTerm already installed.' }
+
+# 3. Restore buckets + apps declared in scoop.json.
 $manifest = Join-Path $repo 'scoop.json'
 if (-not $ForceUniKey -and (Test-UniKeyInstalled)) {
     Write-Host 'UniKey already installed - keeping the existing copy (-ForceUniKey overrides).'
@@ -51,7 +57,7 @@ if (-not $ForceUniKey -and (Test-UniKeyInstalled)) {
 }
 scoop import $manifest
 
-# 3. Default the Rust toolchain to GNU when none is configured yet.
+# 4. Default the Rust toolchain to GNU when none is configured yet.
 $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE 'scoop' }
 $cargoBin = Join-Path $scoopRoot 'persist\rustup\.cargo\bin'
 if (Test-Path $cargoBin) { $env:Path = "$cargoBin;$env:Path" }
@@ -65,11 +71,11 @@ if (Get-Command rustup -ErrorAction SilentlyContinue) {
     }
 }
 
-# 4. Let ShareX own PrtSc: Windows otherwise hands the key to the Snipping Tool.
+# 5. Let ShareX own PrtSc: Windows otherwise hands the key to the Snipping Tool.
 $sharexFix = Join-Path $repo 'fix-sharex-printscreen.ps1'
 if (Test-Path $sharexFix) { & $sharexFix }
 
-# 5. Make PowerShell load the repo-managed shell config on startup.
+# 6. Make PowerShell load the repo-managed shell config on startup.
 #    Any earlier hook is rewritten: a stale path (e.g. ~\skoop\profile.ps1 from an
 #    old layout) would point at a missing file and silently load nothing.
 $loader = Join-Path $repo 'profile.ps1'
