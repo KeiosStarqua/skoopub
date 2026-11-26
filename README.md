@@ -6,7 +6,7 @@ PowerShell profile, restored from a single manifest.
 - `scoop.json` — buckets + apps (`scoop export` format, replayed with `scoop import`)
 - `profile.ps1` — shell config (`zoxide` + `atuin` history search), dot-sourced from your `$PROFILE`
 - `install.ps1` — one-shot bootstrap for a fresh machine
-- `firefox-policies.template.json` — Firefox policy that auto-installs Bitwarden
+- `firefox-policies.template.json` — Firefox policy that auto-installs Bitwarden and mymind
 - `fix-sharex-printscreen.ps1` — hands the PrtSc key back to ShareX
 
 ## Install with one command
@@ -37,7 +37,7 @@ cd skoop
 2. Enables **Task Manager** by setting `DisableTaskMgr=0` for the current user; when run elevated, the machine-wide policy is cleared as well. A locked key is reported but does not abort setup.
 3. Installs **Scoop** if it is missing.
 4. Ensures **git** is available (Scoop buckets are git repos).
-5. Installs **Firefox** first, then **WezTerm**, then **Herdr** (adds the `extras` bucket if needed). Firefox is made the default browser and `firefox-policies.template.json` is copied into Firefox's `distribution` folder so the Bitwarden extension installs automatically on the next start. On Windows 11, confirm the default-browser change in Settings if it opens there.
+5. Installs **Firefox** first, then **WezTerm**, then **Herdr** (adds the `extras` bucket if needed). Firefox is made the default browser and `firefox-policies.template.json` is copied into Firefox's `distribution` folder so the Bitwarden and mymind extensions install automatically on the next start. On Windows 11, confirm the default-browser change in Settings if it opens there.
 6. Runs `scoop import scoop.json` — adds the `main` / `extras` / `zeldrisho` buckets and every listed app. If UniKey is already installed (common on public PCs), that one app is skipped so you do not end up with two IMEs; pass `-ForceUniKey` to install the Scoop copy anyway.
 7. Sets the default Rust toolchain to `stable-x86_64-pc-windows-gnu` if none is configured (no Visual Studio Build Tools needed). The check tolerates a fresh `rustup`'s stderr so it cannot abort the bootstrap.
 8. Disables Windows' "Print screen opens Snipping Tool" so **ShareX** can bind PrtSc. A failure here is reported but does not abort the setup.
@@ -71,7 +71,7 @@ scoop export | Out-File -Encoding utf8 scoop.json
 | Task Manager disabled by policy | `DisableTaskMgr` is set to `0` for the current user; elevated runs also clear the machine-wide value. A domain policy may reapply it on the next refresh |
 | From a clone | The files next to `install.ps1` are used, so edits apply directly |
 | Firefox default browser | `firefox --setDefaultBrowser` runs after install (skipped if Firefox is already the http handler); Windows 11 may open Settings for confirmation, and a failure is non-fatal |
-| Bitwarden extension | Deployed as a Firefox `normal_installed` policy, so it is installed/updated automatically but can still be disabled or removed. Restart Firefox once after setup; check `about:policies` |
+| Bitwarden / mymind extensions | Both use Firefox `normal_installed` policies, so they install automatically but can still be disabled or removed. Bitwarden updates from AMO; mymind is pinned to the 2.0.2 XPI URL, so bump that URL when a newer version ships. Restart Firefox once after setup; check `about:policies` |
 | UniKey preinstalled | Detected via process, uninstall registry and Scoop dir; the existing copy is kept unless `-ForceUniKey` is passed |
 | Rust toolchain | GNU is set as default only when no toolchain is active; switch with `rustup default stable-x86_64-pc-windows-msvc` (needs MSVC Build Tools) |
 | `z` / `atuin` not found | The profile hook is missing or points at a missing `profile.ps1`, or the window predates the install. Check `Get-Content $PROFILE`; re-run `install.ps1` to rewrite it, then open a new PowerShell window |
