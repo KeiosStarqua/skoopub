@@ -195,6 +195,11 @@
                  },
                  {
                      "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "yasb"
+                 },
+                 {
+                     "Info":  "",
                      "Source":  "nerd-fonts",
                      "Name":  "JetBrainsMono-NF"
                  },
