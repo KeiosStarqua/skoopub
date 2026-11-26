@@ -47,7 +47,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 Pass the machine/user up front to skip all prompts (values are supplied at runtime, never committed):
 
 ```powershell
-.\install.ps1 -HerdrPeer <machine-or-ip> -HerdrUser <user> -SkipGhLogin
+.\install.ps1 -HerdrPeer              # interactive gum picker for the machine
+.\install.ps1 -Peer <machine-or-ip> -HerdrUser <user> -SkipGhLogin
 ```
 
 Use `-SkipHerdrConnect` if you only want the machine configured. The piped form accepts the same options through environment variables:

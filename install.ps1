@@ -66,8 +66,12 @@
     Skip the interactive `gh auth login` prompt; only wire up an existing gh login.
 
 .PARAMETER HerdrPeer
-    Tailnet IP or MagicDNS name of the Herdr machine. Passed to
-    setup-herdr-ssh.ps1 so the machine-selection prompt is skipped.
+    Switch: use the interactive gum picker to choose the Herdr machine
+    (no value needed). Use -Peer to supply a name/IP non-interactively.
+
+.PARAMETER Peer
+    Tailnet IP or MagicDNS name of the Herdr machine. Skips the picker.
+    Defaults to $env:SKOOP_HERDR_PEER for piped runs.
 
 .PARAMETER HerdrUser
     SSH user to use on the Herdr machine (otherwise auto-detected).
@@ -84,8 +88,11 @@
     powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 
 .EXAMPLE
+    # Force the interactive peer picker.
+    .\install.ps1 -HerdrPeer
+
     # Same, but with the machine/user supplied so nothing is prompted.
-    .\install.ps1 -HerdrPeer <machine> -HerdrUser <user> -SkipGhLogin
+    .\install.ps1 -Peer <machine> -HerdrUser <user> -SkipGhLogin
 
 .EXAMPLE
     irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
@@ -95,7 +102,8 @@ param(
     [string]$RepoRawBase = 'https://raw.githubusercontent.com/KeiosStarqua/skoopub/main',
     [switch]$ForceUniKey,
     [switch]$SkipGhLogin,
-    [string]$HerdrPeer = "$env:SKOOP_HERDR_PEER",
+    [switch]$HerdrPeer,
+    [string]$Peer = "$env:SKOOP_HERDR_PEER",
     [string]$HerdrUser = "$env:SKOOP_HERDR_USER",
     [switch]$SkipHerdrConnect,
     [switch]$NoMenu,
@@ -116,11 +124,12 @@ skoop install.ps1 - interactive Windows setup
 Usage:
   .\install.ps1                          # menu: Full / Configure only / Herdr only / Quit
   .\install.ps1 -NoMenu                  # skip the menu, run everything
-  .\install.ps1 -HerdrPeer <machine> -HerdrUser <user>
+  .\install.ps1 -HerdrPeer              # interactive peer picker
+  .\install.ps1 -Peer <machine> -HerdrUser <user>
   .\install.ps1 -SkipHerdrConnect        # configure only
   irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
-Options: -ForceUniKey -SkipGhLogin -HerdrPeer -HerdrUser -SkipHerdrConnect -NoMenu -Help
+Options: -ForceUniKey -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -NoMenu -Help
 Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_NO_MENU
 '@
     return
@@ -191,7 +200,7 @@ function Connect-HerdrRemote {
     if (-not (Test-Path $herdrSsh)) { Write-Ok 'setup-herdr-ssh.ps1 not found - skipping'; return }
     Write-Step 'Picking a tailnet machine for Herdr'
     $herdrArgs = @()
-    if ($HerdrPeer) { $herdrArgs += @('-Peer', $HerdrPeer) }
+    if ($Peer) { $herdrArgs += @('-Peer', $Peer) }
     if ($HerdrUser) { $herdrArgs += @('-User', $HerdrUser) }
     try {
         & $herdrSsh @herdrArgs
@@ -390,7 +399,7 @@ function Find-ScoopShims {
 # --- 0. Interactive CLI menu (gum when available) ----------------------------
 $runMode = 'full'
 if (-not $NoMenu -and $env:SKOOP_NO_MENU -ne '1' -and
-    -not ($ForceUniKey -or $SkipGhLogin -or $SkipHerdrConnect -or $HerdrPeer -or $HerdrUser)) {
+    -not ($ForceUniKey -or $SkipGhLogin -or $SkipHerdrConnect -or $Peer -or $HerdrUser)) {
     $runMode = Invoke-SetupMenu
 }
 if ($runMode -eq 'quit') {
