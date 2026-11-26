@@ -126,10 +126,32 @@ function Enable-TaskManager {
     }
 }
 
+function Show-TailscaleSignInHint {
+    # The daemon and tray app work without the CLI; only peer listing needs it.
+    # Probe it so the sign-in advice is right, and never fail the bootstrap on it.
+    $tailscale = Get-Command tailscale -ErrorAction SilentlyContinue
+    if (-not $tailscale) {
+        Write-Host 'Tailscale CLI not found - sign in from the Tailscale tray icon.' -ForegroundColor Yellow
+        return
+    }
+    $raw = (& cmd /c ('"{0}" status 2>&1' -f $tailscale.Source) | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+        $line = ($raw -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 1)
+        if (-not $line) { $line = "exit code $LASTEXITCODE" }
+        Write-Host "Tailscale CLI cannot reach the daemon ($($line.Trim())); use the tray icon to sign in." -ForegroundColor Yellow
+        return
+    }
+    if ($raw -match 'Logged out|NeedsLogin|not logged in|stopped') {
+        Write-Host 'Tailscale is running but not signed in - sign in from the tray icon or run `tailscale up`.' -ForegroundColor Yellow
+    } else {
+        Write-Host 'Tailscale is connected.'
+    }
+}
+
 function Start-TailscaleDaemon {
     # Scoop ships tailscaled but not the Windows service. Prefer the service
     # when the official installer created it; otherwise run the shim directly.
-    # Login (`tailscale up`) is interactive, so it is left to the user.
+    # Login is interactive (tray icon or `tailscale up`), so it is left to you.
     Write-Host 'Starting Tailscale...'
     $service = Get-Service -Name 'Tailscale' -ErrorAction SilentlyContinue
     if ($service) {
@@ -147,21 +169,21 @@ function Start-TailscaleDaemon {
         } catch {
             Write-Host "Could not set Tailscale to Automatic (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
         }
-        return
+    } else {
+        $tailscaled = Get-Command tailscaled -ErrorAction SilentlyContinue
+        if (-not $tailscaled) { Write-Host 'tailscaled not on PATH - skipping.' }
+        elseif (Get-Process -Name 'tailscaled' -ErrorAction SilentlyContinue) {
+            Write-Host 'tailscaled is already running.'
+        } else {
+            try {
+                Start-Process -FilePath $tailscaled.Source -WindowStyle Hidden
+                Write-Host 'Launched tailscaled from Scoop.'
+            } catch {
+                Write-Host "Could not launch tailscaled (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
     }
-
-    $tailscaled = Get-Command tailscaled -ErrorAction SilentlyContinue
-    if (-not $tailscaled) { Write-Host 'tailscaled not on PATH - skipping.'; return }
-    if (Get-Process -Name 'tailscaled' -ErrorAction SilentlyContinue) {
-        Write-Host 'tailscaled is already running.'
-        return
-    }
-    try {
-        Start-Process -FilePath $tailscaled.Source -WindowStyle Hidden
-        Write-Host 'Launched tailscaled from Scoop (run `tailscale up` to sign in).'
-    } catch {
-        Write-Host "Could not launch tailscaled (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
-    }
+    Show-TailscaleSignInHint
 }
 
 # 1. Install Scoop if it is missing (no admin needed unless already elevated).

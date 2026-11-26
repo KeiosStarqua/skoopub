@@ -6,8 +6,11 @@
 .DESCRIPTION
     Meant for a public/internet-cafe Windows machine after `tailscale up`:
 
-      - Lists the machines on the tailnet and asks you to choose the one that
-        has Herdr inside.
+      - Lists the machines on the tailnet with `tailscale status --json` and asks
+        you to choose the one that has Herdr inside. If the Windows CLI is not on
+        PATH or cannot talk to the daemon, you are asked for the machine's
+        Tailscale IP / MagicDNS name instead - Tailscale itself can still work.
+        Use -Peer to provide that address up front and skip the listing entirely.
       - Asks for the SSH user on that machine.
       - Creates a temporary ed25519 key pair under %TEMP% (the private key never
         leaves this machine).
@@ -21,6 +24,11 @@
 
 .PARAMETER Alias
     Alias for the SSH Host / Herdr machine. Defaults to the machine's DNS label.
+
+.PARAMETER Peer
+    Tailscale IP (100.x.y.z) or MagicDNS name of the machine that has Herdr.
+    Accepts user@host to preset the SSH user. Skips `tailscale status --json`,
+    which is useful when the Windows CLI is unavailable.
 
 .PARAMETER KeyDir
     Folder holding the temporary key pair (default: %TEMP%\skoop-herdr-ssh).
@@ -41,11 +49,15 @@
     .\setup-herdr-ssh.ps1
 
 .EXAMPLE
+    .\setup-herdr-ssh.ps1 -Peer muse -Alias muse
+
+.EXAMPLE
     .\setup-herdr-ssh.ps1 -Revoke -Alias muse
 #>
 [CmdletBinding()]
 param(
     [string]$Alias,
+    [string]$Peer,
     [string]$KeyDir = (Join-Path $env:TEMP 'skoop-herdr-ssh'),
     [switch]$SkipMachineAdd,
     [switch]$Attach,
@@ -63,11 +75,60 @@ function Write-Step([string]$Message) { Write-Host "==> $Message" -ForegroundCol
 function Write-Ok([string]$Message)   { Write-Host "    $Message" -ForegroundColor DarkGray }
 function Write-Warn([string]$Message) { Write-Host "    $Message" -ForegroundColor Yellow }
 
+$script:TailscaleCliError = $null
+$script:TailscaleBackend  = $null
+
+function Resolve-TailscaleCli {
+    # The official Windows installer does not add the CLI to PATH. Look in the
+    # usual places before giving up; the CLI is only used to list peers, never
+    # to change the network, so a missing/broken one is not fatal.
+    $cmd = Get-Command tailscale -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+
+    $candidates = @()
+    if ($env:ProgramFiles) { $candidates += Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe' }
+    if (${env:ProgramFiles(x86)}) { $candidates += Join-Path ${env:ProgramFiles(x86)} 'Tailscale\tailscale.exe' }
+    if ($env:LOCALAPPDATA) { $candidates += Join-Path $env:LOCALAPPDATA 'Tailscale\tailscale.exe' }
+    $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE 'scoop' }
+    $candidates += Join-Path $scoopRoot 'apps\tailscale\current\tailscale.exe'
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+    return $null
+}
+
+function Test-TailscaleRunning {
+    if (Get-Service -Name 'Tailscale' -ErrorAction SilentlyContinue) { return $true }
+    return [bool](Get-Process -Name 'tailscaled', 'tailscale-ipn' -ErrorAction SilentlyContinue)
+}
+
+function Get-TailscaleStatus {
+    $cli = Resolve-TailscaleCli
+    if (-not $cli) {
+        $script:TailscaleCliError = 'tailscale.exe was not found (PATH, Program Files or Scoop)'
+        return $null
+    }
+
+    # cmd /c merges stderr without PS 5.1 turning it into a terminating error.
+    # Quoting the path once is correct even when it contains spaces.
+    $raw = (& cmd /c ('"{0}" status --json 2>&1' -f $cli) | Out-String)
+    if ($LASTEXITCODE -ne 0 -or -not $raw.Trim()) {
+        $line = ($raw -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 1)
+        if (-not $line) { $line = "exit code $LASTEXITCODE" }
+        $script:TailscaleCliError = $line.Trim()
+        return $null
+    }
+    try { return ($raw | ConvertFrom-Json) } catch {
+        $script:TailscaleCliError = "could not parse 'tailscale status --json' output"
+        return $null
+    }
+}
+
 function Get-TailnetPeers {
-    if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) { return @() }
-    $raw = (& cmd /c 'tailscale status --json 2>&1' | Out-String)
-    if ($LASTEXITCODE -ne 0 -or -not $raw) { return @() }
-    try { $status = $raw | ConvertFrom-Json } catch { return @() }
+    $status = Get-TailscaleStatus
+    if (-not $status) { return @() }
+    if ($status.BackendState) { $script:TailscaleBackend = "$($status.BackendState)" }
     if ($status.BackendState -and $status.BackendState -ne 'Running') { return @() }
 
     $peers = @()
@@ -91,6 +152,37 @@ function Get-TailnetPeers {
         }
     }
     return @($peers | Sort-Object -Property Online -Descending)
+}
+
+function New-ManualPeer {
+    # Without the CLI we cannot enumerate peers, but SSH only needs the address.
+    param([string]$Target)
+    $target = "$Target".Trim()
+    $sshUser = ''
+    if ($target -match '^([^@]+)@(.+)$') { $sshUser = $Matches[1]; $target = $Matches[2] }
+    $target = $target.TrimEnd('.')
+    $label = if ($target -match '^\d+\.\d+\.\d+\.\d+$') { $target } else { ($target -split '\.')[0] }
+    if (-not $label) { $label = $target }
+    return [pscustomobject]@{
+        Alias   = $label
+        Dns     = $target
+        Ip      = $target
+        User    = $target
+        Online  = $true
+        SshUser = $sshUser
+    }
+}
+
+function Read-ManualPeer {
+    if (-not [Environment]::UserInteractive) {
+        Write-Warn 'Non-interactive shell - skipping Herdr SSH setup.'
+        return @()
+    }
+    Write-Host '    Enter the Tailscale IP (100.x.y.z) or MagicDNS name of the machine'
+    Write-Host '    that has Herdr, or press Enter to skip.'
+    $target = Read-Host 'Tailnet machine'
+    if (-not $target) { return @() }
+    return @(New-ManualPeer -Target $target)
 }
 
 function Select-Peer {
@@ -235,17 +327,39 @@ if ($Revoke) {
     return
 }
 
-$peers = @(Get-TailnetPeers)
-if ($peers.Count -eq 0) {
-    Write-Warn 'No tailnet machines found. Run `tailscale up`, sign in, then re-run this script.'
+# Do not reuse $Peer here: it is a [string] parameter, so assigning a peer
+# object to it would coerce the object to a string and lose its properties.
+$selected = $null
+if ($Peer) {
+    $selected = New-ManualPeer -Target $Peer
+} else {
+    $peers = @(Get-TailnetPeers)
+    if ($peers.Count -gt 0) {
+        $selected = Select-Peer -Peers $peers
+    } elseif ($script:TailscaleCliError) {
+        Write-Warn "Tailscale CLI is not usable here: $($script:TailscaleCliError)"
+        if (Test-TailscaleRunning) {
+            Write-Warn 'Tailscale itself is running - the CLI is only used to list machines.'
+            $manual = @(Read-ManualPeer)
+            if ($manual.Count -gt 0) { $selected = $manual[0] }
+        } else {
+            Write-Warn 'Tailscale does not look installed or running either; skipping the Herdr SSH setup.'
+        }
+    } elseif ($script:TailscaleBackend -and $script:TailscaleBackend -ne 'Running') {
+        Write-Warn "Tailscale is not connected (state: $($script:TailscaleBackend)). Sign in from the Tailscale tray icon (or run ``tailscale up``), then re-run."
+    } else {
+        Write-Warn 'No tailnet machines found. Sign in to Tailscale, then re-run this script.'
+    }
+}
+if (-not $selected) {
+    Write-Ok 'Skipping the Herdr SSH setup.'
     return
 }
-$peer = Select-Peer -Peers $peers
-if (-not $peer) { return }
 
-$name = if ($Alias) { $Alias } else { $peer.Alias }
-$answer = Read-Host ("SSH user on {0} [{1}]" -f $peer.Dns, $env:USERNAME)
-$user = if ($answer) { $answer } else { $env:USERNAME }
+$name = if ($Alias) { $Alias } else { $selected.Alias }
+$defaultUser = if ($selected.SshUser) { $selected.SshUser } else { $env:USERNAME }
+$answer = Read-Host ("SSH user on {0} [{1}]" -f $selected.Dns, $defaultUser)
+$user = if ($answer) { $answer } else { $defaultUser }
 
 New-Item -ItemType Directory -Force -Path $KeyDir | Out-Null
 $key = Join-Path $KeyDir 'id_ed25519'
@@ -259,12 +373,12 @@ if (-not (Test-Path $key)) {
 }
 $publicKey = (Get-Content -LiteralPath "$key.pub" -Raw).Trim()
 
-if (-not (Install-TempPublicKey -User $user -Ip $peer.Ip -PublicKey $publicKey)) {
+if (-not (Install-TempPublicKey -User $user -Ip $selected.Ip -PublicKey $publicKey)) {
     Write-Warn 'Remote authorization did not complete; stopping before the Herdr step.'
     return
 }
 
-Set-SshAlias -AliasName $name -Ip $peer.Ip -User $user -Key $key
+Set-SshAlias -AliasName $name -Ip $selected.Ip -User $user -Key $key
 Write-Ok "test it with: ssh $name"
 
 if (-not $SkipMachineAdd) {

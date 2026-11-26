@@ -13,10 +13,12 @@
       homepage, and disables Firefox's save-password prompt.
     - Runs `scoop import scoop.json` (buckets + apps).
     - Starts Tailscale after the import (Windows service if present, otherwise
-      the Scoop `tailscaled` shim); the interactive `tailscale up` login is left to you.
+      the Scoop `tailscaled` shim); login is left to you (`tailscale up` or the
+      tray icon - the CLI may be missing or unable to reach the daemon on Windows).
     - Offers a temporary SSH key + Herdr remote setup via setup-herdr-ssh.ps1:
-      pick a tailnet machine, generate a throwaway key, authorize it with your
-      SSH password, add an SSH alias and register it with Herdr.
+      pick a tailnet machine (or type its IP/MagicDNS name when the CLI is not
+      usable), generate a throwaway key, authorize it with your SSH password,
+      add an SSH alias and register it with Herdr.
     - Keeps a UniKey that is already installed (e.g. on a public PC) instead of
       adding a second copy; -ForceUniKey installs the Scoop build anyway.
     - Adds a dot-source line for profile.ps1 to your PowerShell $PROFILE early on,
@@ -101,10 +103,33 @@ function Enable-TaskManager {
     }
 }
 
+function Show-TailscaleSignInHint {
+    # Tailscale's daemon and tray app work without the CLI; only peer listing
+    # needs it. Probe the CLI so the sign-in advice matches this machine, and
+    # never let a broken CLI fail the bootstrap.
+    $tailscale = Get-Command tailscale -ErrorAction SilentlyContinue
+    if (-not $tailscale) {
+        Write-Host '    Tailscale CLI not found - sign in from the Tailscale tray icon.' -ForegroundColor Yellow
+        return
+    }
+    $raw = (& cmd /c ('"{0}" status 2>&1' -f $tailscale.Source) | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+        $line = ($raw -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 1)
+        if (-not $line) { $line = "exit code $LASTEXITCODE" }
+        Write-Host "    Tailscale CLI cannot reach the daemon ($($line.Trim())); use the tray icon to sign in." -ForegroundColor Yellow
+        return
+    }
+    if ($raw -match 'Logged out|NeedsLogin|not logged in|stopped') {
+        Write-Ok 'Tailscale is running but not signed in - sign in from the tray icon or run `tailscale up`'
+    } else {
+        Write-Ok 'Tailscale is connected'
+    }
+}
+
 function Start-TailscaleDaemon {
     # Scoop ships tailscaled but not the Windows service. Prefer the service
     # when the official installer created it; otherwise run the shim directly.
-    # Login (`tailscale up`) is interactive, so it is left to the user.
+    # Login is interactive (tray icon or `tailscale up`), so it is left to you.
     Write-Step 'Starting Tailscale'
     $service = Get-Service -Name 'Tailscale' -ErrorAction SilentlyContinue
     if ($service) {
@@ -122,24 +147,22 @@ function Start-TailscaleDaemon {
         } catch {
             Write-Host "    Could not set Tailscale to Automatic (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
         }
-        return
+    } else {
+        $tailscaled = Get-Command tailscaled -ErrorAction SilentlyContinue
+        if (-not $tailscaled) {
+            Write-Ok 'tailscaled not on PATH - skipping'
+        } elseif (Get-Process -Name 'tailscaled' -ErrorAction SilentlyContinue) {
+            Write-Ok 'tailscaled is already running'
+        } else {
+            try {
+                Start-Process -FilePath $tailscaled.Source -WindowStyle Hidden
+                Write-Ok 'launched tailscaled from Scoop'
+            } catch {
+                Write-Host "    Could not launch tailscaled (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
     }
-
-    $tailscaled = Get-Command tailscaled -ErrorAction SilentlyContinue
-    if (-not $tailscaled) {
-        Write-Ok 'tailscaled not on PATH - skipping'
-        return
-    }
-    if (Get-Process -Name 'tailscaled' -ErrorAction SilentlyContinue) {
-        Write-Ok 'tailscaled is already running'
-        return
-    }
-    try {
-        Start-Process -FilePath $tailscaled.Source -WindowStyle Hidden
-        Write-Ok 'launched tailscaled from Scoop (run `tailscale up` to sign in)'
-    } catch {
-        Write-Host "    Could not launch tailscaled (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
-    }
+    Show-TailscaleSignInHint
 }
 
 function Set-FirefoxDefaultBrowser {
