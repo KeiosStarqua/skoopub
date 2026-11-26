@@ -31,6 +31,8 @@
       so `git push` uses the GitHub CLI token instead of prompting for a username.
     - Registers `vicinae-server.exe` in the per-user Startup folder and starts it
       now, so the Vicinae global shortcut works after every sign-in.
+    - Sets the Vicinae global toggle shortcut to Ctrl+Space via a repo-managed
+      config import (existing Vicinae settings are preserved).
 
     Works two ways:
       Local :  .\install.ps1
@@ -249,8 +251,9 @@ if (-not $repoRoot) {
         'scoop.json', 'profile.ps1', 'fix-sharex-printscreen.ps1',
         'sharex-hotkeys.template.json', 'firefox-policies.template.json',
         'setup-gh-auth.ps1', 'configure-zed.ps1', 'setup-herdr-ssh.ps1',
-        'enable-vicinae-autostart.ps1',
-        'zed/settings.json', 'zed/keymap.json', 'zed/tasks.json'
+        'enable-vicinae-autostart.ps1', 'configure-vicinae.ps1',
+        'zed/settings.json', 'zed/keymap.json', 'zed/tasks.json',
+        'vicinae/keybinds.json'
     )
     foreach ($file in $repoFiles) {
         $dest = Join-Path $repoRoot $file
@@ -269,6 +272,7 @@ $ghAuth          = Join-Path $repoRoot 'setup-gh-auth.ps1'
 $zedConfig       = Join-Path $repoRoot 'configure-zed.ps1'
 $herdrSsh        = Join-Path $repoRoot 'setup-herdr-ssh.ps1'
 $vicinae         = Join-Path $repoRoot 'enable-vicinae-autostart.ps1'
+$vicinaeConfig   = Join-Path $repoRoot 'configure-vicinae.ps1'
 Write-Ok "repo root: $repoRoot"
 
 # --- 2. Hook the repo-managed profile into $PROFILE --------------------------
@@ -451,8 +455,20 @@ if (Test-Path $vicinae) {
     Write-Ok 'enable-vicinae-autostart.ps1 not found - skipping'
 }
 
+# --- 16. Set the Vicinae global shortcut to Ctrl+Space ------------------------
+if (Test-Path $vicinaeConfig) {
+    Write-Step 'Setting the Vicinae global shortcut (Ctrl+Space)'
+    try {
+        & $vicinaeConfig
+    } catch {
+        Write-Host "    Vicinae shortcut setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Ok 'configure-vicinae.ps1 not found - skipping'
+}
+
 Write-Host ''
 Write-Host 'Done. Open a new PowerShell window, then try: z ..' -ForegroundColor Green
 Write-Host 'git push will use your gh login (no username prompt).' -ForegroundColor Green
-Write-Host 'Vicinae starts at login; use its shortcut to open the launcher.' -ForegroundColor Green
+Write-Host 'Vicinae starts at login; press Ctrl+Space to open the launcher.' -ForegroundColor Green
 Write-Host 'Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL).' -ForegroundColor Green
