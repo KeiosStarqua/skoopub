@@ -6,7 +6,7 @@
       "workspaces": [
         {
           "name": "Terminal",
-          "layout": "BSP",
+          "layout": "Columns",
           "initial_workspace_rules": [
             { "kind": "Exe", "id": "rio.exe" },
             { "kind": "Exe", "id": "wezterm-gui.exe" },
