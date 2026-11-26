@@ -75,7 +75,7 @@ cd skoop
 
 ## What the script does
 
-1. Wires `shell/profile.ps1` into **both** PowerShell profiles — Windows PowerShell 5.1 (`Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`) and PowerShell 7+ (`Documents\PowerShell\Microsoft.PowerShell_profile.ps1`) — **before anything that can fail**, so `z`/`atuin`/Starship/`n` work in either edition even if a later step breaks. An older hook pointing at a `shell/profile.ps1` that no longer exists is rewritten, which is what silently breaks `z` after the repo moves.
+1. Wires `shell/profile.ps1` into **both** PowerShell profiles — Windows PowerShell 5.1 (`Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`) and PowerShell 7+ (`Documents\PowerShell\Microsoft.PowerShell_profile.ps1`) — **before anything that can fail**, so `z`/`atuin`/Starship/`n` work in either edition even if a later step breaks. An older hook pointing at a `profile.ps1` that no longer exists (for example the old repo-root path from before the file moved into `shell/`) is rewritten, which is what silently breaks `z` after the repo moves.
 2. Enables **Task Manager** by setting `DisableTaskMgr=0` for the current user; when run elevated, the machine-wide policy is cleared as well. A locked key is reported but does not abort setup.
 3. Installs **Scoop** if it is missing.
 4. Ensures **git** is available (Scoop buckets are git repos).

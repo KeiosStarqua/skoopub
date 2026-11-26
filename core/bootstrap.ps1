@@ -106,8 +106,33 @@ function Install-ProfileHook {
     foreach ($target in Get-ProfileTargets) {
         New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
         $lines = if (Test-Path $target) { @(Get-Content -Path $target) } else { @() }
-        $stale   = 'skoop[\\/]profile\.ps1|\$skoopProfile|^# Load the repo-managed shell config|' + [regex]::Escape($loader)
-        $body    = (($lines | Where-Object { $_ -notmatch $stale }) -join "`r`n").TrimEnd()
+        # Replace any hook we previously installed instead of trusting it. A
+        # stale one can point at a profile.ps1 that no longer exists (e.g. the
+        # old repo-root path from before the move into `shell`) and then silently
+        # load nothing, which looks like the packages are missing. Match our
+        # marker comment plus the dot-source line after it, so this works no
+        # matter where the repo is cloned or what its folder was renamed from.
+        $kept = [System.Collections.Generic.List[string]]::new()
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            $line = [string]$lines[$i]
+            if ($line -match '^# Load the repo-managed shell config') {
+                if ($i + 1 -lt $lines.Count -and
+                    $lines[$i + 1] -match '^\s*\.\s+[''"]' -and
+                    $lines[$i + 1] -match 'profile\.ps1') {
+                    $i++
+                }
+                continue
+            }
+            if ($line -match '\$skoopProfile' -or
+                $line -match [regex]::Escape($loader) -or
+                ($line -match '^\s*\.\s+[''"]' -and
+                 $line -match [regex]::Escape($repo) -and
+                 $line -match 'profile\.ps1')) {
+                continue
+            }
+            $kept.Add($line)
+        }
+        $body = ($kept -join "`r`n").TrimEnd()
         $desired = if ($body) { "$body`r`n$hook" } else { $hook }
 
         $existing = if (Test-Path $target) { Get-Content -Raw -Path $target } else { '' }
