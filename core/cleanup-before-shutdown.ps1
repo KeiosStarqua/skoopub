@@ -210,7 +210,8 @@ function Invoke-RemoteBackup {
         throw 'scp upload failed.'
     }
 
-    $verifyCmd = "test -f '" + $remoteDir + "/firefox/prefs.js' && find '" + $remoteDir + "/firefox' -type f | wc -l"
+    # scp copies the whole 'firefox' staging folder, so profiles sit one level deeper.
+    $verifyCmd = "d='" + $remoteDir + "/firefox'; p=`$(find `"`$d`" -name prefs.js -print -quit); n=`$(find `"`$d`" -type f | wc -l); if [ -n `"`$p`" ] && [ `"`$n`" -gt 0 ]; then echo `"`$n`"; else exit 1; fi"
     Write-Log ("verify command: ssh " + ($sshArgs -join ' ') + " " + $verifyCmd)
     $check = & ssh @sshArgs $verifyCmd 2>&1
     foreach ($line in $check) { Write-Log ("verify: " + $line.ToString().Trim()) }
