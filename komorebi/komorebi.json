@@ -1,4 +1,61 @@
 {
   "default_workspace_padding": 4,
-  "default_container_padding": 2
+  "default_container_padding": 2,
+  "monitors": [
+    {
+      "workspaces": [
+        {
+          "name": "Terminal",
+          "layout": "BSP",
+          "initial_workspace_rules": [
+            { "kind": "Exe", "id": "rio.exe" },
+            { "kind": "Exe", "id": "wezterm-gui.exe" },
+            { "kind": "Exe", "id": "firefox.exe" }
+          ]
+        },
+        {
+          "name": "Development",
+          "layout": "BSP",
+          "initial_workspace_rules": [
+            { "kind": "Exe", "id": "zed.exe" },
+            { "kind": "Exe", "id": "Code.exe" },
+            { "kind": "Exe", "id": "YouTube Music.exe" }
+          ]
+        },
+        {
+          "name": "Browser",
+          "layout": "BSP",
+          "initial_workspace_rules": [
+            { "kind": "Exe", "id": "chrome.exe" }
+          ]
+        },
+        {
+          "name": "Communication",
+          "layout": "BSP",
+          "initial_workspace_rules": [
+            { "kind": "Exe", "id": "discord.exe" },
+            { "kind": "Exe", "id": "Telegram.exe" }
+          ]
+        },
+        {
+          "name": "Files",
+          "layout": "BSP",
+          "initial_workspace_rules": [
+            { "kind": "Exe", "id": "explorer.exe" }
+          ]
+        },
+        {
+          "name": "Media",
+          "layout": "BSP",
+          "initial_workspace_rules": [
+            { "kind": "Exe", "id": "spotify.exe" },
+            { "kind": "Exe", "id": "vlc.exe" }
+          ]
+        },
+        { "name": "unnamed", "layout": "BSP" },
+        { "name": "unnamed", "layout": "BSP" },
+        { "name": "unnamed", "layout": "BSP" }
+      ]
+    }
+  ]
 }

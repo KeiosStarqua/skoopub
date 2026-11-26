@@ -40,10 +40,16 @@
     - Sets the Vicinae global toggle shortcut to Ctrl+Space via a repo-managed
       config import (existing Vicinae settings are preserved).
     - Deploys a conflict-free whkdrc and a Komorebi config (tight 4px workspace /
-      2px container padding) to ~/.config via configure-komorebi.ps1, then
-      starts/reloads whkd (and Komorebi when needed) so tiling hotkeys work.
+      2px container padding plus initial-workspace rules: Rio/Firefox on 1,
+      Zed/VS Code/Pear Desktop on 2, etc.) to ~/.config via configure-komorebi.ps1,
+      then starts/reloads whkd (and Komorebi when needed) so tiling hotkeys work.
     - Deploys the repo-managed YASB status bar (config.yaml, styles.css and a .env
       template) via configure-yasb.ps1 and starts YASB for the Komorebi UI.
+
+    Interactive CLI: when gum (charm-gum) is available, the script opens a menu
+    to choose Full setup / Configure only / Connect Herdr only / Quit. It falls
+    back to a numbered prompt, and skips the menu when -NoMenu or any other
+    option is given (or the shell is non-interactive).
 
     Works two ways:
       Local :  .\install.ps1
@@ -69,6 +75,10 @@
 .PARAMETER SkipHerdrConnect
     Do not run the Herdr remote step (useful for unattended installs).
 
+.PARAMETER NoMenu
+    Skip the interactive gum menu and run the full setup directly. The menu is
+    also skipped for non-interactive shells and when any other option is passed.
+
 .EXAMPLE
     # One command: configure this machine, then pick a tailnet machine and attach Herdr.
     powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
@@ -87,7 +97,8 @@ param(
     [switch]$SkipGhLogin,
     [string]$HerdrPeer = "$env:SKOOP_HERDR_PEER",
     [string]$HerdrUser = "$env:SKOOP_HERDR_USER",
-    [switch]$SkipHerdrConnect
+    [switch]$SkipHerdrConnect,
+    [switch]$NoMenu
 )
 
 # Env vars let the piped (`irm ... | iex`) form pass the same options.
@@ -99,6 +110,56 @@ $ProgressPreference    = 'SilentlyContinue'
 
 function Write-Step([string]$Message) { Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok([string]$Message)   { Write-Host "    $Message" -ForegroundColor DarkGray }
+
+function Invoke-SetupMenu {
+    # Interactive CLI entry point. gum is used when available (charm-gum from
+    # scoop.json); otherwise fall back to a numbered prompt. Returns a mode.
+    $items = @(
+        @{ Key = 'full';      Label = 'Full setup + connect Herdr' },
+        @{ Key = 'configure'; Label = 'Configure only (skip Herdr)' },
+        @{ Key = 'herdr';     Label = 'Connect Herdr only' },
+        @{ Key = 'quit';      Label = 'Quit' }
+    )
+    if (-not [Environment]::UserInteractive) {
+        Write-Ok 'Non-interactive shell - running the full setup (use -NoMenu to silence this)'
+        return 'full'
+    }
+
+    $gum = Get-Command gum -ErrorAction SilentlyContinue
+    if ($gum) {
+        Write-Host 'Choose an action:' -ForegroundColor Cyan
+        $labels = @($items.Label)
+        $choice = (& gum choose --header 'skoop setup' @labels 2>$null | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $choice) { return 'quit' }
+        foreach ($item in $items) { if ($choice -eq $item.Label) { return $item.Key } }
+        return 'full'
+    }
+
+    Write-Host 'Choose an action (install gum for a nicer menu):' -ForegroundColor Cyan
+    for ($i = 0; $i -lt $items.Count; $i++) {
+        Write-Host ('  [{0}] {1}' -f ($i + 1), $items[$i].Label)
+    }
+    $answer = Read-Host 'Action [1 = full, Enter = full]'
+    if (-not $answer) { return 'full' }
+    if ($answer -notmatch '^\d+$') { return 'quit' }
+    $n = [int]$answer
+    if ($n -lt 1 -or $n -gt $items.Count) { return 'quit' }
+    return $items[$n - 1].Key
+}
+
+function Connect-HerdrRemote {
+    if ($SkipHerdrConnect) { Write-Ok 'Skipping the Herdr remote step'; return }
+    if (-not (Test-Path $herdrSsh)) { Write-Ok 'setup-herdr-ssh.ps1 not found - skipping'; return }
+    Write-Step 'Picking a tailnet machine for Herdr'
+    $herdrArgs = @()
+    if ($HerdrPeer) { $herdrArgs += @('-Peer', $HerdrPeer) }
+    if ($HerdrUser) { $herdrArgs += @('-User', $HerdrUser) }
+    try {
+        & $herdrSsh @herdrArgs
+    } catch {
+        Write-Host "    Herdr remote setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
 
 function Enable-TaskManager {
     # Locked-down/public PCs can disable Task Manager with a policy. Clear it
@@ -287,6 +348,18 @@ function Find-ScoopShims {
     ) | Where-Object { Test-Path (Join-Path $_ 'scoop.cmd') } | Select-Object -First 1
 }
 
+# --- 0. Interactive CLI menu (gum when available) ----------------------------
+$runMode = 'full'
+if (-not $NoMenu -and $env:SKOOP_NO_MENU -ne '1' -and
+    -not ($ForceUniKey -or $SkipGhLogin -or $SkipHerdrConnect -or $HerdrPeer -or $HerdrUser)) {
+    $runMode = Invoke-SetupMenu
+}
+if ($runMode -eq 'quit') {
+    Write-Host 'Cancelled - nothing changed.' -ForegroundColor Yellow
+    return
+}
+if ($runMode -eq 'configure') { $SkipHerdrConnect = $true }
+
 # --- 1. Locate the repo files ------------------------------------------------
 $repoRoot = $null
 foreach ($candidate in @($PSScriptRoot, (Get-Location).Path)) {
@@ -335,6 +408,14 @@ $vicinaeConfig   = Join-Path $repoRoot 'configure-vicinae.ps1'
 $komorebiConfig  = Join-Path $repoRoot 'configure-komorebi.ps1'
 $yasbConfig      = Join-Path $repoRoot 'configure-yasb.ps1'
 Write-Ok "repo root: $repoRoot"
+
+if ($runMode -eq 'herdr') {
+    Start-TailscaleDaemon
+    Connect-HerdrRemote
+    Write-Host ''
+    Write-Host 'Done. Herdr attach finished; run the full setup to configure this machine.' -ForegroundColor Green
+    return
+}
 
 # --- 2. Hook the repo-managed profile into $PROFILE --------------------------
 # Done before anything that can fail, so `z`/`atuin` are always configured.
@@ -433,21 +514,7 @@ if ($LASTEXITCODE -ne 0) { throw "scoop import failed with exit code $LASTEXITCO
 Start-TailscaleDaemon
 
 # --- 10. Tailnet machine selection + Herdr remote (interactive) -------------
-if ($SkipHerdrConnect) {
-    Write-Ok 'Skipping the Herdr remote step (-SkipHerdrConnect)'
-} elseif (Test-Path $herdrSsh) {
-    Write-Step 'Picking a tailnet machine for Herdr'
-    $herdrArgs = @()
-    if ($HerdrPeer) { $herdrArgs += @('-Peer', $HerdrPeer) }
-    if ($HerdrUser) { $herdrArgs += @('-User', $HerdrUser) }
-    try {
-        & $herdrSsh @herdrArgs
-    } catch {
-        Write-Host "    Herdr remote setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-} else {
-    Write-Ok 'setup-herdr-ssh.ps1 not found - skipping'
-}
+Connect-HerdrRemote
 
 # --- 11. Default Rust toolchain: GNU (no Visual Studio Build Tools needed) ---
 $cargoBin = Join-Path $env:SCOOP 'persist\rustup\.cargo\bin'

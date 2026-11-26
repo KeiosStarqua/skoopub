@@ -51,6 +51,11 @@
                  {
                      "Info":  "",
                      "Source":  "main",
+                     "Name":  "charm-gum"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
                      "Name":  "btop-lhm"
                  },
                  {
