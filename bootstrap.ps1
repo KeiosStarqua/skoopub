@@ -133,10 +133,16 @@ $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE 's
 $cargoBin = Join-Path $scoopRoot 'persist\rustup\.cargo\bin'
 if (Test-Path $cargoBin) { $env:Path = "$cargoBin;$env:Path" }
 if (Get-Command rustup -ErrorAction SilentlyContinue) {
-    $null = rustup show active-toolchain 2>$null
+    # A fresh rustup has no active toolchain: it writes to stderr and exits 1.
+    # Under $ErrorActionPreference='Stop', PowerShell 5.1 turns that into a
+    # terminating NativeCommandError, so go through cmd and check $LASTEXITCODE.
+    $null = & cmd /c 'rustup show active-toolchain 2>&1'
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'Setting GNU toolchain as the default Rust toolchain.'
-        rustup default stable-x86_64-pc-windows-gnu
+        & cmd /c 'rustup default stable-x86_64-pc-windows-gnu 2>&1'
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Rust toolchain setup failed (non-fatal): exit $LASTEXITCODE" -ForegroundColor Yellow
+        }
     } else {
         Write-Host 'Rust toolchain already set; keeping it.'
     }

@@ -38,7 +38,7 @@ cd skoop
 4. Ensures **git** is available (Scoop buckets are git repos).
 5. Installs **Firefox** before **WezTerm** (adds the `extras` bucket if needed), so the browser and terminal are available early. Firefox is also asked to become the default browser; on Windows 11, confirm in Settings if it opens there.
 6. Runs `scoop import scoop.json` — adds the `main` / `extras` / `zeldrisho` buckets and every listed app. If UniKey is already installed (common on public PCs), that one app is skipped so you do not end up with two IMEs; pass `-ForceUniKey` to install the Scoop copy anyway.
-7. Sets the default Rust toolchain to `stable-x86_64-pc-windows-gnu` if none is configured (no Visual Studio Build Tools needed).
+7. Sets the default Rust toolchain to `stable-x86_64-pc-windows-gnu` if none is configured (no Visual Studio Build Tools needed). The check tolerates a fresh `rustup`'s stderr so it cannot abort the bootstrap.
 8. Disables Windows' "Print screen opens Snipping Tool" so **ShareX** can bind PrtSc. A failure here is reported but does not abort the setup.
 
 Then open a new PowerShell window and try:

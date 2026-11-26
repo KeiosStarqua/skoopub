@@ -257,10 +257,18 @@ if ($LASTEXITCODE -ne 0) { throw "scoop import failed with exit code $LASTEXITCO
 $cargoBin = Join-Path $env:SCOOP 'persist\rustup\.cargo\bin'
 if (Test-Path $cargoBin) { $env:Path = "$cargoBin;$env:Path" }
 if (Get-Command rustup -ErrorAction SilentlyContinue) {
-    $null = rustup show active-toolchain 2>$null
+    # A fresh rustup has no active toolchain: it writes "error: no active toolchain"
+    # to stderr and exits 1. Under $ErrorActionPreference='Stop', PowerShell 5.1
+    # turns native stderr into a terminating NativeCommandError (even with
+    # `2>$null`), which aborts the bootstrap before GNU is set. Run it through cmd
+    # with stderr merged into stdout and inspect $LASTEXITCODE instead.
+    $null = & cmd /c 'rustup show active-toolchain 2>&1'
     if ($LASTEXITCODE -ne 0) {
         Write-Step 'Setting GNU toolchain as the default Rust toolchain'
-        rustup default stable-x86_64-pc-windows-gnu
+        & cmd /c 'rustup default stable-x86_64-pc-windows-gnu 2>&1'
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "    Could not set the Rust toolchain (non-fatal): exit $LASTEXITCODE" -ForegroundColor Yellow
+        }
     } else {
         Write-Ok "Rust toolchain already set; keeping it"
     }
