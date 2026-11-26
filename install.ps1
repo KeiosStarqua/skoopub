@@ -15,10 +15,10 @@
     - Starts Tailscale after the import (Windows service if present, otherwise
       the Scoop `tailscaled` shim); login is left to you (`tailscale up` or the
       tray icon - the CLI may be missing or unable to reach the daemon on Windows).
-    - Offers a temporary SSH key + Herdr remote setup via setup-herdr-ssh.ps1:
-      pick a tailnet machine (or type its IP/MagicDNS name when the CLI is not
-      usable), generate a throwaway key, authorize it with your SSH password,
-      add an SSH alias and register it with Herdr.
+    - Offers a one-prompt Herdr remote setup via setup-herdr-ssh.ps1: pick a
+      machine from the tailnet list (or type its IP/MagicDNS name when the CLI
+      is not usable), then attach with Herdr over Tailscale SSH. No keys,
+      passwords or machine addresses are stored in the repo.
     - Keeps a UniKey that is already installed (e.g. on a public PC) instead of
       adding a second copy; -ForceUniKey installs the Scoop build anyway.
     - Adds a dot-source line for profile.ps1 to your PowerShell $PROFILE early on,
@@ -409,9 +409,9 @@ if ($LASTEXITCODE -ne 0) { throw "scoop import failed with exit code $LASTEXITCO
 # --- 9. Start Tailscale ------------------------------------------------------
 Start-TailscaleDaemon
 
-# --- 10. Temporary SSH + Herdr remote setup (interactive) -------------------
+# --- 10. Tailnet machine selection + Herdr remote (interactive) -------------
 if (Test-Path $herdrSsh) {
-    Write-Step 'Setting up a temporary SSH key for a Herdr remote machine'
+    Write-Step 'Picking a tailnet machine for Herdr'
     try {
         & $herdrSsh
     } catch {

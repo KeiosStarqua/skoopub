@@ -1,75 +1,45 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Set up a temporary SSH key + Herdr remote for a machine on your tailnet.
+    Pick a machine from your tailnet and attach Herdr to it over Tailscale SSH.
 
 .DESCRIPTION
-    Meant for a public/internet-cafe Windows machine after `tailscale up`:
+    Run this after signing in to Tailscale. It is the one-prompt path to a
+    Herdr remote machine:
 
-      - Lists the machines on the tailnet with `tailscale status --json` and asks
-        you to choose the one that has Herdr inside. If the Windows CLI is not on
-        PATH or cannot talk to the daemon, you are asked for the machine's
-        Tailscale IP / MagicDNS name instead - Tailscale itself can still work.
-        Use -Peer to provide that address up front and skip the listing entirely.
-      - Asks for the SSH user on that machine.
-      - Creates a temporary ed25519 key pair under %TEMP% (the private key never
-        leaves this machine).
-      - Runs ssh to add the public key to the home machine's authorized_keys.
-        SSH prompts you for the password - type it when asked.
-      - Adds a marked `Host <alias>` block to ~/.ssh/config using that key.
-      - Registers the alias with `herdr machine add` so it appears in Herdr.
+      - Lists peers from `tailscale status --json` and asks you to choose one.
+        The CLI is resolved from PATH, Program Files and Scoop; if it cannot
+        list peers, you are asked for the machine's Tailscale IP or MagicDNS
+        name instead. Tailscale itself can still work without the CLI.
+      - Silently probes a few SSH user names (from your git identity, the
+        Windows user and root) to find one Tailscale SSH permits. No prompt,
+        no password and no generated keys.
+      - Runs `herdr --remote ssh://<user>@<machine>` to attach immediately.
 
-    Use -Revoke to remove the temporary key from the remote, delete the local
-    key pair and remove the Host block again.
-
-.PARAMETER Alias
-    Alias for the SSH Host / Herdr machine. Defaults to the machine's DNS label.
+    Nothing about a particular machine is stored in this repo: no name, no
+    tailnet IP and no private key.
 
 .PARAMETER Peer
-    Tailscale IP (100.x.y.z) or MagicDNS name of the machine that has Herdr.
-    Accepts user@host to preset the SSH user. Skips `tailscale status --json`,
-    which is useful when the Windows CLI is unavailable.
+    Tailscale IP or MagicDNS name of the target machine. Accepts user@host to
+    preset the SSH user. Skips enumeration and the selection prompt.
 
-.PARAMETER KeyDir
-    Folder holding the temporary key pair (default: %TEMP%\skoop-herdr-ssh).
-
-.PARAMETER SkipMachineAdd
-    Only set up SSH/config; do not run `herdr machine add`.
-
-.PARAMETER Attach
-    After registering the machine, open the remote session with
-    `herdr --remote <alias>` immediately. Without this switch the script asks
-    first (default No), so it never blocks an unattended bootstrap.
-
-.PARAMETER Revoke
-    Undo the setup: remove the temporary public key from the remote, delete the
-    local key pair and remove the marked Host block from ~/.ssh/config.
+.PARAMETER User
+    SSH user to try first on the remote machine (otherwise auto-detected).
 
 .EXAMPLE
     .\setup-herdr-ssh.ps1
 
 .EXAMPLE
-    .\setup-herdr-ssh.ps1 -Peer muse -Alias muse
-
-.EXAMPLE
-    .\setup-herdr-ssh.ps1 -Revoke -Alias muse
+    .\setup-herdr-ssh.ps1 -Peer <machine-name>
 #>
 [CmdletBinding()]
 param(
-    [string]$Alias,
     [string]$Peer,
-    [string]$KeyDir = (Join-Path $env:TEMP 'skoop-herdr-ssh'),
-    [switch]$SkipMachineAdd,
-    [switch]$Attach,
-    [switch]$Revoke
+    [string]$User
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
-$Comment               = 'skoop-temp-herdr'
-
-$sshDir     = Join-Path $env:USERPROFILE '.ssh'
-$configPath = Join-Path $sshDir 'config'
 
 function Write-Step([string]$Message) { Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok([string]$Message)   { Write-Host "    $Message" -ForegroundColor DarkGray }
@@ -79,9 +49,8 @@ $script:TailscaleCliError = $null
 $script:TailscaleBackend  = $null
 
 function Resolve-TailscaleCli {
-    # The official Windows installer does not add the CLI to PATH. Look in the
-    # usual places before giving up; the CLI is only used to list peers, never
-    # to change the network, so a missing/broken one is not fatal.
+    # The official Windows installer does not add the CLI to PATH. Peer listing
+    # is the only CLI-dependent step, so a missing CLI is not fatal.
     $cmd = Get-Command tailscale -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
 
@@ -111,7 +80,6 @@ function Get-TailscaleStatus {
     }
 
     # cmd /c merges stderr without PS 5.1 turning it into a terminating error.
-    # Quoting the path once is correct even when it contains spaces.
     $raw = (& cmd /c ('"{0}" status --json 2>&1' -f $cli) | Out-String)
     if ($LASTEXITCODE -ne 0 -or -not $raw.Trim()) {
         $line = ($raw -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 1)
@@ -146,7 +114,7 @@ function Get-TailnetPeers {
                 Alias  = $label
                 Dns    = $dns
                 Ip     = "$ipv4"
-                User   = "$($peer.HostName)"
+                User   = ''
                 Online = [bool]$peer.Online
             }
         }
@@ -155,7 +123,6 @@ function Get-TailnetPeers {
 }
 
 function New-ManualPeer {
-    # Without the CLI we cannot enumerate peers, but SSH only needs the address.
     param([string]$Target)
     $target = "$Target".Trim()
     $sshUser = ''
@@ -167,15 +134,14 @@ function New-ManualPeer {
         Alias   = $label
         Dns     = $target
         Ip      = $target
-        User    = $target
+        User    = $sshUser
         Online  = $true
-        SshUser = $sshUser
     }
 }
 
 function Read-ManualPeer {
     if (-not [Environment]::UserInteractive) {
-        Write-Warn 'Non-interactive shell - skipping Herdr SSH setup.'
+        Write-Warn 'Non-interactive shell - skipping Herdr remote setup.'
         return @()
     }
     Write-Host '    Enter the Tailscale IP (100.x.y.z) or MagicDNS name of the machine'
@@ -195,7 +161,7 @@ function Select-Peer {
         Write-Host ('  [{0}] {1} ({2}) - {3}' -f ($i + 1), $p.Dns, $p.Ip, $state)
     }
     if (-not [Environment]::UserInteractive) {
-        Write-Warn 'Non-interactive shell - skipping Herdr SSH setup.'
+        Write-Warn 'Non-interactive shell - skipping Herdr remote setup.'
         return $null
     }
     $answer = Read-Host 'Machine number (Enter to cancel)'
@@ -205,128 +171,42 @@ function Select-Peer {
     return $Peers[$n - 1]
 }
 
-function Get-ConfigBlock {
-    param([string[]]$Lines, [string]$AliasName)
+function Get-SshUserCandidates {
+    param([string]$Preferred)
 
-    $start = "# >>> skoop-herdr $AliasName"
-    $end   = "# <<< skoop-herdr $AliasName"
-    for ($i = 0; $i -lt $Lines.Count; $i++) {
-        if ($Lines[$i] -eq $start) {
-            $j = $i
-            while ($j -lt $Lines.Count -and $Lines[$j] -ne $end) { $j++ }
-            $block = @($Lines[$i..$j])
-            $hostLine = $block | Where-Object { $_ -match '^\s*HostName\s+' } | Select-Object -First 1
-            $userLine = $block | Where-Object { $_ -match '^\s*User\s+' } | Select-Object -First 1
-            return @{
-                Start = $i
-                End   = $j
-                Host  = "$hostLine" -replace '^\s*HostName\s+', ''
-                User  = "$userLine" -replace '^\s*User\s+', ''
-            }
+    $list = New-Object 'System.Collections.Generic.List[string]'
+    function Add-Candidate([string]$value) {
+        if ($value -and $value -notmatch '[@\s]' -and -not $list.Contains($value)) {
+            $list.Add($value)
         }
     }
-    return $null
+
+    if ($Preferred) { Add-Candidate $Preferred }
+    $gitName = (& git config --global user.name 2>$null | Select-Object -First 1)
+    if ($gitName) {
+        Add-Candidate (($gitName -replace '[^A-Za-z0-9._-]', '').ToLowerInvariant())
+    }
+    $gitEmail = (& git config --global user.email 2>$null | Select-Object -First 1)
+    if ($gitEmail -and $gitEmail -match '^([^@]+)@') { Add-Candidate $Matches[1].ToLowerInvariant() }
+    if ($env:USERNAME) {
+        Add-Candidate $env:USERNAME.ToLowerInvariant()
+        Add-Candidate $env:USERNAME
+    }
+    Add-Candidate 'root'
+    return $list.ToArray()
 }
 
-function Remove-ConfigBlock {
-    param([string[]]$Lines, [int]$Start, [int]$End)
+function Test-DirectSsh {
+    param([string]$SshUser, [string]$HostName)
 
-    $out = @()
-    for ($i = 0; $i -lt $Lines.Count; $i++) {
-        if ($i -lt $Start -or $i -gt $End) { $out += $Lines[$i] }
-    }
-    return $out
-}
-
-function Write-SshConfig {
-    param([string[]]$Lines)
-
-    New-Item -ItemType Directory -Force -Path $sshDir | Out-Null
-    # UTF8 without BOM: OpenSSH rejects a BOM before the first Host directive.
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [IO.File]::WriteAllText($configPath, (($Lines -join "`n") + "`n"), $utf8NoBom)
-}
-
-function Set-SshAlias {
-    param([string]$AliasName, [string]$Ip, [string]$User, [string]$Key)
-
-    $lines = if (Test-Path -LiteralPath $configPath) { @(Get-Content -LiteralPath $configPath) } else { @() }
-    $old = Get-ConfigBlock -Lines $lines -AliasName $AliasName
-    if ($old) { $lines = @(Remove-ConfigBlock -Lines $lines -Start $old.Start -End $old.End) }
-
-    $body = (($lines | Where-Object { $_.Trim() }) -join "`n").TrimEnd()
-    $block = @(
-        "# >>> skoop-herdr $AliasName",
-        "Host $AliasName",
-        "    HostName $Ip",
-        "    User $User",
-        "    IdentityFile $Key",
-        "    IdentitiesOnly yes",
-        "# <<< skoop-herdr $AliasName"
-    ) -join "`n"
-    $desired = if ($body) { "$body`n`n$block" } else { $block }
-
-    $existing = if (Test-Path -LiteralPath $configPath) { (Get-Content -Raw -LiteralPath $configPath).TrimEnd() } else { '' }
-    if ($existing -eq $desired) {
-        Write-Ok "$configPath already up to date"
-    } else {
-        Write-SshConfig -Lines @($desired)
-        Write-Ok "added Host $AliasName -> $User@$Ip"
-    }
-}
-
-function Install-TempPublicKey {
-    param([string]$User, [string]$Ip, [string]$PublicKey)
-
-    $remote = "$User@$Ip"
-    Write-Step "Authorizing the temporary key on $remote"
-    Write-Host '    SSH will ask for your password - type it to install the key on your home machine.'
-    # Pass the key inside a single-quoted remote string; it contains no quotes.
-    $remoteCmd = "mkdir -p ~/.ssh && echo '$PublicKey' >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
-    & ssh -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no $remote $remoteCmd
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warn "Could not install the key on $remote (ssh exit $LASTEXITCODE)."
-        Write-Warn "On your home machine, run: echo '$PublicKey' >> ~/.ssh/authorized_keys"
-        return $false
-    }
-    Write-Ok 'temporary public key installed on the remote machine'
-    return $true
-}
-
-function Revoke-TempSetup {
-    param([string]$AliasName)
-
-    $lines = if (Test-Path -LiteralPath $configPath) { @(Get-Content -LiteralPath $configPath) } else { @() }
-    $block = Get-ConfigBlock -Lines $lines -AliasName $AliasName
-    if (-not $block) {
-        Write-Warn "No skoop-herdr block for '$AliasName' in $configPath"
-        return
-    }
-
-    $key = Join-Path $KeyDir 'id_ed25519'
-    if (Test-Path "$key.pub") {
-        $publicKey = (Get-Content -LiteralPath "$key.pub" -Raw).Trim()
-        Write-Step "Removing the temporary key from $($block.User)@$($block.Host)"
-        $remoteCmd = "grep -v -F '$publicKey' ~/.ssh/authorized_keys > ~/.ssh/authorized_keys.skoop.tmp && mv ~/.ssh/authorized_keys.skoop.tmp ~/.ssh/authorized_keys"
-        & ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new "$($block.User)@$($block.Host)" $remoteCmd
-        if ($LASTEXITCODE -ne 0) { Write-Warn "Could not remove the remote key (ssh exit $LASTEXITCODE); remove it from authorized_keys by hand." }
-    }
-    Remove-Item -LiteralPath "$key", "$key.pub" -Force -ErrorAction SilentlyContinue
-
-    $lines = @(Remove-ConfigBlock -Lines $lines -Start $block.Start -End $block.End)
-    Write-SshConfig -Lines $lines
-    Write-Ok "removed Host $AliasName and the local key pair"
-    Write-Host '    Also drop the saved machine in Herdr: herdr machine list -> herdr machine remove <id>' -ForegroundColor Yellow
+    $target = "$SshUser@$HostName"
+    # BatchMode: never prompt for a password. Tailscale SSH answers with its
+    # own auth; a rejected user exits non-zero with a policy message.
+    $out = (& cmd /c ('ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new "{0}" "echo __SKOOP_SSH_OK__" 2>&1' -f $target) | Out-String)
+    return ($LASTEXITCODE -eq 0 -and $out -match '__SKOOP_SSH_OK__')
 }
 
 # --- Main --------------------------------------------------------------------
-if ($Revoke) {
-    $name = if ($Alias) { $Alias } else { Read-Host 'Alias to revoke' }
-    if (-not $name) { throw 'An alias is required for -Revoke.' }
-    Revoke-TempSetup -AliasName $name
-    return
-}
-
 # Do not reuse $Peer here: it is a [string] parameter, so assigning a peer
 # object to it would coerce the object to a string and lose its properties.
 $selected = $null
@@ -343,7 +223,7 @@ if ($Peer) {
             $manual = @(Read-ManualPeer)
             if ($manual.Count -gt 0) { $selected = $manual[0] }
         } else {
-            Write-Warn 'Tailscale does not look installed or running either; skipping the Herdr SSH setup.'
+            Write-Warn 'Tailscale does not look installed or running either; skipping the Herdr remote setup.'
         }
     } elseif ($script:TailscaleBackend -and $script:TailscaleBackend -ne 'Running') {
         Write-Warn "Tailscale is not connected (state: $($script:TailscaleBackend)). Sign in from the Tailscale tray icon (or run ``tailscale up``), then re-run."
@@ -352,63 +232,37 @@ if ($Peer) {
     }
 }
 if (-not $selected) {
-    Write-Ok 'Skipping the Herdr SSH setup.'
+    Write-Ok 'Skipping the Herdr remote setup.'
     return
 }
 
-$name = if ($Alias) { $Alias } else { $selected.Alias }
-$defaultUser = if ($selected.SshUser) { $selected.SshUser } else { $env:USERNAME }
-$answer = Read-Host ("SSH user on {0} [{1}]" -f $selected.Dns, $defaultUser)
-$user = if ($answer) { $answer } else { $defaultUser }
-
-New-Item -ItemType Directory -Force -Path $KeyDir | Out-Null
-$key = Join-Path $KeyDir 'id_ed25519'
-if (-not (Test-Path $key)) {
-    Write-Step 'Creating a temporary SSH key pair on this machine'
-    & cmd /c ('ssh-keygen -t ed25519 -N "" -C "{0}" -f "{1}"' -f $Comment, $key) | Out-Null
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$key.pub")) { throw 'ssh-keygen failed.' }
-    Write-Ok "key pair created under $KeyDir"
-} else {
-    Write-Ok "reusing the temporary key at $key"
+$hostName = if ($selected.Dns) { $selected.Dns } else { $selected.Ip }
+$preferred = if ($User) { $User } elseif ($selected.User) { $selected.User } else { '' }
+$sshUser = $null
+foreach ($candidate in @(Get-SshUserCandidates -Preferred $preferred)) {
+    Write-Ok "trying Tailscale SSH as $candidate@$hostName"
+    if (Test-DirectSsh -SshUser $candidate -HostName $hostName) {
+        $sshUser = $candidate
+        break
+    }
 }
-$publicKey = (Get-Content -LiteralPath "$key.pub" -Raw).Trim()
 
-if (-not (Install-TempPublicKey -User $user -Ip $selected.Ip -PublicKey $publicKey)) {
-    Write-Warn 'Remote authorization did not complete; stopping before the Herdr step.'
+if (-not $sshUser) {
+    Write-Warn "No permitted SSH user found on $hostName."
+    Write-Warn 'On that machine run: tailscale set --ssh=true  (and check the tailnet SSH policy).'
+    Write-Warn 'Or re-run this script with -User <name>.'
     return
 }
 
-Set-SshAlias -AliasName $name -Ip $selected.Ip -User $user -Key $key
-Write-Ok "test it with: ssh $name"
-
-if (-not $SkipMachineAdd) {
-    $herdr = Get-Command herdr -ErrorAction SilentlyContinue
-    if (-not $herdr) {
-        Write-Warn 'herdr is not on PATH - skipping machine registration.'
-    } else {
-        Write-Step "Registering $name with Herdr"
-        & herdr machine add $name
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warn "herdr machine add failed (non-fatal); run it yourself: herdr machine add $name"
-        }
-    }
+Write-Ok "Tailscale SSH works as $sshUser@$hostName"
+$herdr = Get-Command herdr -ErrorAction SilentlyContinue
+if (-not $herdr) {
+    Write-Warn ("herdr is not on PATH - attach manually with: herdr --remote ssh://{0}@{1}" -f $sshUser, $hostName)
+    return
 }
 
-# --- Attach to the chosen Herdr machine (opt-in) ----------------------------
-if (($Attach -or -not $SkipMachineAdd) -and (Get-Command herdr -ErrorAction SilentlyContinue)) {
-    if (-not $Attach -and [Environment]::UserInteractive) {
-        $attachAnswer = Read-Host "Attach to $name with 'herdr --remote' now? [y/N]"
-        if ($attachAnswer -match '^(y|yes)$') { $Attach = $true }
-    }
-    if ($Attach) {
-        Write-Step "Attaching to $name"
-        & herdr --remote $name
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warn "herdr --remote failed (non-fatal); retry with: herdr --remote $name"
-        }
-    }
+Write-Step "Attaching Herdr to $hostName"
+& herdr --remote ("ssh://{0}@{1}" -f $sshUser, $hostName)
+if ($LASTEXITCODE -ne 0) {
+    Write-Warn "herdr --remote failed (non-fatal); retry with: herdr --remote ssh://$sshUser@$hostName"
 }
-
-Write-Host ''
-Write-Host "Done. Use 'herdr --remote $name' or pick the machine in the Herdr sidebar." -ForegroundColor Green
-Write-Host "This key is temporary: run '.\\setup-herdr-ssh.ps1 -Revoke -Alias $name' before leaving." -ForegroundColor Green
