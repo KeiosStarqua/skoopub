@@ -1,193 +1,193 @@
-{
-  "buckets": [
-    {
-      "Name": "main",
-      "Source": "https://github.com/ScoopInstaller/Main"
-    },
-    {
-      "Name": "extras",
-      "Source": "https://github.com/ScoopInstaller/Extras"
-    },
-    {
-      "Name": "zeldrisho",
-      "Source": "https://github.com/zeldrisho/scoop-bucket"
-    }
-  ],
-  "apps": [
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "git"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "herdr"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "herdr-core"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "7zip"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "mise"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "uv"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "ripgrep"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "fd"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "bat"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "fzf"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "jq"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "gh"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "less"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "starship"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "delta"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "zoxide"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "atuin"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "rustup"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "mingw"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "bun"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "cursor-cli"
-    },
-    {
-      "Info": "",
-      "Source": "main",
-      "Name": "opencode"
-    },
-    {
-      "Info": "",
-      "Source": "extras",
-      "Name": "firefox"
-    },
-    {
-      "Info": "",
-      "Source": "extras",
-      "Name": "vscode"
-    },
-    {
-      "Info": "",
-      "Source": "extras",
-      "Name": "lazygit"
-    },
-    {
-      "Info": "",
-      "Source": "extras",
-      "Name": "wezterm"
-    },
-    {
-      "Info": "",
-      "Source": "extras",
-      "Name": "sharex"
-    },
-    {
-      "Info": "",
-      "Source": "extras",
-      "Name": "tailscale"
-    },
-    {
-      "Info": "",
-      "Source": "extras",
-      "Name": "zed"
-    },
-    {
-      "Info": "",
-      "Source": "extras",
-      "Name": "grok-bot"
-    },
-    {
-      "Info": "",
-      "Source": "extras",
-      "Name": "pear-desktop"
-    },
-    {
-      "Info": "",
-      "Source": "extras",
-      "Name": "vicinae"
-    },
-    {
-      "Info": "",
-      "Source": "extras",
-      "Name": "chatgpt"
-    },
-    {
-      "Info": "",
-      "Source": "extras",
-      "Name": "blender"
-    },
-    {
-      "Info": "",
-      "Source": "zeldrisho",
-      "Name": "unikey"
-    }
-  ]
+﻿{
+    "buckets":  [
+                    {
+                        "Name":  "main",
+                        "Source":  "https://github.com/ScoopInstaller/Main"
+                    },
+                    {
+                        "Name":  "extras",
+                        "Source":  "https://github.com/ScoopInstaller/Extras"
+                    },
+                    {
+                        "Name":  "zeldrisho",
+                        "Source":  "https://github.com/zeldrisho/scoop-bucket"
+                    }
+                ],
+    "apps":  [
+                 {
+                     "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "firefox"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "wezterm"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "herdr"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "herdr-core"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "git"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "7zip"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "mise"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "uv"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "ripgrep"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "fd"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "bat"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "fzf"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "jq"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "gh"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "less"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "starship"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "delta"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "zoxide"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "atuin"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "rustup"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "mingw"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "bun"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "cursor-cli"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "main",
+                     "Name":  "opencode"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "vscode"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "lazygit"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "sharex"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "tailscale"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "zed"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "grok-bot"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "pear-desktop"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "vicinae"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "chatgpt"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "blender"
+                 },
+                 {
+                     "Info":  "",
+                     "Source":  "zeldrisho",
+                     "Name":  "unikey"
+                 }
+             ]
 }

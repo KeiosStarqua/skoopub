@@ -37,7 +37,7 @@ cd skoop
 2. Enables **Task Manager** by setting `DisableTaskMgr=0` for the current user; when run elevated, the machine-wide policy is cleared as well. A locked key is reported but does not abort setup.
 3. Installs **Scoop** if it is missing.
 4. Ensures **git** is available (Scoop buckets are git repos).
-5. Installs **Firefox** before **WezTerm** (adds the `extras` bucket if needed), makes Firefox the default browser, and copies `firefox-policies.template.json` into Firefox's `distribution` folder so the Bitwarden extension installs automatically on the next start. On Windows 11, confirm the default-browser change in Settings if it opens there.
+5. Installs **Firefox** first, then **WezTerm**, then **Herdr** (adds the `extras` bucket if needed). Firefox is made the default browser and `firefox-policies.template.json` is copied into Firefox's `distribution` folder so the Bitwarden extension installs automatically on the next start. On Windows 11, confirm the default-browser change in Settings if it opens there.
 6. Runs `scoop import scoop.json` — adds the `main` / `extras` / `zeldrisho` buckets and every listed app. If UniKey is already installed (common on public PCs), that one app is skipped so you do not end up with two IMEs; pass `-ForceUniKey` to install the Scoop copy anyway.
 7. Sets the default Rust toolchain to `stable-x86_64-pc-windows-gnu` if none is configured (no Visual Studio Build Tools needed). The check tolerates a fresh `rustup`'s stderr so it cannot abort the bootstrap.
 8. Disables Windows' "Print screen opens Snipping Tool" so **ShareX** can bind PrtSc. A failure here is reported but does not abort the setup.
