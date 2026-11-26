@@ -58,18 +58,39 @@
 .PARAMETER SkipGhLogin
     Skip the interactive `gh auth login` prompt; only wire up an existing gh login.
 
-.EXAMPLE
-    irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
+.PARAMETER HerdrPeer
+    Tailnet IP or MagicDNS name of the Herdr machine. Passed to
+    setup-herdr-ssh.ps1 so the machine-selection prompt is skipped.
+
+.PARAMETER HerdrUser
+    SSH user to use on the Herdr machine (otherwise auto-detected).
+
+.PARAMETER SkipHerdrConnect
+    Do not run the Herdr remote step (useful for unattended installs).
 
 .EXAMPLE
+    # One command: configure this machine, then pick a tailnet machine and attach Herdr.
     powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+
+.EXAMPLE
+    # Same, but with the machine/user supplied so nothing is prompted.
+    .\install.ps1 -HerdrPeer <machine> -HerdrUser <user> -SkipGhLogin
+
+.EXAMPLE
+    irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 #>
 [CmdletBinding()]
 param(
     [string]$RepoRawBase = 'https://raw.githubusercontent.com/KeiosStarqua/skoopub/main',
     [switch]$ForceUniKey,
-    [switch]$SkipGhLogin
+    [switch]$SkipGhLogin,
+    [string]$HerdrPeer = "$env:SKOOP_HERDR_PEER",
+    [string]$HerdrUser = "$env:SKOOP_HERDR_USER",
+    [switch]$SkipHerdrConnect
 )
+
+# Env vars let the piped (`irm ... | iex`) form pass the same options.
+if ($env:SKOOP_SKIP_HERDR -eq '1') { $SkipHerdrConnect = $true }
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
@@ -410,12 +431,17 @@ if ($LASTEXITCODE -ne 0) { throw "scoop import failed with exit code $LASTEXITCO
 Start-TailscaleDaemon
 
 # --- 10. Tailnet machine selection + Herdr remote (interactive) -------------
-if (Test-Path $herdrSsh) {
+if ($SkipHerdrConnect) {
+    Write-Ok 'Skipping the Herdr remote step (-SkipHerdrConnect)'
+} elseif (Test-Path $herdrSsh) {
     Write-Step 'Picking a tailnet machine for Herdr'
+    $herdrArgs = @()
+    if ($HerdrPeer) { $herdrArgs += @('-Peer', $HerdrPeer) }
+    if ($HerdrUser) { $herdrArgs += @('-User', $HerdrUser) }
     try {
-        & $herdrSsh
+        & $herdrSsh @herdrArgs
     } catch {
-        Write-Host "    Herdr SSH setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "    Herdr remote setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
 } else {
     Write-Ok 'setup-herdr-ssh.ps1 not found - skipping'

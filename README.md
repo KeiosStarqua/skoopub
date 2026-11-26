@@ -32,6 +32,30 @@ If the execution policy blocks `iex`, wrap it in a bypassed process:
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex"
 ```
 
+### One command to configure and connect Herdr
+
+From a clone, `install.ps1` is the single entry point — it configures the machine **and**, after Tailscale starts, asks you to pick a tailnet machine and attaches Herdr over Tailscale SSH:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+Pass the machine/user up front to skip all prompts (values are supplied at runtime, never committed):
+
+```powershell
+.\install.ps1 -HerdrPeer <machine-or-ip> -HerdrUser <user> -SkipGhLogin
+```
+
+Use `-SkipHerdrConnect` if you only want the machine configured. The piped form accepts the same options through environment variables:
+
+```powershell
+$env:SKOOP_HERDR_PEER = '<machine-or-ip>'
+$env:SKOOP_HERDR_USER = '<user>'      # optional; auto-detected otherwise
+irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
+```
+
+Without any of these, both forms prompt you to pick a machine from `tailscale status` and then attach Herdr.
+
 ### From a clone instead
 
 ```powershell
