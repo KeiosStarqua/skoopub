@@ -31,11 +31,10 @@ y = 1
 x = 8
 y = 8
 
-# Mouse reporting to TUIs (Herdr, lazygit, etc.) works by default.
-# Hide the pointer while typing and make right-click paste the selection.
+# Mouse reporting to TUIs (Herdr, lazygit, etc.) works by default. Keep all
+# click bindings unset so clicks reach the TUI: Herdr uses left-click to focus
+# panes/tabs, drag borders to resize and right-click for its context menu, while
+# lazygit uses mouseEvents: true (its default). Shift+click still bypasses TUI
+# capture for text selection, and middle-click pastes where supported.
 [mouse]
 hide_when_typing = true
-
-[[mouse.bindings]]
-mouse = "Right"
-action = "Paste"
