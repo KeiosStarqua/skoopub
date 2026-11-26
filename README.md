@@ -9,6 +9,7 @@ PowerShell profile, restored from a single manifest.
 - `firefox-policies.template.json` — Firefox policy for extensions, managed bookmarks, homepage, and password saving
 - `fix-sharex-printscreen.ps1` — hands the PrtSc key back to ShareX
 - `setup-gh-auth.ps1` — asks you to log in with `gh auth login` if needed, then makes `git push` use that login
+- `setup-git-identity.ps1` — sets the git author to **Keios <git@taquangkhoi.com>** globally (or locally with `-Local`)
 - `zed/` + `configure-zed.ps1` — repo-managed Zed settings/keymap/tasks, copied to `%APPDATA%\Zed` on install
 - `setup-herdr-ssh.ps1` — temporary SSH key + Herdr remote for a tailnet machine; asks which machine to use
 - `enable-vicinae-autostart.ps1` — starts the Vicinae server at login (and now); scrubs inherited `HERDR_*` variables
@@ -50,10 +51,11 @@ cd skoop
 9. Sets the default Rust toolchain to `stable-x86_64-pc-windows-gnu` if none is configured (no Visual Studio Build Tools needed). The check tolerates a fresh `rustup`'s stderr so it cannot abort the bootstrap.
 10. Disables Windows' "Print screen opens Snipping Tool" so **ShareX** can bind PrtSc. A failure here is reported but does not abort the setup.
 11. Checks GitHub CLI auth. If you are not logged in, it asks whether to run `gh auth login` for you (HTTPS, no SSH key prompt), then runs `gh auth setup-git` so `git push` uses your gh token instead of prompting for a username. Pass `-SkipGhLogin` to skip the interactive prompt on unattended runs.
-12. Copies `zed/settings.json`, `zed/keymap.json` and `zed/tasks.json` into `%APPDATA%\Zed` via `configure-zed.ps1` (existing files are backed up first). Zed installs the declared extensions on its first start: **PowerShell**, HTML, Dockerfile, Docker Compose, TOML, Nix and SQL. PowerShell support needs `pwsh` (added to `scoop.json`); Rust is supported natively in Zed via `rust-analyzer`, so there is no Rust extension to install.
-13. Copies `rio/config.toml` into `%LOCALAPPDATA%\rio\config.toml` via `configure-rio.ps1` (a changed original is backed up first). It sets Rio's font size — its zoom level — to **16**; Rio hot-reloads the config, so new windows use it immediately.
-14. Creates a per-user Startup shortcut for `vicinae-server.exe` via `enable-vicinae-autostart.ps1` and starts the server in the current session. Vicinae's global shortcut needs the server running, so it now works after every sign-in. The script clears inherited `HERDR_*` variables first, so terminals opened from Vicinae do not think they are inside a Herdr pane. Use `-Remove` to undo the autostart, `-NoLaunch` to only install the shortcut, or `-Restart` to relaunch an already running (contaminated) server.
-15. Sets the Vicinae global shortcut to **Ctrl+Space** via `configure-vicinae.ps1`: it copies `vicinae/keybinds.json` into `%LOCALAPPDATA%\vicinae\config` and adds it to `settings.json`'s `imports`, so GUI changes never overwrite it. Existing settings are backed up before editing. Restart Vicinae (or sign in again) to register the shortcut; `.\configure-vicinae.ps1 -Restart` does that now.
+12. Sets the global git author identity to **Keios <git@taquangkhoi.com>** via `setup-git-identity.ps1`, so commits are attributed correctly in every repository. Use `-Local` to apply it only to the current repo; re-running is safe.
+13. Copies `zed/settings.json`, `zed/keymap.json` and `zed/tasks.json` into `%APPDATA%\Zed` via `configure-zed.ps1` (existing files are backed up first). Zed installs the declared extensions on its first start: **PowerShell**, HTML, Dockerfile, Docker Compose, TOML, Nix and SQL. PowerShell support needs `pwsh` (added to `scoop.json`); Rust is supported natively in Zed via `rust-analyzer`, so there is no Rust extension to install.
+14. Copies `rio/config.toml` into `%LOCALAPPDATA%\rio\config.toml` via `configure-rio.ps1` (a changed original is backed up first). It sets Rio's font size — its zoom level — to **16**; Rio hot-reloads the config, so new windows use it immediately.
+15. Creates a per-user Startup shortcut for `vicinae-server.exe` via `enable-vicinae-autostart.ps1` and starts the server in the current session. Vicinae's global shortcut needs the server running, so it now works after every sign-in. The script clears inherited `HERDR_*` variables first, so terminals opened from Vicinae do not think they are inside a Herdr pane. Use `-Remove` to undo the autostart, `-NoLaunch` to only install the shortcut, or `-Restart` to relaunch an already running (contaminated) server.
+16. Sets the Vicinae global shortcut to **Ctrl+Space** via `configure-vicinae.ps1`: it copies `vicinae/keybinds.json` into `%LOCALAPPDATA%\vicinae\config` and adds it to `settings.json`'s `imports`, so GUI changes never overwrite it. Existing settings are backed up before editing. Restart Vicinae (or sign in again) to register the shortcut; `.\configure-vicinae.ps1 -Restart` does that now.
 
 Then open a new PowerShell window and try:
 
@@ -92,7 +94,7 @@ scoop export | Out-File -Encoding utf8 scoop.json
 |---|---|
 | Normal (non-elevated) shell | Scoop installs per-user under `%USERPROFILE%\scoop` |
 | Elevated shell | Scoop installs system-wide under `C:\ProgramData\scoop` |
-| Piped via `irm \| iex` | `scoop.json`, `profile.ps1`, `firefox-policies.template.json`, `fix-sharex-printscreen.ps1`, `setup-gh-auth.ps1`, `configure-zed.ps1`, `setup-herdr-ssh.ps1`, `enable-vicinae-autostart.ps1`, `configure-vicinae.ps1`, `configure-rio.ps1`, `vicinae/keybinds.json`, `rio/config.toml` and `zed/*.json` are fetched to `%LOCALAPPDATA%\skoop` |
+| Piped via `irm \| iex` | `scoop.json`, `profile.ps1`, `firefox-policies.template.json`, `fix-sharex-printscreen.ps1`, `setup-gh-auth.ps1`, `setup-git-identity.ps1`, `configure-zed.ps1`, `setup-herdr-ssh.ps1`, `enable-vicinae-autostart.ps1`, `configure-vicinae.ps1`, `configure-rio.ps1`, `vicinae/keybinds.json`, `rio/config.toml` and `zed/*.json` are fetched to `%LOCALAPPDATA%\skoop` |
 | Task Manager disabled by policy | `DisableTaskMgr` is set to `0` for the current user; elevated runs also clear the machine-wide value. A domain policy may reapply it on the next refresh |
 | From a clone | The files next to `install.ps1` are used, so edits apply directly |
 | Firefox default browser | `firefox --setDefaultBrowser` runs after install (skipped if Firefox is already the http handler); Windows 11 may open Settings for confirmation, and a failure is non-fatal |
@@ -102,6 +104,7 @@ scoop export | Out-File -Encoding utf8 scoop.json
 | Tailscale | The installer starts the `Tailscale` service (and sets it to Automatic) when present, otherwise launches the Scoop `tailscaled` shim. Login still needs `tailscale up` in a terminal; the Scoop package does not install the Windows service by itself |
 | Temporary Herdr SSH | Run `.\setup-herdr-ssh.ps1` after `tailscale up` on a public machine: choose a tailnet machine, type its SSH user and password, and a throwaway key in `%TEMP%` gets authorized remotely. The private key stays local; `-Revoke -Alias <alias>` removes the remote key, local key pair and SSH config block. Drop the saved machine with `herdr machine remove <id>` |
 | `git push` asks for a username | Being logged in to `gh` is not enough: git also needs `gh auth setup-git`. `setup-gh-auth.ps1` does both; re-run it any time, or use `-SkipGhLogin` for unattended runs |
+| Git author identity | `setup-git-identity.ps1` sets `user.name` / `user.email` globally to **Keios <git@taquangkhoi.com>**. Override with `-Name` / `-Email`, or pass `-Local` to change only the current repo |
 | UniKey preinstalled | Detected via process, uninstall registry and Scoop dir; the existing copy is kept unless `-ForceUniKey` is passed |
 | Zed config | `configure-zed.ps1` copies `zed/*.json` to `%APPDATA%\Zed` and backs up changed originals as `.bak.<timestamp>`; use `-NoBackup` to overwrite directly, or `-ConfigDir` to target another folder |
 | Zed extensions | Zed installs `auto_install_extensions` when it starts, so launch it once after setup; the PowerShell extension uses `pwsh` from Scoop, and Rust language support is built in (`rust-analyzer`) rather than an extension |

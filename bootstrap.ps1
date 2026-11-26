@@ -2,6 +2,7 @@
 # Usage:  powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
 # Use -ForceUniKey to replace an already installed UniKey with the Scoop build.
 # Use -SkipGhLogin to avoid the interactive `gh auth login` prompt.
+# Sets the global git author identity to Keios <git@taquangkhoi.com>.
 # Also applies the repo-managed Zed config from zed\ via configure-zed.ps1.
 # Also applies the repo-managed Rio config (font size / zoom 16) via configure-rio.ps1.
 # After Tailscale starts, setup-herdr-ssh.ps1 offers a temporary SSH key + Herdr remote.
@@ -250,28 +251,34 @@ if (Test-Path $ghAuth) {
     catch { Write-Host "GitHub auth setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
-# 11. Apply the repo-managed Zed config (settings/keymap/tasks).
+# 11. Set the git author identity used for commits.
+$gitIdentity = Join-Path $repo 'setup-git-identity.ps1'
+if (Test-Path $gitIdentity) {
+    try { & $gitIdentity }
+    catch { Write-Host "Git identity setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+# 12. Apply the repo-managed Zed config (settings/keymap/tasks).
 $zedConfig = Join-Path $repo 'configure-zed.ps1'
 if (Test-Path $zedConfig) {
     try { & $zedConfig }
     catch { Write-Host "Zed config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
-# 12. Apply the repo-managed Rio config (font size / zoom 16).
+# 13. Apply the repo-managed Rio config (font size / zoom 16).
 $rioConfig = Join-Path $repo 'configure-rio.ps1'
 if (Test-Path $rioConfig) {
     try { & $rioConfig }
     catch { Write-Host "Rio config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
-# 13. Auto-start Vicinae (Startup shortcut + start the server now).
+# 14. Auto-start Vicinae (Startup shortcut + start the server now).
 $vicinae = Join-Path $repo 'enable-vicinae-autostart.ps1'
 if (Test-Path $vicinae) {
     try { & $vicinae }
     catch { Write-Host "Vicinae autostart setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
-# 14. Set the Vicinae global shortcut to Ctrl+Space (config import).
+# 15. Set the Vicinae global shortcut to Ctrl+Space (config import).
 $vicinaeConfig = Join-Path $repo 'configure-vicinae.ps1'
 if (Test-Path $vicinaeConfig) {
     try { & $vicinaeConfig }
@@ -280,6 +287,7 @@ if (Test-Path $vicinaeConfig) {
 
 Write-Host "Done. Open a new PowerShell window, then try: z .." -ForegroundColor Green
 Write-Host "git push will use your gh login (no username prompt)." -ForegroundColor Green
+Write-Host "Commits will be authored as Keios <git@taquangkhoi.com>." -ForegroundColor Green
 Write-Host "Vicinae starts at login; press Ctrl+Space to open the launcher." -ForegroundColor Green
 Write-Host "Rio font size / zoom is 16." -ForegroundColor Green
 Write-Host "Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL)." -ForegroundColor Green
