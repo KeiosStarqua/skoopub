@@ -1,0 +1,4 @@
+# Repo-managed Rio config.
+# Rio has no separate zoom setting: the font size is the zoom level.
+[fonts]
+size = 16

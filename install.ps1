@@ -27,6 +27,8 @@
       there is reported but does not abort the bootstrap.
     - Copies the repo-managed Zed settings/keymap/tasks into %APPDATA%\Zed (old
       files are backed up); Zed installs its declared extensions on next start.
+    - Copies the repo-managed Rio config into %LOCALAPPDATA%\rio\config.toml,
+      setting the font size (Rio's zoom) to 16; Rio hot-reloads it on change.
     - Offers to run `gh auth login` (only when needed) and runs `gh auth setup-git`
       so `git push` uses the GitHub CLI token instead of prompting for a username.
     - Registers `vicinae-server.exe` in the per-user Startup folder and starts it
@@ -252,8 +254,9 @@ if (-not $repoRoot) {
         'sharex-hotkeys.template.json', 'firefox-policies.template.json',
         'setup-gh-auth.ps1', 'configure-zed.ps1', 'setup-herdr-ssh.ps1',
         'enable-vicinae-autostart.ps1', 'configure-vicinae.ps1',
+        'configure-rio.ps1',
         'zed/settings.json', 'zed/keymap.json', 'zed/tasks.json',
-        'vicinae/keybinds.json'
+        'vicinae/keybinds.json', 'rio/config.toml'
     )
     foreach ($file in $repoFiles) {
         $dest = Join-Path $repoRoot $file
@@ -270,6 +273,7 @@ $sharexFix      = Join-Path $repoRoot 'fix-sharex-printscreen.ps1'
 $firefoxPolicies = Join-Path $repoRoot 'firefox-policies.template.json'
 $ghAuth          = Join-Path $repoRoot 'setup-gh-auth.ps1'
 $zedConfig       = Join-Path $repoRoot 'configure-zed.ps1'
+$rioConfig       = Join-Path $repoRoot 'configure-rio.ps1'
 $herdrSsh        = Join-Path $repoRoot 'setup-herdr-ssh.ps1'
 $vicinae         = Join-Path $repoRoot 'enable-vicinae-autostart.ps1'
 $vicinaeConfig   = Join-Path $repoRoot 'configure-vicinae.ps1'
@@ -443,7 +447,19 @@ if (Test-Path $zedConfig) {
     Write-Ok 'configure-zed.ps1 not found - skipping'
 }
 
-# --- 15. Auto-start Vicinae --------------------------------------------------
+# --- 15. Apply the repo-managed Rio config (zoom 16) -------------------------
+if (Test-Path $rioConfig) {
+    Write-Step 'Applying the Rio config (font size / zoom 16)'
+    try {
+        & $rioConfig
+    } catch {
+        Write-Host "    Rio config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Ok 'configure-rio.ps1 not found - skipping'
+}
+
+# --- 16. Auto-start Vicinae --------------------------------------------------
 if (Test-Path $vicinae) {
     Write-Step 'Enabling Vicinae to start at login'
     try {
@@ -455,7 +471,7 @@ if (Test-Path $vicinae) {
     Write-Ok 'enable-vicinae-autostart.ps1 not found - skipping'
 }
 
-# --- 16. Set the Vicinae global shortcut to Ctrl+Space ------------------------
+# --- 17. Set the Vicinae global shortcut to Ctrl+Space ------------------------
 if (Test-Path $vicinaeConfig) {
     Write-Step 'Setting the Vicinae global shortcut (Ctrl+Space)'
     try {
@@ -471,4 +487,5 @@ Write-Host ''
 Write-Host 'Done. Open a new PowerShell window, then try: z ..' -ForegroundColor Green
 Write-Host 'git push will use your gh login (no username prompt).' -ForegroundColor Green
 Write-Host 'Vicinae starts at login; press Ctrl+Space to open the launcher.' -ForegroundColor Green
+Write-Host 'Rio font size / zoom is 16.' -ForegroundColor Green
 Write-Host 'Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL).' -ForegroundColor Green

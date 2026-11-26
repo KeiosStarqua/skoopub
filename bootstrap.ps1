@@ -3,6 +3,7 @@
 # Use -ForceUniKey to replace an already installed UniKey with the Scoop build.
 # Use -SkipGhLogin to avoid the interactive `gh auth login` prompt.
 # Also applies the repo-managed Zed config from zed\ via configure-zed.ps1.
+# Also applies the repo-managed Rio config (font size / zoom 16) via configure-rio.ps1.
 # After Tailscale starts, setup-herdr-ssh.ps1 offers a temporary SSH key + Herdr remote.
 # Also registers Vicinae to start at login via enable-vicinae-autostart.ps1
 # and sets its global shortcut to Ctrl+Space via configure-vicinae.ps1.
@@ -256,14 +257,21 @@ if (Test-Path $zedConfig) {
     catch { Write-Host "Zed config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
-# 12. Auto-start Vicinae (Startup shortcut + start the server now).
+# 12. Apply the repo-managed Rio config (font size / zoom 16).
+$rioConfig = Join-Path $repo 'configure-rio.ps1'
+if (Test-Path $rioConfig) {
+    try { & $rioConfig }
+    catch { Write-Host "Rio config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+
+# 13. Auto-start Vicinae (Startup shortcut + start the server now).
 $vicinae = Join-Path $repo 'enable-vicinae-autostart.ps1'
 if (Test-Path $vicinae) {
     try { & $vicinae }
     catch { Write-Host "Vicinae autostart setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
-# 13. Set the Vicinae global shortcut to Ctrl+Space (config import).
+# 14. Set the Vicinae global shortcut to Ctrl+Space (config import).
 $vicinaeConfig = Join-Path $repo 'configure-vicinae.ps1'
 if (Test-Path $vicinaeConfig) {
     try { & $vicinaeConfig }
@@ -273,4 +281,5 @@ if (Test-Path $vicinaeConfig) {
 Write-Host "Done. Open a new PowerShell window, then try: z .." -ForegroundColor Green
 Write-Host "git push will use your gh login (no username prompt)." -ForegroundColor Green
 Write-Host "Vicinae starts at login; press Ctrl+Space to open the launcher." -ForegroundColor Green
+Write-Host "Rio font size / zoom is 16." -ForegroundColor Green
 Write-Host "Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL)." -ForegroundColor Green
