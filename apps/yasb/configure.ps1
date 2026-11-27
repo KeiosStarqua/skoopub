@@ -46,6 +46,27 @@ if (-not $ConfigDir) {
 }
 New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
 
+# Load the user's YASB settings before patching the theme. YASB reads .env from
+# this same folder, and its weather widget supports location: "env", so the
+# location survives a theme re-download as long as .env keeps the value.
+$example = Join-Path $SourceDir '.env.example'
+$envFile = Join-Path $ConfigDir '.env'
+if ((Test-Path -LiteralPath $example) -and -not (Test-Path -LiteralPath $envFile)) {
+    Copy-Item -LiteralPath $example -Destination $envFile
+    Write-Host "Created $envFile from the template - fill in any values you need."
+}
+function Get-YasbEnvValue {
+    param([string]$Name)
+    if (-not (Test-Path -LiteralPath $envFile)) { return '' }
+    foreach ($line in [System.IO.File]::ReadAllLines($envFile)) {
+        if ($line -match "^\s*$Name\s*=\s*(.*?)\s*$") {
+            return $Matches[1].Trim().Trim('"', "'")
+        }
+    }
+    return ''
+}
+$weatherLocation = Get-YasbEnvValue 'YASB_WEATHER_LOCATION'
+
 $themeBase = 'https://raw.githubusercontent.com/amnweb/yasb-themes/main/themes/{0}' -f $ThemeId
 $themeName = $ThemeId
 try {
@@ -62,6 +83,11 @@ $patch = {
     $text = $Text -replace '(?m)^(\s*image_path:\s*).*$', '$1"$env:YASB_WALLPAPER_DIR" # Set in ~/.config/yasb/.env (see .env.example)'
     $text = $text -replace '(?m)^(\s*path:\s*)[''"]?[A-Za-z]:\\.*[Ww]allpaper.*$', '$1"$env:YASB_WALLPAPER_DIR"'
     $text = $text -replace '(?m)^(\s*update_check:\s*).*$', '${1}false'
+    # Use YASB's native env support so the theme's hardcoded location does not
+    # overwrite the user's choice on a fresh install or theme change.
+    if ($weatherLocation) {
+        $text = $text -replace '(?m)^(\s*location:\s*).*$', '${1}"env"'
+    }
     # Nerd Font supplies the F0xxx/EAF8 glyphs, Segoe Fluent Icons supplies E972
     # and the Windows system glyphs; neither alone covers every theme label.
     $text = $text -replace '(?m)^(\s*--icons-font(?:-fallback)?:\s*).*$', '$1"JetBrainsMono NFP", "Segoe Fluent Icons";'
@@ -251,13 +277,8 @@ function Ensure-ThemeFonts {
 }
 Ensure-ThemeFonts -StylesPath (Join-Path $ConfigDir 'styles.css')
 
-# YASB reads secrets from .env in the same directory. Never overwrite a real one.
-$example = Join-Path $SourceDir '.env.example'
-$envFile = Join-Path $ConfigDir '.env'
-if ((Test-Path -LiteralPath $example) -and -not (Test-Path -LiteralPath $envFile)) {
-    Copy-Item -LiteralPath $example -Destination $envFile
-    Write-Host "Created $envFile from the template - fill in any values you need."
-}
+# .env is created near the top (before the theme patch); an existing one is never
+# overwritten here - it may hold the user's API key, location and wallpaper path.
 
 # The wallpapers widget reads YASB_WALLPAPER_DIR. Clone the community collection
 # once and point the env var at its images folder. Non-fatal when offline.
