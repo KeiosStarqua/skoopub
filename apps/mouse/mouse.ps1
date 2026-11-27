@@ -16,6 +16,7 @@ param(
     [int]$Seconds = 30,
     [string]$Out,
     [string]$From,
+    [string]$Expect,
     [switch]$Adaptive,
     [switch]$DryRun,
     [switch]$Force,
@@ -48,10 +49,12 @@ switch ($Command) {
     'diagnose' {
         $exeArgs += @('--seconds', "$Seconds")
         if ($DebugRaw) { $exeArgs += '--debug-raw' }
+        if ($Expect) { $exeArgs += @('--expect', $Expect) }
         if ($Out) { $exeArgs += @('--out', $Out) }
     }
     'monitor' {
         $exeArgs += @('--seconds', "$Seconds")
+        if ($Expect) { $exeArgs += @('--expect', $Expect) }
     }
     'fix' {
         if ($Adaptive) { $exeArgs += '--adaptive' }

@@ -18,11 +18,38 @@ alternating-sign bursts, suspect the encoder, USB receiver, or a second pointing
 device. A device reporting `OK` in Device Manager only means it is recognized,
 not that its wheel data is correct.
 
+## Reading the report
+
+- `injected` on an event is true when `WH_MOUSE_LL` flagged it with
+  `LLMHF_INJECTED` (synthetic input). `SendInput` does not always set that flag,
+  so the tool also checks HID identity: an unresolved `unknown-hid` path makes
+  `identified=false` and sets `physical_sample=false`.
+- `expect` windows (seconds from capture start) define the direction the
+  operator says they are scrolling. `unexpected_direction` counts raw events
+  that contradict the schedule; the protocol below uses two windows.
+- `devices[].mismatch_rate` is the per-device error rate; `devices[].vid_pid`
+  summarises the HID path (`VID_046D&PID_C08F`, …).
+- `burst_count` / `isolated_reversals` describe runs of same-direction scrolls
+  and one-off reversals inside a run (noise or accidental double input).
+- Never enable `fix` from a sample with `physical_sample=false` or with
+  `warnings` about injected/unidentified input.
+
+### 60-second physical-mouse protocol
+
+```powershell
+.\apps\mouse\mouse.ps1 diagnose -Seconds 60 -Expect 'down@0-25,up@30-55'
+```
+
+Scroll **only down** from 0–25 s, rest 25–30 s, scroll **only up** from
+30–55 s, rest 55–60 s. A real mouse should resolve a `VID_*/PID_*` path and
+produce `physical_sample=true`. Try to reproduce the random reversal during
+those windows.
+
 ## Commands
 
 ```powershell
 .\apps\mouse\mouse.ps1 install                     # download the release exe
-.\apps\mouse\mouse.ps1 diagnose -Seconds 30         # capture + JSON report
+.\apps\mouse\mouse.ps1 diagnose -Seconds 60 -Expect 'down@0-25,up@30-55'
 .\apps\mouse\mouse.ps1 monitor                     # stream events live
 .\apps\mouse\mouse.ps1 status                      # is correction running?
 .\apps\mouse\mouse.ps1 fix                         # start correction (hidden)
@@ -35,6 +62,7 @@ Direct binary (same commands without the `.ps1` wrapper):
 
 ```
 skoopub-mouse diagnose [--seconds 30] [--out <path>] [--debug-raw]
+                       [--expect down@0-25,up@30-55]
 skoopub-mouse monitor  [--seconds 30]
 skoopub-mouse fix [--adaptive] [--dry-run] [--from <report>] [--force]
 skoopub-mouse restore

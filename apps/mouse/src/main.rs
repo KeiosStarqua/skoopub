@@ -10,7 +10,7 @@
 
 mod model;
 
-use model::{analyze, Analysis, CorrectionConfig, Corrector, ScrollEvent};
+use model::{analyze, Analysis, CorrectionConfig, Corrector, ExpectWindow, ScrollEvent};
 use std::collections::HashMap;
 use std::env;
 use std::ffi::c_void;
@@ -51,7 +51,7 @@ const LLMHF_INJECTED: u32 = 0x00000010;
 struct State {
     started: Instant,
     events: Vec<ScrollEvent>,
-    device_names: HashMap<isize, String>,
+    device_names: HashMap<isize, (String, bool, String)>,
     corrector: Option<Corrector>,
     monitor: bool,
     printed: usize,
@@ -59,6 +59,7 @@ struct State {
     raw_calls: u32,
     debug_raw: bool,
     debug_printed: usize,
+    expect: Vec<ExpectWindow>,
     // Stored as raw addresses: windows-rs handle types are !Send, and the
     // shared state must be Sync for the static Mutex.
     hook: Option<isize>,
@@ -79,6 +80,7 @@ impl Default for State {
             raw_calls: 0,
             debug_raw: false,
             debug_printed: 0,
+            expect: Vec::new(),
             hook: None,
             window: None,
             dry_run: false,
@@ -146,16 +148,34 @@ fn flag(args: &[String], name: &str) -> bool {
     args.iter().any(|a| a == &format!("--{}", name))
 }
 
-fn device_name(handle: HANDLE, cache: &mut HashMap<isize, String>) -> String {
+/// Pull a 4-hex-digit value following a marker such as `VID_` from an HID path.
+fn hex_after(name: &str, marker: &str) -> Option<String> {
+    let upper = name.to_uppercase();
+    let start = upper.find(marker)? + marker.len();
+    let value: String = upper[start..].chars().take(4).collect();
+    if value.len() == 4 && value.chars().all(|c| c.is_ascii_hexdigit()) {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+/// Resolve an HID device path plus a `VID_xxxx&PID_xxxx` summary.
+/// `(name, identified, vid_pid)`; `identified` is false for injected/virtual
+/// devices whose path Windows cannot report.
+fn device_name(
+    handle: HANDLE,
+    cache: &mut HashMap<isize, (String, bool, String)>,
+) -> (String, bool, String) {
     let key = handle.0 as isize;
-    if let Some(name) = cache.get(&key) {
-        return name.clone();
+    if let Some(cached) = cache.get(&key) {
+        return cached.clone();
     }
     let mut size = 0u32;
     unsafe {
         let _ = GetRawInputDeviceInfoW(Some(handle), RIDI_DEVICENAME, None, &mut size);
     }
-    let name = if size > 0 {
+    let (name, identified) = if size > 0 && size < 4096 {
         let mut buffer = vec![0u16; size as usize / 2 + 1];
         let written = unsafe {
             GetRawInputDeviceInfoW(
@@ -165,16 +185,56 @@ fn device_name(handle: HANDLE, cache: &mut HashMap<isize, String>) -> String {
                 &mut size,
             )
         };
-        if written > 0 {
-            String::from_utf16_lossy(&buffer[..written as usize / 2])
+        if written > 1 {
+            let raw = String::from_utf16_lossy(&buffer[..written as usize / 2])
+                .trim_end_matches('\0')
+                .to_string();
+            let identified = !raw.is_empty()
+                && raw.to_uppercase().contains("VID_")
+                && raw.to_uppercase().contains("PID_");
+            (raw, identified)
         } else {
-            "unknown-hid".to_string()
+            ("unknown-hid".to_string(), false)
         }
     } else {
-        "unknown-hid".to_string()
+        ("unknown-hid".to_string(), false)
     };
-    cache.insert(key, name.clone());
-    name
+    let vid_pid = match (hex_after(&name, "VID_"), hex_after(&name, "PID_")) {
+        (Some(vid), Some(pid)) => format!("VID_{}&PID_{}", vid, pid),
+        _ => String::new(),
+    };
+    let result = (name.clone(), identified, vid_pid);
+    cache.insert(key, result.clone());
+    result
+}
+
+/// Parse `--expect down@0-25,up@30-55` (seconds from capture start).
+fn parse_expect(spec: &str) -> Vec<ExpectWindow> {
+    let mut windows = Vec::new();
+    for part in spec.split(',') {
+        let (direction, range) = match part.split_once('@') {
+            Some(pair) => pair,
+            None => continue,
+        };
+        let sign = match direction.trim().to_ascii_lowercase().as_str() {
+            "up" => 1,
+            "down" => -1,
+            _ => continue,
+        };
+        let (start, end) = match range.split_once('-') {
+            Some(pair) => pair,
+            None => continue,
+        };
+        if let (Ok(start), Ok(end)) = (start.trim().parse::<u64>(), end.trim().parse::<u64>()) {
+            windows.push(ExpectWindow {
+                direction: direction.trim().to_ascii_lowercase(),
+                sign,
+                start_ms: start as u128 * 1000,
+                end_ms: end as u128 * 1000,
+            });
+        }
+    }
+    windows
 }
 
 unsafe fn read_u16_at(base: *const u8, offset: usize) -> u16 {
@@ -251,13 +311,16 @@ unsafe fn handle_raw_input(lparam: LPARAM) {
         Err(_) => return,
     };
     let t_ms = guard.started.elapsed().as_millis();
-    let device = device_name(header.hDevice, &mut guard.device_names);
+    let (device, identified, vid_pid) = device_name(header.hDevice, &mut guard.device_names);
     guard.events.push(ScrollEvent {
         t_ms,
         layer: "raw".to_string(),
         device,
         delta: raw_delta,
         axis: axis.to_string(),
+        injected: false,
+        identified,
+        vid_pid,
     });
 }
 
@@ -285,34 +348,38 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
             let data = lparam.0 as *mut MSLLHOOKSTRUCT;
             if !data.is_null() {
                 let entry = &mut *data;
-                if entry.flags & LLMHF_INJECTED == 0 {
-                    let delta = (entry.mouseData >> 16) as i16 as i32;
-                    let axis = if message == WM_MOUSEWHEEL {
-                        "vertical"
-                    } else {
-                        "horizontal"
-                    };
-                    let mut new_delta = None;
-                    if let Ok(mut guard) = state().lock() {
-                        let t_ms = guard.started.elapsed().as_millis();
-                        guard.events.push(ScrollEvent {
-                            t_ms,
-                            layer: "wm".to_string(),
-                            device: "hook".to_string(),
-                            delta,
-                            axis: axis.to_string(),
-                        });
-                        if !guard.dry_run {
-                            if let Some(corrector) = guard.corrector.as_mut() {
-                                new_delta = corrector.decide(delta, axis, t_ms);
-                            }
+                let injected = entry.flags & LLMHF_INJECTED != 0;
+                let delta = (entry.mouseData >> 16) as i16 as i32;
+                let axis = if message == WM_MOUSEWHEEL {
+                    "vertical"
+                } else {
+                    "horizontal"
+                };
+                let mut new_delta = None;
+                if let Ok(mut guard) = state().lock() {
+                    let t_ms = guard.started.elapsed().as_millis();
+                    guard.events.push(ScrollEvent {
+                        t_ms,
+                        layer: "wm".to_string(),
+                        device: if injected { "hook-injected" } else { "hook" }.to_string(),
+                        delta,
+                        axis: axis.to_string(),
+                        injected,
+                        identified: false,
+                        vid_pid: String::new(),
+                    });
+                    // Never feed injected input into correction: that would
+                    // create a feedback loop with our own (or another) tool.
+                    if !injected && !guard.dry_run {
+                        if let Some(corrector) = guard.corrector.as_mut() {
+                            new_delta = corrector.decide(delta, axis, t_ms);
                         }
                     }
-                    if let Some(fixed) = new_delta {
-                        // Low-level hooks may edit MSLLHOOKSTRUCT in place; the
-                        // changed value flows to the rest of the hook chain.
-                        entry.mouseData = ((fixed as u16 as u32) << 16) | (entry.mouseData & 0xFFFF);
-                    }
+                }
+                if let Some(fixed) = new_delta {
+                    // Low-level hooks may edit MSLLHOOKSTRUCT in place; the
+                    // changed value flows to the rest of the hook chain.
+                    entry.mouseData = ((fixed as u16 as u32) << 16) | (entry.mouseData & 0xFFFF);
                 }
             }
         }
@@ -436,6 +503,7 @@ struct Report {
     duration_ms: u128,
     hook_calls: u32,
     raw_calls: u32,
+    expect: Vec<ExpectWindow>,
     analysis: Analysis,
     events: Vec<ScrollEvent>,
     note: String,
@@ -451,7 +519,11 @@ fn run_capture(args: &[String], monitor: bool) -> Result<(), String> {
         guard.corrector = None;
         guard.debug_raw = flag(args, "debug-raw");
         guard.debug_printed = 0;
+        guard.expect = option(args, "expect")
+            .map(|s| parse_expect(&s))
+            .unwrap_or_default();
     }
+    let expect = state().lock().unwrap().expect.clone();
     init_capture().map_err(|e| format!("could not register raw input or the mouse hook: {e}"))?;
     println!(
         "capturing for {}s — turn the wheel normally, then reverse it a few times...",
@@ -464,7 +536,7 @@ fn run_capture(args: &[String], monitor: bool) -> Result<(), String> {
         let guard = state().lock().unwrap();
         (guard.events.clone(), guard.hook_calls, guard.raw_calls)
     };
-    let analysis = analyze(&events);
+    let analysis = analyze(&events, &expect);
     let report = Report {
         tool: "skoopub-mouse",
         mode: if monitor { "monitor" } else { "diagnose" }.to_string(),
@@ -472,9 +544,10 @@ fn run_capture(args: &[String], monitor: bool) -> Result<(), String> {
         duration_ms: started.elapsed().as_millis(),
         hook_calls,
         raw_calls,
+        expect,
         analysis,
         events: if monitor { Vec::new() } else { events },
-        note: "Positive delta = up/away. Compare `raw` (HID) with `wm` (what apps receive).".to_string(),
+        note: "Positive delta = up/away. Compare `raw` (HID) with `wm` (what apps receive). `injected=true` marks synthetic input (LLMHF_INJECTED).".to_string(),
     };
     let path = option(args, "out")
         .map(PathBuf::from)
@@ -605,10 +678,13 @@ fn usage() {
         "skoopub-mouse — mouse wheel diagnostics and correction\n\n\
 Usage:\n\
   skoopub-mouse diagnose [--seconds 30] [--out <path>] [--debug-raw]\n\
+                         [--expect down@0-25,up@30-55]\n\
   skoopub-mouse monitor  [--seconds 30]\n\
   skoopub-mouse fix [--adaptive] [--dry-run] [--from <report>] [--force]\n\
   skoopub-mouse restore\n\
   skoopub-mouse status\n\n\
+--expect gives windows (seconds from start) where you scroll down/up, so the\n\
+report can count events that contradict the expected direction.\n\
 diagnose/monitor capture HID Raw Input and WM_MOUSEWHEEL together.\n\
 fix flips the wheel sign using the calibration from `diagnose`; restore stops it."
     );

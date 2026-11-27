@@ -24,7 +24,7 @@ manager of its own — the files are the product.
 | `.github/workflows/mouse-release.yml` | CI | Builds `skoopub-mouse.exe` on `mouse-v*` tags (or `workflow_dispatch`) and attaches it to the GitHub Release. |
 | `shell/profile.ps1` | Profile fragment | Dot-sourced from both PowerShell editions: zoxide, atuin, Starship, `n` -> `nu`, btop aliases, Herdr env scrubbing. |
 | `apps/firefox/policies.template.json` | JSON template | Firefox enterprise policy (extensions, bookmarks, homepage, password prompt). |
-| `apps/sharex/fix-printscreen.ps1` | PowerShell utility | Releases PrtSc from Snipping Tool and seeds `hotkeys.template.json`. |
+| `apps/sharex/fix-printscreen.ps1` | PowerShell utility | Releases PrtSc from Snipping Tool and seeds `hotkeys.template.json`; checks state first so re-runs are a no-op. |
 | `apps/unikey/configure.ps1`, `apps/unikey/unikey.reg` | CLI wrapper + sanitized baseline | Installs/reuses UniKey and sets Unicode + VNI, Vietnamese on, no startup dialog and a Startup shortcut; `-Export` / `-Restore` back up and restore settings. |
 | `apps/sharex/hotkeys.template.json` | JSON template | ShareX hotkey set. |
 | `apps/github/setup-auth.ps1` | PowerShell utility | `gh auth login` + `gh auth setup-git`. |

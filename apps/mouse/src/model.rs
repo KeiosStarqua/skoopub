@@ -6,6 +6,16 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// A window of the capture where the operator says which way they are scrolling.
+/// Example: `down@0-25,up@30-55` (seconds from the start).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExpectWindow {
+    pub direction: String,
+    pub sign: i32,
+    pub start_ms: u128,
+    pub end_ms: u128,
+}
+
 /// A wheel event captured from one of the two observable layers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScrollEvent {
@@ -19,18 +29,28 @@ pub struct ScrollEvent {
     pub delta: i32,
     /// `vertical` or `horizontal`.
     pub axis: String,
+    /// WM events flagged LLMHF_INJECTED (synthetic input, e.g. SendInput).
+    pub injected: bool,
+    /// Whether the HID device path could be resolved for a raw event.
+    pub identified: bool,
+    /// VID/PID pair parsed from the HID path, empty when unidentified.
+    pub vid_pid: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeviceStats {
     pub device: String,
+    pub vid_pid: String,
     pub raw_up: u32,
     pub raw_down: u32,
     pub wm_up: u32,
     pub wm_down: u32,
     pub matched: u32,
     pub mismatched: u32,
+    pub mismatch_rate: f64,
     pub noisy: u32,
+    pub injected: u32,
+    pub unexpected: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -41,7 +61,15 @@ pub struct Analysis {
     pub mismatched: u32,
     pub mismatch_rate: f64,
     pub noisy_candidates: u32,
-    pub conclusion: String,
+    pub injected_events: u32,
+    pub burst_count: u32,
+    pub isolated_reversals: u32,
+    pub expected_windows: usize,
+    pub expected_checked: u32,
+    pub unexpected_direction: u32,
+    pub physical_sample: bool,
+    pub conclusions: Vec<String>,
+    pub warnings: Vec<String>,
     pub devices: Vec<DeviceStats>,
 }
 
@@ -51,6 +79,8 @@ const CORRELATION_MS: u128 = 150;
 /// when they are small (one notch) — a deliberate reversal is usually slower.
 const NOISE_WINDOW_MS: u128 = 80;
 const NOISE_MAX_ABS_DELTA: i32 = 120;
+/// Gap above which a run of wheel events is considered a separate scroll burst.
+const BURST_PAUSE_MS: u128 = 500;
 
 fn sign(delta: i32) -> i32 {
     if delta > 0 {
@@ -62,22 +92,44 @@ fn sign(delta: i32) -> i32 {
     }
 }
 
-fn stats_for<'a>(map: &'a mut HashMap<String, DeviceStats>, device: &str) -> &'a mut DeviceStats {
-    map.entry(device.to_string()).or_insert_with(|| DeviceStats {
-        device: device.to_string(),
+fn stats_for<'a>(map: &'a mut HashMap<String, DeviceStats>, e: &ScrollEvent) -> &'a mut DeviceStats {
+    map.entry(e.device.clone()).or_insert_with(|| DeviceStats {
+        device: e.device.clone(),
+        vid_pid: e.vid_pid.clone(),
         ..Default::default()
     })
 }
 
-pub fn analyze(events: &[ScrollEvent]) -> Analysis {
+pub fn analyze(events: &[ScrollEvent], expect: &[ExpectWindow]) -> Analysis {
     let mut devices: HashMap<String, DeviceStats> = HashMap::new();
     let mut raw: Vec<(usize, &ScrollEvent)> = Vec::new();
     let mut wm: Vec<&ScrollEvent> = Vec::new();
+    let mut injected_events = 0u32;
+    let mut unexpected_direction = 0u32;
+    let mut expected_checked = 0u32;
 
     for (i, e) in events.iter().enumerate() {
+        if e.injected {
+            injected_events += 1;
+        }
+        let s = stats_for(&mut devices, e);
+        if e.injected {
+            s.injected += 1;
+        }
+        if !expect.is_empty() && e.layer == "raw" {
+            if let Some(window) = expect
+                .iter()
+                .find(|w| e.t_ms >= w.start_ms && e.t_ms <= w.end_ms)
+            {
+                expected_checked += 1;
+                if sign(e.delta) != window.sign {
+                    unexpected_direction += 1;
+                    s.unexpected += 1;
+                }
+            }
+        }
         if e.layer == "raw" {
             raw.push((i, e));
-            let s = stats_for(&mut devices, &e.device);
             if e.delta > 0 {
                 s.raw_up += 1;
             } else if e.delta < 0 {
@@ -85,7 +137,6 @@ pub fn analyze(events: &[ScrollEvent]) -> Analysis {
             }
         } else if e.layer == "wm" {
             wm.push(e);
-            let s = stats_for(&mut devices, &e.device);
             if e.delta > 0 {
                 s.wm_up += 1;
             } else if e.delta < 0 {
@@ -116,7 +167,7 @@ pub fn analyze(events: &[ScrollEvent]) -> Analysis {
         if let Some((_, idx)) = best {
             claimed[idx] = true;
             let r = &events[idx];
-            let s = stats_for(&mut devices, &r.device);
+            let s = stats_for(&mut devices, r);
             if sign(r.delta) == sign(w.delta) {
                 matched += 1;
                 s.matched += 1;
@@ -127,9 +178,20 @@ pub fn analyze(events: &[ScrollEvent]) -> Analysis {
         }
     }
 
+    for s in devices.values_mut() {
+        let total = s.matched + s.mismatched;
+        s.mismatch_rate = if total == 0 {
+            0.0
+        } else {
+            ((s.mismatched as f64 / total as f64) * 1000.0).round() / 1000.0
+        };
+    }
+
     // Short opposite-sign bursts in the raw stream are the hardware/encoder
     // signature. We never auto-correct these — they need a physical check.
     let mut noisy = 0u32;
+    let mut burst_count = 0u32;
+    let mut isolated_reversals = 0u32;
     let mut by_stream: HashMap<(String, String), Vec<&ScrollEvent>> = HashMap::new();
     for &(_, r) in &raw {
         by_stream
@@ -137,8 +199,19 @@ pub fn analyze(events: &[ScrollEvent]) -> Analysis {
             .or_default()
             .push(r);
     }
-    for ((device, _axis), list) in &mut by_stream {
+    for ((_device, _axis), list) in &mut by_stream {
         list.sort_by_key(|e| e.t_ms);
+        let mut burst_sign = 0i32;
+        let mut last_t = 0u128;
+        for e in list.iter() {
+            if burst_sign == 0 || e.t_ms.saturating_sub(last_t) > BURST_PAUSE_MS {
+                burst_count += 1;
+                burst_sign = sign(e.delta);
+            } else if sign(e.delta) != 0 && sign(e.delta) != burst_sign {
+                isolated_reversals += 1;
+            }
+            last_t = e.t_ms;
+        }
         for pair in list.windows(2) {
             let (a, b) = (pair[0], pair[1]);
             if sign(a.delta) != 0
@@ -148,7 +221,7 @@ pub fn analyze(events: &[ScrollEvent]) -> Analysis {
                 && b.delta.abs() <= NOISE_MAX_ABS_DELTA
             {
                 noisy += 1;
-                stats_for(&mut devices, device).noisy += 1;
+                stats_for(&mut devices, a).noisy += 1;
             }
         }
     }
@@ -159,20 +232,46 @@ pub fn analyze(events: &[ScrollEvent]) -> Analysis {
     } else {
         mismatched as f64 / total as f64
     };
+    let identified_raw = raw.iter().filter(|(_, r)| r.identified).count();
+    let physical_sample = raw.len() > 0
+        && identified_raw > 0
+        && raw.iter().all(|(_, r)| !r.injected)
+        && injected_events == 0;
 
-    let conclusion = if raw.is_empty() {
-        "No Raw Input wheel data captured. Either no wheel was turned, or raw input registration failed; this sample is inconclusive."
+    let mut conclusions = Vec::new();
+    if raw.is_empty() {
+        conclusions.push("No Raw Input wheel data captured. Either no wheel was turned, or raw input registration failed; this sample is inconclusive.".to_string());
     } else if mismatched >= 3 && mismatch_rate >= 0.5 {
-        "Sign is flipped between HID Raw Input and WM_MOUSEWHEEL. The device data is consistent but something in the Windows input/hook chain inverts it (G HUB, cafe client, or another hook)."
+        conclusions.push("Sign is flipped between HID Raw Input and WM_MOUSEWHEEL. The device data is consistent but something in the Windows input/hook chain inverts it (G HUB, cafe client, or another hook).".to_string());
     } else if noisy >= 3 {
-        "Raw Input itself contains short alternating-sign bursts. Suspect a noisy encoder, a duplicate pointing device, or a flaky USB receiver rather than Windows."
+        conclusions.push("Raw Input itself contains short alternating-sign bursts. Suspect a noisy encoder, a duplicate pointing device, or a flaky USB receiver rather than Windows.".to_string());
     } else if total == 0 {
-        "Raw Input and WM_MOUSEWHEEL events did not line up in time. Scroll longer, or try again with the window focused."
+        conclusions.push("Raw Input and WM_MOUSEWHEEL events did not line up in time. Scroll longer, or try again with the window focused.".to_string());
     } else if mismatch_rate > 0.0 {
-        "Only a few inverted events were seen. The fault is likely intermittent; capture for longer before enabling correction."
+        conclusions.push("Only a few inverted events were seen. The fault is likely intermittent; capture for longer before enabling correction.".to_string());
     } else {
-        "No inversion in this sample. The symptom is intermittent or specific to one application; repeat the capture while it happens."
-    };
+        conclusions.push("No inversion in this sample. The symptom is intermittent or specific to one application; repeat the capture while it happens.".to_string());
+    }
+    if !expect.is_empty() && expected_checked > 0 && unexpected_direction > 0 {
+        conclusions.push(format!(
+            "{} of {} raw events scrolled opposite to the expected-direction schedule; inspect those timestamps.",
+            unexpected_direction, expected_checked
+        ));
+    }
+
+    let mut warnings = Vec::new();
+    if injected_events > 0 {
+        warnings.push(format!(
+            "{} WM wheel events are marked LLMHF_INJECTED (synthetic input). This sample cannot prove a physical mouse fault.",
+            injected_events
+        ));
+    }
+    if identified_raw == 0 && !raw.is_empty() {
+        warnings.push("No raw event resolved a HID device path (all show unknown-hid). Injected/virtual input is likely; repeat with a physical mouse.".to_string());
+    }
+    if !expect.is_empty() && expected_checked == 0 {
+        warnings.push("The expected-direction windows did not overlap any raw events; check the --expect seconds.".to_string());
+    }
 
     let mut device_list: Vec<DeviceStats> = devices.into_values().collect();
     device_list.sort_by(|a, b| {
@@ -187,7 +286,15 @@ pub fn analyze(events: &[ScrollEvent]) -> Analysis {
         mismatched,
         mismatch_rate: (mismatch_rate * 1000.0).round() / 1000.0,
         noisy_candidates: noisy,
-        conclusion: conclusion.to_string(),
+        injected_events,
+        burst_count,
+        isolated_reversals,
+        expected_windows: expect.len(),
+        expected_checked,
+        unexpected_direction,
+        physical_sample,
+        conclusions,
+        warnings,
         devices: device_list,
     }
 }
