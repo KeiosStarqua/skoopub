@@ -98,11 +98,13 @@ function Add-WallpapersWidget {
         on_middle: "do_nothing"
         on_right: "change_wallpaper"
 '@
-    # Insert before the top-level `widgets:` mapping so YAML stays valid.
+    # Insert *after* the top-level `widgets:` key: the 2-space-indented block is
+    # a child of that mapping. Inserting before it would leave the block inside
+    # `bars:` and YASB would reject the config with "Extra inputs are not permitted".
     $marker = "`nwidgets:"
     $idx = $Text.IndexOf($marker)
-    if ($idx -lt 0) { return $Text + "`n`n" + $widget }
-    return $Text.Insert($idx + 1, $widget + "`n`n")
+    if ($idx -lt 0) { return $Text + "`n`nwidgets:`n" + $widget }
+    return $Text.Insert($idx + $marker.Length, "`n" + $widget)
 }
 
 function Add-WallpapersToBar {
