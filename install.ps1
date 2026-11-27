@@ -500,40 +500,21 @@ function Enable-TaskManager {
 }
 
 function Get-WindowsActivationStatus {
-    # Read-only check of whether Windows is activated. Uses the SoftwareLicensingProduct
-    # WMI/CIM class (no external downloads, no activation performed). A non-activated
-    # machine is reported in yellow so it can be fixed with a real product key; this
-    # never attempts to bypass licensing.
+    # Read-only check of whether Windows is activated. Returns the Windows
+    # LicenseStatus code (0 = unlicensed, 1 = licensed, 2..6 = grace/notification
+    # states), or -1 when the check cannot be performed. It never activates or
+    # bypasses licensing. Reporting is done by the caller from the return value.
     Write-Step 'Checking Windows activation status'
     try {
         $lic = Get-CimInstance -ClassName SoftwareLicensingProduct -Filter "Name LIKE 'Windows%'" -ErrorAction Stop |
             Where-Object { $_.PartialProductKey } |
             Select-Object -First 1
         if (-not $lic) {
-            Write-Ok 'could not determine Windows activation status - skipping'
-            return
+            return -1
         }
-        $status = [int]$lic.LicenseStatus
-        $desc = switch ($status) {
-            0 { 'not activated (unlicensed)' }
-            1 { 'activated (licensed)' }
-            2 { 'in out-of-box grace period' }
-            3 { 'in out-of-tolerance grace period' }
-            4 { 'in non-genuine grace period' }
-            5 { 'in notification state (not activated)' }
-            6 { 'in extended grace period' }
-            default { "unknown status ($status)" }
-        }
-        if ($status -eq 1) {
-            Write-Ok "Windows is $desc"
-        } else {
-            Write-Host "    Windows is $desc - activate via Settings -> Activation with a valid product key." -ForegroundColor Yellow
-        }
-        if ($lic.PartialProductKey) {
-            Write-Ok "installed product key ending in: $($lic.PartialProductKey)"
-        }
+        return [int]$lic.LicenseStatus
     } catch {
-        Write-Host "    Could not check Windows activation (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        return -1
     }
 }
 
@@ -1076,7 +1057,26 @@ if (-not (Test-SkoopProfileLoads)) {
 Enable-TaskManager
 
 # --- 3b. Check Windows activation status (read-only) -------------------------
-Get-WindowsActivationStatus
+$activationStatus = Get-WindowsActivationStatus
+if ($activationStatus -eq 1) {
+    Write-Ok 'Windows is activated'
+} elseif ($activationStatus -eq -1) {
+    Write-Host '    Could not determine Windows activation status (non-fatal)' -ForegroundColor Yellow
+} elseif ($activationStatus -eq 0) {
+    Write-Host '    Windows is not activated - activate via Settings -> Activation with a valid product key.' -ForegroundColor Yellow
+} elseif ($activationStatus -eq 2) {
+    Write-Host '    Windows is in the out-of-box grace period.' -ForegroundColor Yellow
+} elseif ($activationStatus -eq 3) {
+    Write-Host '    Windows is in the out-of-tolerance grace period.' -ForegroundColor Yellow
+} elseif ($activationStatus -eq 4) {
+    Write-Host '    Windows is in the non-genuine grace period.' -ForegroundColor Yellow
+} elseif ($activationStatus -eq 5) {
+    Write-Host '    Windows is in the notification state (not activated).' -ForegroundColor Yellow
+} elseif ($activationStatus -eq 6) {
+    Write-Host '    Windows is in the extended grace period.' -ForegroundColor Yellow
+} else {
+    Write-Host "    Windows reported an unknown activation status ($activationStatus)." -ForegroundColor Yellow
+}
 # --- 4. Install Scoop if its shims are missing -------------------------------
 $shimDir = Find-ScoopShims
 if (-not $shimDir) {
