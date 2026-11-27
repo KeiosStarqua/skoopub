@@ -1,12 +1,13 @@
 # apps/yasb/configure.ps1
 # Deploy a repo-managed YASB theme (config.yaml + styles.css) into ~/.config/yasb,
-# create a .env from the template when missing, and start YASB. Adaptive Islands
-# is the default; the previous Komorebi bar theme is preserved under
-# themes/komorebi/ and can be restored with -Theme komorebi. It also clones the
+# create a .env from the template when missing, and start YASB. Okinami is the
+# default; Adaptive Islands and the original Komorebi bar theme are preserved
+# under themes/ and can be restored with -Theme adaptive-islands / komorebi. It clones the
 # community aesthetic-wallpapers collection once and sets YASB_WALLPAPER_DIR.
 # The config watches for changes, so a restart is only needed with -Restart.
 #
 #   powershell -ExecutionPolicy Bypass -File .\apps/yasb/configure.ps1
+#   powershell -ExecutionPolicy Bypass -File .\apps/yasb/configure.ps1 -Theme adaptive-islands
 #   powershell -ExecutionPolicy Bypass -File .\apps/yasb/configure.ps1 -Theme komorebi
 #   powershell -ExecutionPolicy Bypass -File .\apps/yasb/configure.ps1 -Restart
 [CmdletBinding()]
@@ -14,9 +15,9 @@ param(
     # Resolved in the body: $PSScriptRoot is empty during param binding in PS 5.1.
     [string]$SourceDir = '',
     [string]$ConfigDir = '',
-    # Which repo-managed theme to deploy (default: Adaptive Islands).
-    [ValidateSet('adaptive-islands', 'komorebi')]
-    [string]$Theme = 'adaptive-islands',
+    # Which repo-managed theme to deploy (default: Okinami).
+    [ValidateSet('okinami', 'adaptive-islands', 'komorebi')]
+    [string]$Theme = 'okinami',
     # Overwrite changed files directly instead of keeping a timestamped .bak.
     [switch]$NoBackup,
     # Stop and relaunch YASB so the config is reloaded immediately.
@@ -43,7 +44,7 @@ if (-not (Test-Path -LiteralPath $SourceDir)) {
     return
 }
 
-$themeDir = if ($Theme -eq 'komorebi') { Join-Path $SourceDir 'themes\komorebi' } else { $SourceDir }
+$themeDir = if ($Theme -eq 'komorebi' -or $Theme -eq 'adaptive-islands') { Join-Path $SourceDir "themes\$Theme" } else { $SourceDir }
 if (-not (Test-Path -LiteralPath $themeDir)) {
     Write-Host "YASB theme '$Theme' not found at $themeDir" -ForegroundColor Yellow
     return
@@ -125,6 +126,8 @@ if (-not $yasbc) {
     return
 }
 
+$colorsFile = Join-Path $ConfigDir 'yasb_colors.css'
+$colorsExisted = Test-Path -LiteralPath $colorsFile
 $running = [bool](Get-Process -Name yasb -ErrorAction SilentlyContinue)
 if ($running -and $Restart) {
     Write-Host 'Restarting YASB...'
@@ -137,6 +140,16 @@ if (-not $running) {
     Write-Host 'Starting YASB...'
     & $yasbc start 2>&1 | ForEach-Object { Write-Host "    $_" }
     Start-Sleep -Seconds 2
+}
+
+# With system_colors: true, YASB generates yasb_colors.css after the first CSS
+# pass, so a theme that @imports it can log a missing-file error on first run.
+# Reload once when the file appeared during this run so the import resolves.
+if (-not $colorsExisted -and (Test-Path -LiteralPath $colorsFile) -and
+    (Get-Process -Name yasb -ErrorAction SilentlyContinue)) {
+    Write-Host 'Reloading YASB so the generated yasb_colors.css is picked up...'
+    & $yasbc reload 2>&1 | ForEach-Object { Write-Host "    $_" }
+    Start-Sleep -Milliseconds 600
 }
 
 if (Get-Process -Name yasb -ErrorAction SilentlyContinue) {

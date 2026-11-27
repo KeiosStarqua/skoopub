@@ -2,7 +2,7 @@
   "default_workspace_padding": 4,
   "default_container_padding": 2,
   "border_width": 3,
-  "focus_follows_mouse": "Windows",
+  "focus_follows_mouse": "Komorebi",
   "mouse_follows_focus": false,
   "monitors": [
     {

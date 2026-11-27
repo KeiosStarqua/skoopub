@@ -144,13 +144,22 @@ $komorebic = Resolve-Tool 'komorebic'
 $whkd = Resolve-Tool 'whkd'
 
 if (-not (Get-Process -Name komorebi -ErrorAction SilentlyContinue)) {
-    if ($komorebic) {
-        $startArgs = @('start')
+    # Start komorebi.exe directly with --ffm: the custom focus-follows-mouse
+    # implementation only focuses managed windows, so YASB popups keep focus.
+    # `komorebic start` has no --ffm flag and would leave native Windows
+    # X-Mouse active, which steals focus from YASB popups.
+    $komorebi = Resolve-Tool 'komorebi'
+    if ($komorebi) {
+        $startArgs = @('--ffm')
         if (Test-Path -LiteralPath $komorebiConfig) { $startArgs += @('-c', $komorebiConfig) }
-        Write-Host 'Starting Komorebi...'
-        & $komorebic @startArgs 2>&1 | ForEach-Object { Write-Host "    $_" }
+        Write-Host 'Starting Komorebi with --ffm (managed windows only)...'
+        Start-Process -FilePath $komorebi -ArgumentList $startArgs -WindowStyle Hidden
+        Start-Sleep -Milliseconds 900
+        if (-not (Get-Process -Name komorebi -ErrorAction SilentlyContinue)) {
+            Write-Host 'Komorebi did not stay running; check its log.' -ForegroundColor Yellow
+        }
     } else {
-        Write-Host 'komorebic not found; cannot start Komorebi.' -ForegroundColor Yellow
+        Write-Host 'komorebi.exe not found; cannot start Komorebi.' -ForegroundColor Yellow
     }
 } elseif ($komorebic -and (Test-Path -LiteralPath $komorebiConfig)) {
     # Reapply on every run: the config may differ from a session started before
