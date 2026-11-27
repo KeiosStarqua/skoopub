@@ -597,6 +597,11 @@ function Connect-HerdrRemote
     if ($HerdrUser)
     { $herdrArgs += @('-User', $HerdrUser) 
     }
+    # -HerdrPeer explicitly asks for the picker, so bypass setup-ssh.ps1's
+    # "already saved" early skip in that case only.
+    if ($HerdrPeer)
+    { $herdrArgs += '-Force' 
+    }
     try
     {
         & $herdrSsh @herdrArgs

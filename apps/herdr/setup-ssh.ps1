@@ -19,6 +19,8 @@
         shows up in the sidebar of every open Herdr client. Nothing is shelled
         into with `herdr --remote`, so this also works from inside a Herdr pane.
         An already-saved target is left untouched, which keeps re-runs safe.
+        On re-runs the whole step is skipped early when Herdr already has a
+        machine saved, so the picker is not shown again; -Force re-opens it.
 
     Nothing about a particular machine is stored in this repo: no name, no
     tailnet IP and no private key.
@@ -26,6 +28,10 @@
 .PARAMETER Peer
     Tailscale IP or MagicDNS name of the target machine. Accepts user@host to
     preset the SSH user. Skips enumeration and the selection prompt.
+
+.PARAMETER Force
+    Re-open the picker even when a Herdr machine is already saved (otherwise
+    re-runs skip the whole step). Useful to add or switch machines.
 
 .PARAMETER User
     SSH user to try first on the remote machine (otherwise auto-detected).
@@ -39,7 +45,8 @@
 [CmdletBinding()]
 param(
     [string]$Peer,
-    [string]$User
+    [string]$User,
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -260,9 +267,38 @@ function Test-DirectSsh {
     return ($LASTEXITCODE -eq 0 -and $out -match '__SKOOP_SSH_OK__')
 }
 
+function Get-HerdrSavedMachines {
+    # Returns the targets of machines already saved in Herdr, or @() when the
+    # CLI is missing/unusable. `herdr machine list` prints tab-separated fields
+    # with the user@host target in column 3 (same parsing as the add check).
+    $herdr = Get-Command herdr -ErrorAction SilentlyContinue
+    if (-not $herdr) { return @() }
+    $out = (& cmd /c ('"{0}" machine list 2>&1' -f $herdr.Source) | Out-String)
+    if ($LASTEXITCODE -ne 0) { return @() }
+    $saved = @()
+    foreach ($line in ($out -split "`r?`n")) {
+        $fields = @($line -split "`t")
+        if ($fields.Count -ge 3 -and $fields[2].Trim() -match '@') {
+            $saved += $fields[2].Trim()
+        }
+    }
+    return $saved
+}
+
 # --- Main --------------------------------------------------------------------
 # Do not reuse $Peer here: it is a [string] parameter, so assigning a peer
 # object to it would coerce the object to a string and lose its properties.
+
+# On re-runs, do not make the user pick a machine again once one is already
+# saved. -Peer (explicit target) and -Force (explicit re-pick) still go through.
+if (-not $Peer -and -not $Force) {
+    $saved = @(Get-HerdrSavedMachines)
+    if ($saved.Count -gt 0) {
+        Write-Ok "Herdr machine already saved ($($saved -join ', ')) - skipping the picker. Use -Force to choose another."
+        return
+    }
+}
+
 $selected = $null
 if ($Peer) {
     $selected = New-ManualPeer -Target $Peer
