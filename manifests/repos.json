@@ -22,6 +22,12 @@
       "url": "",
       "branch": "",
       "note": "Local-only repo on this machine (no origin); nothing to clone."
+    },
+    {
+      "name": "zed",
+      "url": "https://github.com/zed-industries/zed.git",
+      "branch": "",
+      "note": "Registered on 2026-11-27; checked out at detached HEAD here, so clone uses the remote default branch."
     }
   ]
 }
