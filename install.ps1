@@ -1968,6 +1968,39 @@ if ($restoreAppsArgs.Count -eq 0)
     Write-Ok 'apps/tailscale/configure.ps1 not found - skipping Firefox/Atuin restore'
 }
 
+# --- 20d. Add the ponytail plugin to OpenCode -------------------------------
+# opencode is installed by the app phases. Add the plugin once, non-fatally;
+# read the global config first so re-runs never duplicate it or prompt.
+$opencode = Get-Command opencode -ErrorAction SilentlyContinue
+if ($opencode) {
+    $ocConfig = Join-Path $env:USERPROFILE '.config\opencode\opencode.json'
+    $plugin = '@dietrichgebert/ponytail'
+    $alreadyAdded = $false
+    if (Test-Path -LiteralPath $ocConfig) {
+        try {
+            $ocSettings = Get-Content -Raw -LiteralPath $ocConfig | ConvertFrom-Json
+            $alreadyAdded = @($ocSettings.plugins) -contains $plugin
+        } catch {
+            # Unreadable config: let `plugin add` handle/repair it.
+        }
+    }
+    if ($alreadyAdded) {
+        Write-Ok 'ponytail OpenCode plugin already installed'
+    } else {
+        Write-Step 'Adding the ponytail OpenCode plugin'
+        # cmd /c keeps native stderr from becoming a terminating NativeCommandError on 5.1.
+        $ocOut = (& cmd /c ('"{0}" plugin add "{1}" 2>&1' -f $opencode.Source, $plugin) | Out-String)
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok 'ponytail plugin added to OpenCode'
+        } else {
+            $line = ($ocOut -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 1)
+            Write-Host "    opencode plugin add failed (non-fatal): $($line.Trim())" -ForegroundColor Yellow
+        }
+    }
+} else {
+    Write-Ok 'opencode not on PATH - skipping the ponytail plugin step'
+}
+
 # --- 21. Automatic cleanup on shutdown / logoff -----------------------------
 $shutdownHook = Join-Path $repoRoot 'core\install-shutdown-hook.ps1'
 if (-not $SkipShutdownHook -and (Test-Path $shutdownHook))
