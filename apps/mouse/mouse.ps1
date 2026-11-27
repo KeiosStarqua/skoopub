@@ -11,7 +11,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('diagnose', 'monitor', 'fix', 'restore', 'status', 'install')]
+    [ValidateSet('diagnose', 'monitor', 'fix', 'restore', 'status', 'install', 'driver')]
     [string]$Command,
     [int]$Seconds = 30,
     [string]$Out,
@@ -23,8 +23,15 @@ param(
     [switch]$Build,
     [switch]$Interactive,
     [switch]$DebugRaw,
+    [switch]$Cues,
     [string]$Repo = 'KeiosStarqua/skoopub',
-    [string]$Version = ''
+    [string]$Version = '',
+    [ValidateSet('inspect', 'stack', 'filters', 'integrity', 'events', 'report')]
+    [string]$Action = 'report',
+    [string]$MouseVidPid = 'VID_046D&PID_C08F',
+    [int]$Days = 7,
+    [switch]$Deep,
+    [switch]$Json
 )
 
 $ErrorActionPreference = 'Stop'
@@ -32,6 +39,13 @@ $ErrorActionPreference = 'Stop'
 $installDir = Join-Path $env:LOCALAPPDATA 'skoop\mouse'
 $exe = Join-Path $installDir 'skoopub-mouse.exe'
 $configure = Join-Path $PSScriptRoot 'configure.ps1'
+$driverScript = Join-Path $PSScriptRoot 'driver.ps1'
+
+if ($Command -eq 'driver') {
+    if (-not (Test-Path -LiteralPath $driverScript)) { throw "driver.ps1 not found at $driverScript" }
+    & $driverScript -Action $Action -MouseVidPid $MouseVidPid -Days $Days -Deep:$Deep -Json:$Json
+    return
+}
 
 if ($Command -eq 'install') {
     & $configure -Repo $Repo -Version $Version -Force:$Force -Build:$Build
@@ -49,6 +63,7 @@ switch ($Command) {
     'diagnose' {
         $exeArgs += @('--seconds', "$Seconds")
         if ($DebugRaw) { $exeArgs += '--debug-raw' }
+        if ($Cues) { $exeArgs += '--cues' }
         if ($Expect) { $exeArgs += @('--expect', $Expect) }
         if ($Out) { $exeArgs += @('--out', $Out) }
     }

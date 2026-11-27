@@ -31,25 +31,51 @@ not that its wheel data is correct.
   summarises the HID path (`VID_046D&PID_C08F`, …).
 - `burst_count` / `isolated_reversals` describe runs of same-direction scrolls
   and one-off reversals inside a run (noise or accidental double input).
+- `expected_down_*` / `expected_up_*` separate the error rate per intended
+  direction, and `outside_expect_events` counts wheel events during declared
+  rest windows (a mouse that scrolls by itself will show them).
+- The conclusion now distinguishes the layers: *"already present in Raw Input"*
+  means raw and WM agree and both are wrong (device/driver/earlier layer), while
+  *"cross-layer mismatch"* means raw is right and WM is flipped (software hook).
 - Never enable `fix` from a sample with `physical_sample=false` or with
   `warnings` about injected/unidentified input.
+
+## Driver diagnostics
+
+Static, read-only inspection of the HID/mouse driver stack (no driver, service,
+registry value or cafe software is changed):
+
+```powershell
+.\apps\mouse\mouse.ps1 driver                     # full report JSON + summary
+.\apps\mouse\mouse.ps1 driver -Action inspect     # PnP devices, INF, version, service
+.\apps\mouse\mouse.ps1 driver -Action stack       # parent chain (HID → USB → root hub)
+.\apps\mouse\mouse.ps1 driver -Action filters     # Mouse/HID/USB Upper/LowerFilters
+.\apps\mouse\mouse.ps1 driver -Action integrity   # Authenticode + file version of HID/USB drivers
+.\apps\mouse\mouse.ps1 driver -Action events -Days 7
+.\apps\mouse\mouse.ps1 driver -Action report -Out "$env:TEMP\driver-report.json"
+```
+
+`filters` flags anything outside the known-good sets (`mouclass` for Mouse,
+`usbccgp` for USB); a third-party filter there is active even when its GUI is
+closed. `-Deep` adds `sfc /verifyonly` (slow, needs an elevated shell).
 
 ### 60-second physical-mouse protocol
 
 ```powershell
-.\apps\mouse\mouse.ps1 diagnose -Seconds 60 -Expect 'down@0-25,up@30-55'
+.\apps\mouse\mouse.ps1 diagnose -Seconds 60 -Expect 'down@0-25,up@30-55' -Cues
 ```
 
+`-Cues` beeps at 0 s (start down), 25 s (rest), 30 s (start up) and 55 s (rest).
 Scroll **only down** from 0–25 s, rest 25–30 s, scroll **only up** from
 30–55 s, rest 55–60 s. A real mouse should resolve a `VID_*/PID_*` path and
 produce `physical_sample=true`. Try to reproduce the random reversal during
-those windows.
+those windows; `outside_expect_events > 0` means input arrived while resting.
 
 ## Commands
 
 ```powershell
 .\apps\mouse\mouse.ps1 install                     # download the release exe
-.\apps\mouse\mouse.ps1 diagnose -Seconds 60 -Expect 'down@0-25,up@30-55'
+.\apps\mouse\mouse.ps1 diagnose -Seconds 60 -Expect 'down@0-25,up@30-55' -Cues
 .\apps\mouse\mouse.ps1 monitor                     # stream events live
 .\apps\mouse\mouse.ps1 status                      # is correction running?
 .\apps\mouse\mouse.ps1 fix                         # start correction (hidden)
@@ -61,7 +87,7 @@ those windows.
 Direct binary (same commands without the `.ps1` wrapper):
 
 ```
-skoopub-mouse diagnose [--seconds 30] [--out <path>] [--debug-raw]
+skoopub-mouse diagnose [--seconds 30] [--out <path>] [--debug-raw] [--cues]
                        [--expect down@0-25,up@30-55]
 skoopub-mouse monitor  [--seconds 30]
 skoopub-mouse fix [--adaptive] [--dry-run] [--from <report>] [--force]
@@ -92,8 +118,10 @@ captured enough data to justify it.
 
 ## Limits
 
-- The tool observes wheel events only; it does not touch mouse buttons, pointer
-  speed, "Enhance pointer precision", drivers, registry, or cafe client software.
+- `diagnose`/`monitor`/`fix` observe wheel events only; they do not touch mouse
+  buttons, pointer speed, "Enhance pointer precision", drivers, registry, or
+  cafe client software. The `driver` commands are read-only inspection and
+  change nothing either.
 - `diagnose` needs actual wheel turns during the capture window. Running it
   with no input correctly reports an inconclusive sample.
 - On a machine with KMSpico remnants, disabled Windows Update and no Defender

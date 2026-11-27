@@ -25,6 +25,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use windows::core::w;
 use windows::Win32::Foundation::{HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::Diagnostics::Debug::MessageBeep;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::{
     GetRawInputData, GetRawInputDeviceInfoW, RegisterRawInputDevices, HRAWINPUT, RAWINPUTDEVICE,
@@ -34,8 +35,8 @@ use windows::Win32::UI::Input::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, HHOOK,
     PeekMessageW, RegisterClassW, SetWindowsHookExW, UnhookWindowsHookEx, MSLLHOOKSTRUCT, MSG,
-    PEEK_MESSAGE_REMOVE_TYPE, WH_MOUSE_LL, WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSW,
-    WNDCLASS_STYLES, WM_INPUT, WM_MOUSEHWHEEL, WM_MOUSEWHEEL, WM_QUIT,
+    MB_ICONEXCLAMATION, MB_ICONINFORMATION, PEEK_MESSAGE_REMOVE_TYPE, WH_MOUSE_LL, WINDOW_EX_STYLE,
+    WINDOW_STYLE, WNDCLASSW, WNDCLASS_STYLES, WM_INPUT, WM_MOUSEHWHEEL, WM_MOUSEWHEEL, WM_QUIT,
 };
 
 const WINDOW_CLASS: windows::core::PCWSTR = w!("SkoopubMouseRawInput");
@@ -60,6 +61,7 @@ struct State {
     debug_raw: bool,
     debug_printed: usize,
     expect: Vec<ExpectWindow>,
+    cues: bool,
     // Stored as raw addresses: windows-rs handle types are !Send, and the
     // shared state must be Sync for the static Mutex.
     hook: Option<isize>,
@@ -81,6 +83,7 @@ impl Default for State {
             debug_raw: false,
             debug_printed: 0,
             expect: Vec::new(),
+            cues: false,
             hook: None,
             window: None,
             dry_run: false,
@@ -461,8 +464,27 @@ fn cleanup() {
 
 fn pump(seconds: Option<u64>) {
     let deadline = seconds.map(|s| Instant::now() + Duration::from_secs(s));
+    let (started, cues) = {
+        let guard = state().lock().unwrap();
+        (guard.started, guard.cues)
+    };
+    // Protocol cues: low beep = start scrolling down, high = rest, low =
+    // start scrolling up, high = rest again.
+    let cue_times = [0u64, 25, 30, 55];
+    let mut cue_index = 0usize;
     let mut msg = MSG::default();
     loop {
+        if cues && cue_index < cue_times.len() && started.elapsed().as_secs() >= cue_times[cue_index] {
+            let beep = if cue_index % 2 == 0 {
+                MB_ICONEXCLAMATION
+            } else {
+                MB_ICONINFORMATION
+            };
+            unsafe {
+                let _ = MessageBeep(beep);
+            }
+            cue_index += 1;
+        }
         if let Some(deadline) = deadline {
             if Instant::now() >= deadline {
                 break;
@@ -531,6 +553,7 @@ fn run_capture(args: &[String], monitor: bool) -> Result<(), String> {
         guard.expect = option(args, "expect")
             .map(|s| parse_expect(&s))
             .unwrap_or_default();
+        guard.cues = flag(args, "cues");
     }
     let expect = state().lock().unwrap().expect.clone();
     init_capture().map_err(|e| format!("could not register raw input or the mouse hook: {e}"))?;
@@ -686,7 +709,7 @@ fn usage() {
     println!(
         "skoopub-mouse — mouse wheel diagnostics and correction\n\n\
 Usage:\n\
-  skoopub-mouse diagnose [--seconds 30] [--out <path>] [--debug-raw]\n\
+  skoopub-mouse diagnose [--seconds 30] [--out <path>] [--debug-raw] [--cues]\n\
                          [--expect down@0-25,up@30-55]\n\
   skoopub-mouse monitor  [--seconds 30]\n\
   skoopub-mouse fix [--adaptive] [--dry-run] [--from <report>] [--force]\n\

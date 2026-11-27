@@ -67,6 +67,11 @@ pub struct Analysis {
     pub expected_windows: usize,
     pub expected_checked: u32,
     pub unexpected_direction: u32,
+    pub expected_down_total: u32,
+    pub expected_down_error: u32,
+    pub expected_up_total: u32,
+    pub expected_up_error: u32,
+    pub outside_expect_events: u32,
     pub physical_sample: bool,
     pub conclusions: Vec<String>,
     pub warnings: Vec<String>,
@@ -107,6 +112,11 @@ pub fn analyze(events: &[ScrollEvent], expect: &[ExpectWindow]) -> Analysis {
     let mut injected_events = 0u32;
     let mut unexpected_direction = 0u32;
     let mut expected_checked = 0u32;
+    let mut expected_down_total = 0u32;
+    let mut expected_down_error = 0u32;
+    let mut expected_up_total = 0u32;
+    let mut expected_up_error = 0u32;
+    let mut outside_expect_events = 0u32;
 
     for (i, e) in events.iter().enumerate() {
         if e.injected {
@@ -117,15 +127,28 @@ pub fn analyze(events: &[ScrollEvent], expect: &[ExpectWindow]) -> Analysis {
             s.injected += 1;
         }
         if !expect.is_empty() && e.layer == "raw" {
-            if let Some(window) = expect
+            match expect
                 .iter()
                 .find(|w| e.t_ms >= w.start_ms && e.t_ms <= w.end_ms)
             {
-                expected_checked += 1;
-                if sign(e.delta) != window.sign {
-                    unexpected_direction += 1;
-                    s.unexpected += 1;
+                Some(window) => {
+                    expected_checked += 1;
+                    if window.sign < 0 {
+                        expected_down_total += 1;
+                    } else {
+                        expected_up_total += 1;
+                    }
+                    if sign(e.delta) != window.sign {
+                        unexpected_direction += 1;
+                        s.unexpected += 1;
+                        if window.sign < 0 {
+                            expected_down_error += 1;
+                        } else {
+                            expected_up_error += 1;
+                        }
+                    }
                 }
+                None => outside_expect_events += 1,
             }
         }
         if e.layer == "raw" {
@@ -239,8 +262,24 @@ pub fn analyze(events: &[ScrollEvent], expect: &[ExpectWindow]) -> Analysis {
         && injected_events == 0;
 
     let mut conclusions = Vec::new();
+    let direction_checked = !expect.is_empty() && expected_checked > 0;
     if raw.is_empty() {
         conclusions.push("No Raw Input wheel data captured. Either no wheel was turned, or raw input registration failed; this sample is inconclusive.".to_string());
+    } else if direction_checked {
+        if unexpected_direction > 0 {
+            if mismatched == 0 {
+                conclusions.push("Unexpected direction is already present in Raw Input: raw and WM agree with each other, so the sign is wrong before WM_MOUSEWHEEL. Look at the device, firmware, HID driver or an earlier input layer rather than at an app-level hook.".to_string());
+            } else {
+                conclusions.push("Unexpected direction plus a cross-layer mismatch: Raw Input is wrong in places and WM does not consistently match it. Check both the device/driver and software hooks.".to_string());
+            }
+        } else if mismatched > 0 {
+            conclusions.push("Cross-layer mismatch detected: Raw Input follows the expected direction but WM_MOUSEWHEEL is flipped. A software hook/filter is the likely cause.".to_string());
+        } else {
+            conclusions.push("No direction anomaly detected: every raw event matched the expected schedule and WM matched Raw Input.".to_string());
+        }
+        if noisy >= 3 {
+            conclusions.push("Raw Input also contains short alternating-sign bursts, which supports encoder/USB noise in addition to wrong-direction events.".to_string());
+        }
     } else if mismatched >= 3 && mismatch_rate >= 0.5 {
         conclusions.push("Sign is flipped between HID Raw Input and WM_MOUSEWHEEL. The device data is consistent but something in the Windows input/hook chain inverts it (G HUB, cafe client, or another hook).".to_string());
     } else if noisy >= 3 {
@@ -252,10 +291,10 @@ pub fn analyze(events: &[ScrollEvent], expect: &[ExpectWindow]) -> Analysis {
     } else {
         conclusions.push("No inversion in this sample. The symptom is intermittent or specific to one application; repeat the capture while it happens.".to_string());
     }
-    if !expect.is_empty() && expected_checked > 0 && unexpected_direction > 0 {
+    if direction_checked {
         conclusions.push(format!(
-            "{} of {} raw events scrolled opposite to the expected-direction schedule; inspect those timestamps.",
-            unexpected_direction, expected_checked
+            "Direction check: down {}/{} wrong, up {}/{} wrong, {} events outside the declared windows.",
+            expected_down_error, expected_down_total, expected_up_error, expected_up_total, outside_expect_events
         ));
     }
 
@@ -271,6 +310,12 @@ pub fn analyze(events: &[ScrollEvent], expect: &[ExpectWindow]) -> Analysis {
     }
     if !expect.is_empty() && expected_checked == 0 {
         warnings.push("The expected-direction windows did not overlap any raw events; check the --expect seconds.".to_string());
+    }
+    if outside_expect_events > 0 {
+        warnings.push(format!(
+            "{} raw wheel events happened outside the declared expect windows (during rest). Confirm you really stopped scrolling; otherwise the device is sending input on its own.",
+            outside_expect_events
+        ));
     }
 
     let mut device_list: Vec<DeviceStats> = devices.into_values().collect();
@@ -292,10 +337,102 @@ pub fn analyze(events: &[ScrollEvent], expect: &[ExpectWindow]) -> Analysis {
         expected_windows: expect.len(),
         expected_checked,
         unexpected_direction,
+        expected_down_total,
+        expected_down_error,
+        expected_up_total,
+        expected_up_error,
+        outside_expect_events,
         physical_sample,
         conclusions,
         warnings,
         devices: device_list,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn event(t_ms: u128, layer: &str, device: &str, delta: i32) -> ScrollEvent {
+        ScrollEvent {
+            t_ms,
+            layer: layer.to_string(),
+            device: device.to_string(),
+            delta,
+            axis: "vertical".to_string(),
+            injected: false,
+            identified: device.starts_with(r"\\?\HID"),
+            vid_pid: if device.starts_with(r"\\?\HID") {
+                "VID_046D&PID_C08F".to_string()
+            } else {
+                String::new()
+            },
+        }
+    }
+
+    fn windows() -> Vec<ExpectWindow> {
+        vec![
+            ExpectWindow {
+                direction: "down".to_string(),
+                sign: -1,
+                start_ms: 0,
+                end_ms: 6000,
+            },
+            ExpectWindow {
+                direction: "up".to_string(),
+                sign: 1,
+                start_ms: 8000,
+                end_ms: 12000,
+            },
+        ]
+    }
+
+    #[test]
+    fn raw_and_wm_both_wrong_is_not_cross_layer_mismatch() {
+        // Operator scrolled down, but raw and WM both say up.
+        let events = vec![
+            event(1000, "raw", r"\\?\HID#VID_046D&PID_C08F", 120),
+            event(1000, "wm", "hook", 120),
+        ];
+        let a = analyze(&events, &windows());
+        assert_eq!(a.mismatched, 0);
+        assert_eq!(a.unexpected_direction, 1);
+        assert!(a.conclusions[0].contains("already present in Raw Input"));
+        assert!(!a.conclusions[0].contains("Cross-layer"));
+    }
+
+    #[test]
+    fn raw_expected_but_wm_flipped_is_cross_layer() {
+        let events = vec![
+            event(1000, "raw", r"\\?\HID#VID_046D&PID_C08F", -120),
+            event(1000, "wm", "hook", 120),
+        ];
+        let a = analyze(&events, &windows());
+        assert_eq!(a.mismatched, 1);
+        assert_eq!(a.unexpected_direction, 0);
+        assert!(a.conclusions[0].contains("Cross-layer mismatch"));
+    }
+
+    #[test]
+    fn events_in_rest_window_are_counted_and_warned() {
+        let events = vec![event(7000, "raw", r"\\?\HID#VID_046D&PID_C08F", -120)];
+        let a = analyze(&events, &windows());
+        assert_eq!(a.outside_expect_events, 1);
+        assert!(a.warnings.iter().any(|w| w.contains("outside the declared expect")));
+    }
+
+    #[test]
+    fn per_direction_errors_are_separated() {
+        let events = vec![
+            event(1000, "raw", r"\\?\HID#VID_046D&PID_C08F", 120), // down window, wrong
+            event(2000, "raw", r"\\?\HID#VID_046D&PID_C08F", -120), // down window, right
+            event(9000, "raw", r"\\?\HID#VID_046D&PID_C08F", -120), // up window, wrong
+        ];
+        let a = analyze(&events, &windows());
+        assert_eq!(a.expected_down_total, 2);
+        assert_eq!(a.expected_down_error, 1);
+        assert_eq!(a.expected_up_total, 1);
+        assert_eq!(a.expected_up_error, 1);
     }
 }
 
