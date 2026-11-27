@@ -112,12 +112,40 @@ function New-SkoopPhaseManifest {
     return $path
 }
 
+function Get-SkoopInstalledApps {
+    # Names of Scoop apps that have a live `current` entry. Reading the app dirs
+    # avoids parsing `scoop list` (locale-dependent) and works even when the
+    # scoop shim itself is not on PATH yet.
+    [CmdletBinding()]
+    param([string]$ScoopRoot = '')
+
+    $roots = @()
+    if ($ScoopRoot) { $roots += $ScoopRoot }
+    if ($env:SCOOP) { $roots += $env:SCOOP }
+    if ($env:USERPROFILE) { $roots += (Join-Path $env:USERPROFILE 'scoop') }
+    if ($env:ProgramData) { $roots += (Join-Path $env:ProgramData 'scoop') }
+
+    $appsDir = $null
+    foreach ($root in $roots) {
+        $candidate = Join-Path $root 'apps'
+        if (Test-Path -LiteralPath $candidate) { $appsDir = $candidate; break }
+    }
+    if (-not $appsDir) { return @() }
+
+    return @(Get-ChildItem -LiteralPath $appsDir -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'current') } |
+        ForEach-Object { $_.Name })
+}
+
 function Invoke-SkoopPhases {
     <#
         Install every phase in order. -AfterPhase runs after a phase imports
         successfully (install.ps1 uses it to finish the phase 1 setup and to
         re-launch under pwsh). -StopAfterPhase ends the loop after that phase,
-        which is what -EssentialsOnly uses.
+        which is what -EssentialsOnly uses. -SkipInstalled drops apps that are
+        already present in Scoop from the generated manifests, so re-runs only
+        import what is missing; -Force defeats that check (but never overrides
+        an explicit -ExcludeApps such as an existing UniKey).
     #>
     [CmdletBinding()]
     param(
@@ -125,11 +153,31 @@ function Invoke-SkoopPhases {
         [Parameter(Mandatory)][string]$ManifestPath,
         [Parameter(Mandatory)][string]$PhasesPath,
         [string[]]$ExcludeApps = @(),
+        [switch]$SkipInstalled,
+        [switch]$Force,
+        [string]$ScoopRoot = '',
         [scriptblock]$AfterPhase,
         [string]$StopAfterPhase = ''
     )
 
     $plan = Get-SkoopPhasePlan -ManifestPath $ManifestPath -PhasesPath $PhasesPath
+    $effectiveExclude = @($ExcludeApps)
+    if ($SkipInstalled -and -not $Force) {
+        $installed = @(Get-SkoopInstalledApps -ScoopRoot $ScoopRoot)
+        if ($installed.Count -gt 0) {
+            $alreadyPresent = @()
+            foreach ($app in @($plan.Manifest.apps)) {
+                $name = [string]$app.Name
+                if ($installed -contains $name -and $effectiveExclude -notcontains $name) {
+                    $effectiveExclude += $name
+                    $alreadyPresent += $name
+                }
+            }
+            if ($alreadyPresent.Count -gt 0) {
+                Write-Host ('    already installed, skipping: {0}' -f ($alreadyPresent -join ', ')) -ForegroundColor DarkGray
+            }
+        }
+    }
     $failed = New-Object 'System.Collections.Generic.List[string]'
     $index = 0
 
@@ -138,17 +186,23 @@ function Invoke-SkoopPhases {
         $label = if ($phase.Description) { '{0} - {1}' -f $phase.Name, $phase.Description } else { [string]$phase.Name }
         Write-Host ('==> Phase {0}/{1}: {2}' -f $index, $plan.Phases.Count, $label) -ForegroundColor Cyan
 
-        $phaseFile = New-SkoopPhaseManifest -Plan $plan -Phase $phase -ExcludeApps $ExcludeApps
-        $timer = [System.Diagnostics.Stopwatch]::StartNew()
+        $pending = @($Phase.Apps | Where-Object { $effectiveExclude -notcontains $_ })
         $exit = 0
-        try {
-            & $Scoop import $phaseFile
-            $exit = $LASTEXITCODE
-        } catch {
-            $exit = 1
-            Write-Host "    $($_.Exception.Message)" -ForegroundColor Yellow
+        $timer = $null
+        if ($pending.Count -eq 0) {
+            Write-Host '    all apps already installed - skipping scoop import' -ForegroundColor DarkGray
+        } else {
+            $phaseFile = New-SkoopPhaseManifest -Plan $plan -Phase $phase -ExcludeApps $effectiveExclude
+            $timer = [System.Diagnostics.Stopwatch]::StartNew()
+            try {
+                & $Scoop import $phaseFile
+                $exit = $LASTEXITCODE
+            } catch {
+                $exit = 1
+                Write-Host "    $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+            $timer.Stop()
         }
-        $timer.Stop()
 
         if ($exit -ne 0) {
             if ($index -eq 1) {
@@ -156,7 +210,7 @@ function Invoke-SkoopPhases {
             }
             Write-Host ("    phase '{0}' failed (exit {1}) - continuing with the next phase" -f $phase.Name, $exit) -ForegroundColor Yellow
             $failed.Add([string]$phase.Name)
-        } else {
+        } elseif ($timer) {
             Write-Host ('    done in {0:n1}s' -f $timer.Elapsed.TotalSeconds) -ForegroundColor DarkGray
         }
 

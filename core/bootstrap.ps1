@@ -2,6 +2,7 @@
 # Usage:  powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
 # Installs manifests/scoop.json in the phases from manifests/phases.json: phase 1
 # is PowerShell 7 + Rio + Vicinae + the Herdr TUI, the heavy apps come last.
+# Re-runs skip Scoop apps that are already installed; -ForceInstall re-imports them.
 # Use -ForceUniKey to replace an already installed UniKey with the Scoop build.
 # Configures UniKey (Unicode + VNI, Vietnamese on, no startup dialog, autostart)
 # via apps\unikey\configure.ps1; -Export / -Restore back up its settings.
@@ -27,8 +28,12 @@
 [CmdletBinding()]
 param(
     [switch]$ForceUniKey,
+    [Alias('Force')]
+    [switch]$ForceInstall,
     [switch]$SkipGhLogin
 )
+
+if ($env:SKOOP_FORCE_INSTALL -eq '1') { $ForceInstall = $true }
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -382,6 +387,7 @@ $phaseResult = Invoke-SkoopPhases -Scoop 'scoop' `
     -ManifestPath (Join-Path $repo 'manifests\scoop.json') `
     -PhasesPath (Join-Path $repo 'manifests\phases.json') `
     -ExcludeApps $(if ($skipUniKey) { @('unikey') } else { @() }) `
+    -SkipInstalled -Force:$ForceInstall `
     -AfterPhase {
         param($phase)
         if ($phase.Name -ne 'core-terminal') { return }

@@ -8,7 +8,7 @@ PowerShell profile, restored from a single manifest.
 - `core/scoop-phases.ps1` — validates the phase mapping and replays each phase as its own temporary `scoop import`
 - `core/set-dark-mode.ps1` — checks the Windows theme and turns on Dark Mode (apps + system) for the current user; a no-op when it is already dark
 - `shell/profile.ps1` — shell config (`zoxide` + `atuin` history search, Starship prompt), dot-sourced from your `$PROFILE`; aliases `btop-lhm` / `btop-lh` to `btop` and drops inherited `HERDR_*` variables so a fresh shell is not mistaken for a nested Herdr pane
-- `install.ps1` — one-shot bootstrap for a fresh machine (phased install, `-EssentialsOnly` for just the terminal/launcher); creates `~/repos` and clones skoopub there, then opens Rio in that folder with Herdr running (`-NoAutoHerdr` opts out)
+- `install.ps1` — one-shot bootstrap for a fresh machine (phased install, `-EssentialsOnly` for just the terminal/launcher); re-runs skip Scoop apps that are already installed (`-ForceInstall` re-imports them). Creates `~/repos` and clones skoopub there, then opens Rio in that folder with Herdr running (`-NoAutoHerdr` opts out). `-NoWallpapers` skips the one-time wallpaper collection clone
 - `apps/firefox/policies.template.json` — Firefox policy for extensions, managed bookmarks, homepage, and password saving
 - `apps/sharex/fix-printscreen.ps1` — hands the PrtSc key back to ShareX (checks first; re-runs are a no-op)
 - `apps/unikey/` + `apps/unikey/configure.ps1` — installs/auto-configures UniKey with **Unicode + VNI**, Vietnamese typing on, no startup dialog and a Startup shortcut; `unikey.reg` is the sanitized baseline and `-Export` / `-Restore` back up settings
@@ -155,13 +155,15 @@ the release — you do not need Rust installed locally (`-Build` exists for that
 
 ## Updating this machine later
 
-Re-run the installer; it replays the phases and skips what is already installed:
+Re-run the installer; it checks the Scoop app directories first and leaves already-installed apps out of the generated phase manifests, so only missing packages are imported. The skipped names are printed under each phase, and a phase whose apps are all present is not imported at all:
 
 ```powershell
 .\install.ps1
 ```
 
-A plain `scoop import .\manifests/scoop.json` still installs every app at once, but it ignores the phase order (and therefore the fast phase-1 path).
+Pass `-ForceInstall` (alias `-Force`, or `$env:SKOOP_FORCE_INSTALL=1` for piped runs) to re-import the apps that are already there. This never overrides the deliberate UniKey skip — use `-ForceUniKey` for that.
+
+A plain `scoop import .\manifests/scoop.json` still installs every app at once, but it ignores the phase order (and therefore the fast phase-1 path) and this skip check.
 
 Re-apply the editor config after editing `apps/zed/`:
 

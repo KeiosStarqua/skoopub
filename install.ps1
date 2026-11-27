@@ -8,7 +8,10 @@
     - Makes sure git is available, then installs manifests/scoop.json in the
       ordered phases declared by manifests/phases.json: phase 1 is the fast
       essentials (git, PowerShell 7, Rio first, then the Herdr TUI, Vicinae and
-      Tailscale), and the heavy downloads come last. Phase 1 finishes its own
+      Tailscale), and the heavy downloads come last. Re-runs check which Scoop
+      apps are already installed and leave them out of the phase manifests, so
+      only missing apps are imported; -ForceInstall re-imports the existing ones.
+      Phase 1 finishes its own
       setup (Rio config, Vicinae shortcut + autostart, Herdr check, Tailscale
       sign-in with `tailscale up --qr`), restores Vicinae once Tailscale is
       connected, and opens Rio in ~/repos with Herdr running before phase 2
@@ -125,6 +128,10 @@
 .PARAMETER ForceUniKey
     Install the Scoop UniKey package even if another UniKey is already installed.
 
+.PARAMETER ForceInstall
+    Re-import Scoop apps that are already installed instead of skipping them on
+    a re-run (also $env:SKOOP_FORCE_INSTALL=1 for piped runs). Alias: -Force.
+
 .PARAMETER SkipGhLogin
     Skip the interactive `gh auth login` prompt; only wire up an existing gh login.
 
@@ -186,6 +193,8 @@
 param(
     [string]$RepoRawBase = 'https://raw.githubusercontent.com/KeiosStarqua/skoopub/main',
     [switch]$ForceUniKey,
+    [Alias('Force')]
+    [switch]$ForceInstall,
     [switch]$SkipGhLogin,
     [switch]$HerdrPeer,
     [string]$Peer = "$env:SKOOP_HERDR_PEER",
@@ -210,6 +219,7 @@ if ($env:SKOOP_ESSENTIALS_ONLY -eq '1') { $EssentialsOnly = $true }
 if ($env:SKOOP_NO_AUTO_HERDR -eq '1') { $NoAutoHerdr = $true }
 if ($env:SKOOP_MENU -eq '1') { $Menu = $true }
 if ($env:SKOOP_NO_WALLPAPERS -eq '1') { $NoWallpapers = $true }
+if ($env:SKOOP_FORCE_INSTALL -eq '1') { $ForceInstall = $true }
 if ($NoGum) { $env:SKOOP_NO_GUM = '1' }
 
 # `--help` arrives in $args with CmdletBinding; handle it before any side effect.
@@ -229,8 +239,8 @@ Usage:
   .\install.ps1 -SkipHerdrConnect        # configure only
   irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
-Options: -ForceUniKey -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoAutoHerdr -EssentialsOnly -BackupUser -SkipShutdownHook -Help
-Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER
+Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoAutoHerdr -EssentialsOnly -BackupUser -SkipShutdownHook -Help
+Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL
 '@
     return
 }
@@ -248,6 +258,7 @@ function Get-SkoopReLaunchArgs {
     if ($Menu -and -not $SkipMenu) { $list += '-Menu' }
     if ($RepoRawBase) { $list += @('-RepoRawBase', $RepoRawBase) }
     if ($ForceUniKey) { $list += '-ForceUniKey' }
+    if ($ForceInstall) { $list += '-ForceInstall' }
     if ($SkipGhLogin) { $list += '-SkipGhLogin' }
     if ($SkipHerdrConnect) { $list += '-SkipHerdrConnect' }
     if ($HerdrPeer) { $list += '-HerdrPeer' }
@@ -930,6 +941,7 @@ if ($skipUniKey) {
 
 $phaseResult = Invoke-SkoopPhases -Scoop $scoop -ManifestPath $manifest -PhasesPath $phasesManifest `
     -ExcludeApps $(if ($skipUniKey) { @('unikey') } else { @() }) `
+    -SkipInstalled -Force:$ForceInstall -ScoopRoot $env:SCOOP `
     -StopAfterPhase $(if ($EssentialsOnly) { 'core-terminal' } else { '' }) `
     -AfterPhase {
         param($phase, $index)
