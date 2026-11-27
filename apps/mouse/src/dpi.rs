@@ -177,7 +177,7 @@ fn option(args: &[String], name: &str) -> Result<Option<String>, String> {
 pub fn run(args: &[String]) -> Result<(), String> {
     let raw = option(args, "value")?
         .or(option(args, "dpi")?)
-        .unwrap_or_else(|| "1000".to_string());
+        .unwrap_or_else(|| "1200".to_string());
     let dpi: u16 = raw
         .parse()
         .map_err(|_| format!("invalid DPI value: {}", raw))?;

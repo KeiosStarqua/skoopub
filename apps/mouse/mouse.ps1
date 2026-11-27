@@ -14,7 +14,7 @@ param(
     [ValidateSet('diagnose', 'monitor', 'fix', 'restore', 'status', 'dpi', 'install', 'driver')]
     [string]$Command,
     [int]$Seconds = 30,
-    [int]$Dpi = 1000,
+    [int]$Dpi = 1200,
     [string]$Out,
     [string]$From,
     [string]$Expect,

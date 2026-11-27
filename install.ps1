@@ -101,7 +101,7 @@
     - Installs skoopub-mouse from the GitHub Release into %LOCALAPPDATA%\skoop\mouse
       via apps/mouse/configure.ps1 (non-fatal), so `apps/mouse/mouse.ps1 diagnose`
       can capture HID Raw Input vs WM_MOUSEWHEEL. It also sets the hardware DPI
-      of a Logitech HID++ mouse to 1000 via `mouse.ps1 dpi` (hidapi, no G H UB
+      of a Logitech HID++ mouse to 1200 via `mouse.ps1 dpi` (hidapi, no G H UB
       config editing); -MouseDpi changes the value, -SkipMouseDpi opts out. The
       correction hook remains opt-in: run `mouse.ps1 fix` / `restore` yourself.
     - Installs and starts LibreScroll (inertial middle-button scrolling) from its
@@ -202,7 +202,7 @@
 
 .PARAMETER MouseDpi
     Hardware DPI to set on a Logitech HID++ mouse after installing skoopub-mouse
-    (default 1000; also $env:SKOOP_MOUSE_DPI). Ignored with -SkipMouseDpi.
+    (default 1200; also $env:SKOOP_MOUSE_DPI). Ignored with -SkipMouseDpi.
 
 .PARAMETER SkipMouseDpi
     Do not touch the mouse DPI (also $env:SKOOP_NO_MOUSE_DPI=1).
@@ -254,7 +254,7 @@ param(
     [switch]$NoGum,
     [switch]$NoPwsh,
     [switch]$NoAutoHerdr,
-    [int]$MouseDpi = 1000,
+    [int]$MouseDpi = 1200,
     [switch]$SkipMouseDpi,
     [switch]$ForceFirefoxRestore,
     [switch]$ForceAtuinRestore,
@@ -331,7 +331,7 @@ function Get-SkoopReLaunchArgs {
     if ($EssentialsOnly) { $list += '-EssentialsOnly' }
     if ($NoGum) { $list += '-NoGum' }
     if ($NoAutoHerdr) { $list += '-NoAutoHerdr' }
-    if ($MouseDpi -ne 1000) { $list += @('-MouseDpi', "$MouseDpi") }
+    if ($MouseDpi -ne 1200) { $list += @('-MouseDpi', "$MouseDpi") }
     if ($SkipMouseDpi) { $list += '-SkipMouseDpi' }
     if ($ForceFirefoxRestore) { $list += '-ForceFirefoxRestore' }
     if ($ForceAtuinRestore) { $list += '-ForceAtuinRestore' }
