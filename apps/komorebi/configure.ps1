@@ -39,9 +39,9 @@ if (-not $ConfigDir) {
 
 New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
 
-function Read-Normalized {
+function Get-FileHashOf {
     param([string]$Path)
-    return ((Get-Content -Raw -LiteralPath $Path) -replace "`r`n", "`n").TrimEnd()
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash
 }
 
 function Deploy-File {
@@ -52,7 +52,9 @@ function Deploy-File {
     }
     $changed = $true
     if (Test-Path -LiteralPath $Destination) {
-        $changed = (Read-Normalized $Destination) -ne (Read-Normalized $Source)
+        # Compare the settings files by SHA-256 hash: any byte difference (including
+        # line endings/whitespace) means the deployed copy needs updating.
+        $changed = (Get-FileHashOf $Source) -ne (Get-FileHashOf $Destination)
         if (-not $changed) {
             Write-Host "$(Split-Path -Leaf $Destination) already up to date: $Destination"
         } else {
@@ -132,6 +134,33 @@ function Start-PinWatcher {
         $link.Save()
     } catch {
         Write-Host "    Pin watcher autostart shortcut failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+function Test-TaskbarAutoHide {
+    # Mirrors set-taskbar-autohide.ps1: StuckRects3 Settings byte 8 = 0x03 is auto-hide.
+    $path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3'
+    try {
+        $settings = (Get-ItemProperty -LiteralPath $path -Name Settings -ErrorAction Stop).Settings
+        return ([byte]$settings[8] -eq 0x03)
+    } catch {
+        return $false
+    }
+}
+
+# Re-runs are a no-op when everything this script manages is already in place:
+# managed files unchanged, Komorebi and whkd running, pin watcher running (unless
+# opted out) and the taskbar already hidden. -Restart / -RestartPin force a reload.
+if (-not $Restart -and -not $RestartPin -and -not $NoStart) {
+    $filesCurrent = (-not $hotkeysChanged) -and (-not $configChanged) -and ($NoPin -or -not $pinChanged)
+    $pinRunning = $NoPin -or (@(Get-PinWatcherProcesses).Count -gt 0)
+    $processesCurrent = [bool](Get-Process -Name komorebi -ErrorAction SilentlyContinue) -and
+                        [bool](Get-Process -Name whkd -ErrorAction SilentlyContinue) -and
+                        $pinRunning -and
+                        ($NoTaskbarAutohide -or (Test-TaskbarAutoHide))
+    if ($filesCurrent -and $processesCurrent) {
+        Write-Host 'Komorebi is already set up and running - skipping (use -Restart to force a reload).' -ForegroundColor DarkGray
+        return
     }
 }
 
