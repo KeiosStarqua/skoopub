@@ -90,7 +90,8 @@ function Test-TailscaleConnected {
 function Invoke-VicinaeRestoreOnConnect {
     # The shutdown backup logs Tailscale out and uploads Vicinae's config/data,
     # so a reconnected (or freshly installed) machine can put it straight back.
-    $restoreScript = Join-Path (Split-Path $PSScriptRoot -Parent) 'core\restore-backup.ps1'
+    $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+    $restoreScript = Join-Path $repoRoot 'core\restore-backup.ps1'
     if (-not (Test-Path -LiteralPath $restoreScript)) {
         Write-Warn 'core/restore-backup.ps1 not found - skipping Vicinae auto-restore.'
         return
