@@ -67,6 +67,55 @@ function Get-YasbEnvValue {
 }
 $weatherLocation = Get-YasbEnvValue 'YASB_WEATHER_LOCATION'
 
+function Add-WallpapersWidget {
+    # Many catalog themes (including the default dots windows) have no wallpapers
+    # widget at all. Add one so YASB's own hotkey + gallery can change wallpapers:
+    #   Ctrl+Alt+w or Alt+E -> open gallery, Left/Right + Enter -> apply.
+    # Right-clicking the widget changes to a random wallpaper directly.
+    param([string]$Text)
+    if ($Text -match '(?m)^\s*wallpapers:\s*') { return $Text }
+
+    $widget = @'
+  wallpapers:
+    type: "yasb.wallpapers.WallpapersWidget"
+    options:
+      label: "Wallpaper"
+      image_path: "$env:YASB_WALLPAPER_DIR"
+      change_automatically: false
+      gallery:
+        type: "magnified"
+        image_width: 220
+        image_corner_radius: 8
+      keybindings:
+        - keys: "ctrl+alt+w"
+          action: "toggle_gallery"
+          screen: "cursor"
+        - keys: "alt+e"
+          action: "toggle_gallery"
+          screen: "cursor"
+      callbacks:
+        on_left: "toggle_gallery"
+        on_middle: "do_nothing"
+        on_right: "change_wallpaper"
+'@
+    # Insert before the top-level `widgets:` mapping so YAML stays valid.
+    $marker = "`nwidgets:"
+    $idx = $Text.IndexOf($marker)
+    if ($idx -lt 0) { return $Text + "`n`n" + $widget }
+    return $Text.Insert($idx + 1, $widget + "`n`n")
+}
+
+function Add-WallpapersToBar {
+    # The widget only registers its keybindings when it is placed in a bar.
+    # Append it to the first right-hand widget list under `bars:`.
+    param([string]$Text)
+    if ($Text -match '"wallpapers"') { return $Text }
+    $marker = 'right: ['
+    $idx = $Text.IndexOf($marker)
+    if ($idx -lt 0) { return $Text }
+    return $Text.Insert($idx + $marker.Length, "`n        `"wallpapers`",")
+}
+
 $themeBase = 'https://raw.githubusercontent.com/amnweb/yasb-themes/main/themes/{0}' -f $ThemeId
 $themeName = $ThemeId
 try {
@@ -92,6 +141,8 @@ $patch = {
     # and the Windows system glyphs; neither alone covers every theme label.
     $text = $text -replace '(?m)^(\s*--icons-font(?:-fallback)?:\s*).*$', '$1"JetBrainsMono NFP", "Segoe Fluent Icons";'
     $text = $text -replace '(?m)^(\s*font-family:\s*)"Segoe Fluent Icons".*$', '$1"Segoe Fluent Icons", "JetBrainsMono NFP";'
+    $text = Add-WallpapersWidget $text
+    $text = Add-WallpapersToBar $text
     return $text
 }
 

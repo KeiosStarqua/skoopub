@@ -87,8 +87,10 @@
       -ThemeId / SKOOP_YASB_THEME_ID picks another) and writes them to ~/.config/yasb
       with backups, plus a .env template; no theme files are committed here.
       apps/yasb/setup-wallpapers.ps1 shallow-clones D3Ext/aesthetic-wallpapers once
-      and points YASB_WALLPAPER_DIR at its images folder (Alt+E gallery); opt out
-      with -NoWallpapers / SKOOP_NO_WALLPAPERS=1.
+      and points YASB_WALLPAPER_DIR at its images folder. A wallpapers widget is
+      added to the bar with Ctrl+Alt+W / Alt+E to open the gallery (Left/Right +
+      Enter to apply) and right-click for a random wallpaper; opt out with
+      -NoWallpapers / SKOOP_NO_WALLPAPERS=1.
     - Clears wallpaper-change policies (NoChangingWallPaper, NoDispBackgroundPage
       and a forced Wallpaper/WallpaperStyle value) for the current user and, when
       elevated, machine-wide, then sets a desktop wallpaper from the cloned
