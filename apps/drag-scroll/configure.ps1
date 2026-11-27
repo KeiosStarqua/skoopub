@@ -8,9 +8,9 @@
     %LOCALAPPDATA%\skoop\drag-scroll\mouse-scroll.ahk, installs AutoHotkey v2
     with Scoop when it is missing, writes a per-user Startup shortcut and
     starts the script when it is not already running. Idempotent: re-runs only
-    repair the copy/shortcut/process. Hold the RIGHT mouse button and move the
-    mouse to scroll; release to stop. Unlike LibreScroll this does not block
-    physical wheel events, so skoopub-mouse diagnostics are unaffected.
+    repair the copy/shortcut/process. Hold RAlt (right Alt) and move the mouse
+    to scroll; release to stop. Unlike LibreScroll this does not block physical
+    wheel events, so skoopub-mouse diagnostics are unaffected.
 #>
 [CmdletBinding()]
 param(
@@ -99,7 +99,7 @@ if (-not $NoLaunch) {
             Where-Object { $_.CommandLine -like "*mouse-scroll.ahk*" })
     }
     if ($running.Count -gt 0) {
-        Write-Host "==> running (PID $($running[0].ProcessId)): hold RIGHT mouse button and drag to scroll"
+        Write-Host "==> running (PID $($running[0].ProcessId)): hold RAlt and move the mouse to scroll"
     } else {
         Write-Host '==> could not start the drag-scroll script' -ForegroundColor Yellow
     }

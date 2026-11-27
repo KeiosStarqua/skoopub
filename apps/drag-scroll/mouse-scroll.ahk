@@ -1,18 +1,21 @@
 ; Drag to scroll - AutoHotkey v2 port of Mikhail V.'s mouse-scroll-v04.ahk
 ; Source: https://github.com/Mikhail22/drag-scroll--autohotkey
-; Hold the RIGHT mouse button and move the mouse to scroll; release to stop.
+; Hold RIGHT Alt (RAlt) and move the mouse to scroll; release to stop.
+; A press with no scrolling sends RAlt so the key is not swallowed.
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 
 ; === User settings ===
 swap := false      ; true reverses the scroll direction
 horiz := true      ; true uses horizontal mouse movement as the input
-k := 2             ; scroll speed coefficient (higher = faster)
+k := 1             ; scroll speed coefficient (higher = faster)
+; Lower k and higher S make scrolling slower; lower T makes it smoother
+; (more frequent, smaller wheel steps instead of occasional bursts).
 
 ; === Internal settings ===
-scrollsLimit := 15 ; max wheel notches sent per timer tick
-S := 12            ; unit distance (higher = slower)
-T := 30            ; scan frequency in ms
+scrollsLimit := 5  ; max wheel notches sent per timer tick
+S := 24            ; unit distance (higher = slower)
+T := 15            ; scan frequency in ms (lower = smoother)
 
 running := false
 dyTotal := 0
@@ -52,19 +55,20 @@ Watch() {
         Send("{WheelUp " n "}")
 }
 
-; Without ~ the native right-click is suppressed, so the context menu only
-; appears when the drag produced no scrolling (matching the v1 behaviour).
-RButton:: {
+; Without ~ the native RAlt is suppressed while held, so it cannot trigger
+; menu/shortcut side effects during a scroll drag. If the press produced no
+; scrolling, send RAlt so a plain press still behaves normally.
+RAlt:: {
     global running, dyTotal, mxLast, myLast
     running := true
     dyTotal := 0
     MouseGetPos(&mxLast, &myLast)
 }
 
-RButton up:: {
+RAlt up:: {
     global running, scrollsTotal
     running := false
     if (scrollsTotal = 0)
-        Send("{RButton}")
+        Send("{RAlt}")
     scrollsTotal := 0
 }

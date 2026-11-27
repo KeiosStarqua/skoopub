@@ -110,8 +110,8 @@
       config editing); -MouseDpi changes the value, -SkipMouseDpi opts out. The
       correction hook remains opt-in: run `mouse.ps1 fix` / `restore` yourself.
     - Installs and starts drag-to-scroll via apps/drag-scroll/configure.ps1
-      (AutoHotkey v2 port of Mikhail22/drag-scroll--autohotkey): hold the RIGHT
-      mouse button and move the mouse to scroll. The script is deployed to
+      (AutoHotkey v2 port of Mikhail22/drag-scroll--autohotkey): hold RIGHT Alt
+      (RAlt) and move the mouse to scroll; release to stop. The script is deployed to
       %LOCALAPPDATA%\skoop\drag-scroll, installed with Scoop when AutoHotkey is
       missing, given a per-user Startup shortcut and started on every run.
       Unlike LibreScroll it does not block physical wheel events, so mouse
