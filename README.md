@@ -48,6 +48,8 @@ If the execution policy blocks `iex`, wrap it in a bypassed process:
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex"
 ```
 
+The installer sets the **CurrentUser execution policy to `RemoteSigned`** early on, so the dot-sourced profile loads in every new PowerShell shell (including Rio) instead of failing with *"running scripts is disabled on this system"*. The bypass above is only needed for the very first piped run; an already-permissive policy is left alone. As a regression guard, the installer then opens a fresh shell and checks that the managed profile really loaded — if it did not, you get an error naming `Get-ExecutionPolicy -List` and your `$PROFILE`.
+
 ### One command to configure and connect Herdr
 
 From a clone, `install.ps1` is the single entry point — it configures the machine **and**, after Tailscale starts, asks you to pick a tailnet machine and saves it in Herdr over Tailscale SSH:

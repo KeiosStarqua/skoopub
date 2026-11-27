@@ -14,6 +14,7 @@
 # Deploys ~/.config/whkdrc and starts Komorebi/whkd via apps\komorebi\configure.ps1.
 # Deploys the YASB status bar config and starts YASB via apps\yasb\configure.ps1.
 # Adds `n` for Nushell in PowerShell (profile.ps1) and cmd (apps\nushell\setup.ps1).
+# Sets the CurrentUser execution policy to RemoteSigned so the profile hook works.
 # Checks the Windows theme and enables Dark Mode (core\set-dark-mode.ps1).
 [CmdletBinding()]
 param(
@@ -97,6 +98,53 @@ function Get-ProfileTargets {
         $targets += Join-Path (Join-Path $documents $other) 'Microsoft.PowerShell_profile.ps1'
     }
     return @($targets | Where-Object { $_ } | Select-Object -Unique)
+}
+
+function Set-SkoopExecutionPolicy {
+    # Windows defaults to Restricted, so the dot-source below would make every
+    # new shell print "running scripts is disabled on this system". Allow local
+    # scripts for this user; downloaded files still need a signature. Non-fatal
+    # when Group Policy locks the scope down.
+    try {
+        $current = Get-ExecutionPolicy -Scope CurrentUser -ErrorAction Stop
+        if ($current -in @('RemoteSigned', 'Unrestricted', 'Bypass')) {
+            Write-Host "Execution policy for CurrentUser is already $current."
+            return
+        }
+    } catch {
+        Write-Host "Could not read the execution policy (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        return
+    }
+
+    try {
+        Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction SilentlyContinue | Out-Null
+    } catch {
+        # A process launched with -ExecutionPolicy Bypass can raise
+        # ExecutionPolicyOverride even though CurrentUser was written; verify
+        # with a read-back below instead of trusting the exception.
+    }
+    $after = Get-ExecutionPolicy -Scope CurrentUser -ErrorAction SilentlyContinue
+    if ($after -eq 'RemoteSigned') {
+        Write-Host 'Execution policy for CurrentUser set to RemoteSigned.'
+    } else {
+        Write-Host "Could not set the execution policy (non-fatal, CurrentUser is $after)" -ForegroundColor Yellow
+    }
+}
+
+function Test-SkoopProfileLoads {
+    # Regression guard for the two things that broke before: a Restricted
+    # execution policy and a stale/missing dot-source hook. A fresh Windows
+    # PowerShell process must load $PROFILE and expose Clear-HerdrEnv from
+    # shell/profile.ps1. No -NoProfile, and no inherited process-scope Bypass.
+    $shell51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $shell51)) { return $true }
+    try {
+        $probe = 'if (Get-Command Clear-HerdrEnv -ErrorAction SilentlyContinue) { ''ok'' }'
+        $out = & $shell51 -NoLogo -Command $probe 2>$null
+        return (((@($out) -join "`n") -match '\bok\b'))
+    } catch {
+        return $false
+    }
 }
 
 function Install-ProfileHook {
@@ -242,8 +290,12 @@ if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
 }
 $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
 
-# 2. Hook the repo-managed profile into $PROFILE before anything can fail.
+# 2. Allow local scripts, then hook the repo-managed profile into $PROFILE.
+Set-SkoopExecutionPolicy
 Install-ProfileHook
+if (-not (Test-SkoopProfileLoads)) {
+    Write-Host 'Profile did not load in a fresh shell - check Get-ExecutionPolicy -List and your $PROFILE.' -ForegroundColor Red
+}
 
 # 3. Clear the Task Manager policy.
 Enable-TaskManager

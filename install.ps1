@@ -37,6 +37,10 @@
       addresses are stored in the repo.
     - Keeps a UniKey that is already installed (e.g. on a public PC) instead of
       adding a second copy; -ForceUniKey installs the Scoop build anyway.
+    - Sets the CurrentUser execution policy to RemoteSigned so the repo-managed
+      profile and other local scripts load instead of failing with "running
+      scripts is disabled on this system"; an already-permissive policy is kept.
+      A fresh shell is probed afterwards, so a policy/hook regression is reported.
     - Adds a dot-source line for profile.ps1 to your PowerShell $PROFILE early on,
       so zoxide/atuin are configured even if a later, optional step fails.
     - Enables Task Manager by clearing DisableTaskMgr for the current user (and
@@ -477,6 +481,53 @@ function Get-ProfileTargets {
     return @($targets | Where-Object { $_ } | Select-Object -Unique)
 }
 
+function Set-SkoopExecutionPolicy {
+    # The profile hook below dot-sources shell/profile.ps1. Windows defaults to
+    # Restricted, which makes every new shell print "running scripts is disabled
+    # on this system". Allow local scripts for this user; downloaded files still
+    # need a signature. Non-fatal when Group Policy locks the scope down.
+    try {
+        $current = Get-ExecutionPolicy -Scope CurrentUser -ErrorAction Stop
+        if ($current -in @('RemoteSigned', 'Unrestricted', 'Bypass')) {
+            Write-Ok "execution policy for CurrentUser is already $current"
+            return
+        }
+    } catch {
+        Write-Host "    could not read the execution policy (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        return
+    }
+
+    try {
+        Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction SilentlyContinue | Out-Null
+    } catch {
+        # A process launched with -ExecutionPolicy Bypass can raise
+        # ExecutionPolicyOverride even though CurrentUser was written; verify
+        # with a read-back below instead of trusting the exception.
+    }
+    $after = Get-ExecutionPolicy -Scope CurrentUser -ErrorAction SilentlyContinue
+    if ($after -eq 'RemoteSigned') {
+        Write-Ok 'execution policy for CurrentUser set to RemoteSigned'
+    } else {
+        Write-Host "    could not set the execution policy (non-fatal, CurrentUser is $after)" -ForegroundColor Yellow
+    }
+}
+
+function Test-SkoopProfileLoads {
+    # Regression guard for the two things that broke before: a Restricted
+    # execution policy and a stale/missing dot-source hook. A fresh Windows
+    # PowerShell process must load $PROFILE and expose Clear-HerdrEnv from
+    # shell/profile.ps1. No -NoProfile, and no inherited process-scope Bypass.
+    $shell51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $shell51)) { return $true }
+    try {
+        $probe = 'if (Get-Command Clear-HerdrEnv -ErrorAction SilentlyContinue) { ''ok'' }'
+        $out = & $shell51 -NoLogo -Command $probe 2>$null
+        return (((@($out) -join "`n") -match '\bok\b'))
+    } catch {
+        return $false
+    }
+}
+
 function Install-ProfileHook {
     # Wire the repo-managed profile into $PROFILE early so zoxide/atuin are
     # configured even if a later (optional) step fails.
@@ -642,9 +693,14 @@ if ($runMode -eq 'herdr') {
     return
 }
 
-# --- 2. Hook the repo-managed profile into $PROFILE --------------------------
-# Done before anything that can fail, so `z`/`atuin` are always configured.
+# --- 2. Allow local scripts and hook the repo-managed profile into $PROFILE --
+# Both are done before anything that can fail, so `z`/`atuin` are configured and
+# the dot-source below actually loads in new shells (see Set-SkoopExecutionPolicy).
+Set-SkoopExecutionPolicy
 Install-ProfileHook
+if (-not (Test-SkoopProfileLoads)) {
+    Write-Host '    profile did not load in a fresh shell - check Get-ExecutionPolicy -List and your $PROFILE' -ForegroundColor Red
+}
 
 # --- 3. Clear the Task Manager policy ---------------------------------------
 Enable-TaskManager
