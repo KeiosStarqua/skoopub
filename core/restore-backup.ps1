@@ -1,15 +1,17 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Restore the latest Firefox, Vicinae, Atuin and/or Pear Desktop snapshot from acer-ubuntu onto a fresh machine.
+    Restore the latest Firefox, Vicinae, Atuin, Pear Desktop and/or OpenCode snapshot from acer-ubuntu onto a fresh machine.
 
 .DESCRIPTION
     Companion to core/cleanup-before-shutdown.ps1. The backup keeps one folder per
     app on the tailnet host (~/skoop-backups/firefox/<timestamp>/firefox,
     ~/skoop-backups/vicinae/<timestamp>/vicinae,
-    ~/skoop-backups/atuin/<timestamp>/atuin and
-    ~/skoop-backups/pear/<timestamp>/pear); this script picks the newest timestamp
-    for each app independently, downloads it with scp and merges it into place:
+    ~/skoop-backups/atuin/<timestamp>/atuin,
+    ~/skoop-backups/pear/<timestamp>/pear and
+    ~/skoop-backups/opencode/<timestamp>/opencode); this script picks the newest
+    timestamp for each app independently, downloads it with scp and merges it into
+    place:
 
       - Firefox: profiles.ini, installs.ini and every profile folder in the
         snapshot go back under %APPDATA%\Mozilla\Firefox. Existing folders are
@@ -30,6 +32,12 @@
         stopped first and a stale Chromium lockfile is removed. Cookies are
         encrypted with Windows DPAPI, so a different Windows user or machine may
         still ask you to sign in again; the app config and local storage survive.
+      - OpenCode: config (`~/.config/opencode`) and state (`~/.local/state/opencode`,
+        including the selected model and prompt history) are merged back, then the
+        snapshot's `auth/export.json` is imported with `opencode auth import` so
+        integrations stay signed in. Legacy v1 `auth.json` files are copied back
+        too. The CLI must be installed; run the restore after the app phase or
+        install it first.
 
     Nothing is uploaded or changed on the remote host. -List prints the newest
     snapshot for each app, -Stamp pins all apps to one timestamp, -Only narrows
@@ -57,12 +65,16 @@
 .PARAMETER PearRemotePath
     Pear Desktop snapshot parent on the remote host (default 'skoop-backups/pear').
 
+.PARAMETER OpenCodeRemotePath
+    OpenCode snapshot parent on the remote host (default 'skoop-backups/opencode').
+
 .PARAMETER Stamp
     Use this timestamp for all apps instead of each app's latest. Fails if a
     requested app has no snapshot with that timestamp.
 
 .PARAMETER Only
-    Restrict the restore to firefox, vicinae, atuin and/or pear (default: all).
+    Restrict the restore to firefox, vicinae, atuin, pear and/or opencode
+    (default: all).
 
 .PARAMETER List
     Print the newest snapshot timestamp per app and exit.
@@ -71,8 +83,8 @@
     Show what would be downloaded and restored; do not change any local files.
 
 .PARAMETER NoBackup
-    Overwrite profiles.ini / installs.ini, Vicinae folders, Atuin config/data and
-    Pear Desktop userData without a .bak copy.
+    Overwrite profiles.ini / installs.ini, Vicinae folders, Atuin config/data,
+    Pear Desktop userData and OpenCode config/state without a .bak copy.
 
 .PARAMETER NoRestart
     Do not relaunch vicinae-server after restoring (it is stopped first if running).
@@ -97,6 +109,9 @@
 
 .EXAMPLE
     .\core\restore-backup.ps1 -User keios -Only pear
+
+.EXAMPLE
+    .\core\restore-backup.ps1 -User keios -Only opencode
 #>
 [CmdletBinding()]
 param(
@@ -106,9 +121,10 @@ param(
     [string] $VicinaeRemotePath = 'skoop-backups/vicinae',
     [string] $AtuinRemotePath = 'skoop-backups/atuin',
     [string] $PearRemotePath = 'skoop-backups/pear',
+    [string] $OpenCodeRemotePath = 'skoop-backups/opencode',
     [string] $Stamp,
-    [ValidateSet('firefox', 'vicinae', 'atuin', 'pear')]
-    [string[]] $Only = @('firefox', 'vicinae', 'atuin', 'pear'),
+    [ValidateSet('firefox', 'vicinae', 'atuin', 'pear', 'opencode')]
+    [string[]] $Only = @('firefox', 'vicinae', 'atuin', 'pear', 'opencode'),
     [switch] $List,
     [switch] $DryRun,
     [switch] $NoBackup,
@@ -397,6 +413,105 @@ function Restore-PearDesktop {
     }
 }
 
+function Get-OpenCodePaths {
+    # Mirror cleanup-before-shutdown.ps1: prefer the CLI's own paths (XDG-aware).
+    $homeDir = $env:USERPROFILE
+    $paths = [ordered] @{
+        Config       = Join-Path $homeDir '.config\opencode'
+        Data         = Join-Path $homeDir '.local\share\opencode'
+        State        = Join-Path $homeDir '.local\state\opencode'
+        LocalAppData = Join-Path $env:LOCALAPPDATA 'opencode'
+    }
+    $opencode = Get-Command opencode -ErrorAction SilentlyContinue
+    if ($opencode) {
+        try {
+            $out = & cmd /c ('"{0}" debug paths 2>nul' -f $opencode.Source)
+            foreach ($line in @($out)) {
+                if ($line -match '^(config|data|state)\s+(.+)$') {
+                    $value = $Matches[2].Trim()
+                    if (-not $value) { continue }
+                    switch ($Matches[1]) {
+                        'config' { $paths.Config = $value }
+                        'data'   { $paths.Data = $value }
+                        'state'  { $paths.State = $value }
+                    }
+                }
+            }
+        } catch {
+            Write-Warn ('could not read opencode paths, using defaults: ' + $_.Exception.Message)
+        }
+    }
+    return [pscustomobject] $paths
+}
+
+function Restore-OpenCode {
+    param([string] $StageRoot, [string] $TheStamp)
+
+    $paths = Get-OpenCodePaths
+    $srcRoot = Join-Path $StageRoot 'opencode'
+    if (-not (Test-Path -LiteralPath $srcRoot)) {
+        if ($DryRun) {
+            Write-Log 'DRYRUN would restore OpenCode config/state and credentials'
+            return
+        }
+        throw 'Downloaded snapshot has no opencode folder; cannot restore OpenCode.'
+    }
+
+    foreach ($pair in @(
+        @{ Name = 'config'; Target = $paths.Config },
+        @{ Name = 'state'; Target = $paths.State }
+    )) {
+        $src = Join-Path $srcRoot $pair.Name
+        if (-not (Test-Path -LiteralPath $src)) { continue }
+        Write-Log ("restore opencode/" + $pair.Name + " -> " + $pair.Target)
+        if ($DryRun) { continue }
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $pair.Target) | Out-Null
+        if ((Test-Path -LiteralPath $pair.Target) -and -not $NoBackup) {
+            $bak = '{0}.bak.{1}' -f $pair.Target, $TheStamp
+            Copy-Item -LiteralPath $pair.Target -Destination $bak -Recurse -Force
+            Write-Log ("backed up " + $pair.Target + " -> " + $bak)
+        }
+        New-Item -ItemType Directory -Force -Path $pair.Target | Out-Null
+        Copy-Tree -Source $src -Destination $pair.Target
+    }
+
+    $authRoot = Join-Path $srcRoot 'auth'
+    $exportFile = Join-Path $authRoot 'export.json'
+    if (Test-Path -LiteralPath $exportFile) {
+        $opencode = Get-Command opencode -ErrorAction SilentlyContinue
+        if (-not $opencode) {
+            Write-Warn 'opencode CLI not found - credentials were not imported; run .\core\restore-backup.ps1 -Only opencode again after installing it.'
+        } elseif ($DryRun) {
+            Write-Log 'DRYRUN would run: opencode auth import <snapshot auth/export.json>'
+        } else {
+            Write-Log 'importing opencode credentials'
+            $imported = $false
+            foreach ($prefix in @('', '--standalone ')) {
+                & cmd /c ('"{0}" {1}auth import "{2}" 2>nul' -f $opencode.Source, $prefix, $exportFile) | Out-Null
+                if ($LASTEXITCODE -eq 0) { $imported = $true; break }
+            }
+            if (-not $imported) {
+                throw 'opencode auth import failed (run it manually with the snapshot auth/export.json).'
+            }
+            Write-Log 'opencode credentials imported'
+        }
+    }
+
+    # v1 builds kept auth.json under config/data instead of the current database.
+    foreach ($legacy in @(
+        @{ Name = 'config-auth.json'; Target = (Join-Path $paths.Config 'auth.json') },
+        @{ Name = 'data-auth.json'; Target = (Join-Path $paths.Data 'auth.json') },
+        @{ Name = 'localappdata-auth.json'; Target = (Join-Path $paths.LocalAppData 'auth.json') }
+    )) {
+        $src = Join-Path $authRoot $legacy.Name
+        if (-not (Test-Path -LiteralPath $src)) { continue }
+        Write-Log ("restore opencode/auth/" + $legacy.Name + " -> " + $legacy.Target)
+        if ($DryRun) { continue }
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $legacy.Target) | Out-Null
+        Copy-Item -LiteralPath $src -Destination $legacy.Target -Force
+    }
+}
+
 function Start-VicinaeServer {
     $roots = @($env:SCOOP, (Join-Path $env:USERPROFILE 'scoop'), (Join-Path $env:ProgramData 'scoop'))
     $server = $roots | Where-Object { $_ } | ForEach-Object {
@@ -450,23 +565,27 @@ if ($Stamp) {
     $vcStamps = @($Stamp)
     $atStamps = @($Stamp)
     $peStamps = @($Stamp)
+    $ocStamps = @($Stamp)
 } else {
     $ffStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $FirefoxRemotePath)
     $vcStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $VicinaeRemotePath)
     $atStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $AtuinRemotePath)
     $peStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $PearRemotePath)
+    $ocStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $OpenCodeRemotePath)
 }
 $ffStamp = if ($ffStamps.Count) { $ffStamps[0] } else { $null }
 $vcStamp = if ($vcStamps.Count) { $vcStamps[0] } else { $null }
 $atStamp = if ($atStamps.Count) { $atStamps[0] } else { $null }
 $peStamp = if ($peStamps.Count) { $peStamps[0] } else { $null }
+$ocStamp = if ($ocStamps.Count) { $ocStamps[0] } else { $null }
 
 if ($List) {
     Write-Log ("Firefox        latest: " + $(if ($ffStamp) { $ffStamp } else { '(none)' }) + "  (" + $FirefoxRemotePath + ")")
     Write-Log ("Vicinae        latest: " + $(if ($vcStamp) { $vcStamp } else { '(none)' }) + "  (" + $VicinaeRemotePath + ")")
     Write-Log ("Atuin          latest: " + $(if ($atStamp) { $atStamp } else { '(none)' }) + "  (" + $AtuinRemotePath + ")")
     Write-Log ("Pear Desktop   latest: " + $(if ($peStamp) { $peStamp } else { '(none)' }) + "  (" + $PearRemotePath + ")")
-    if (-not $ffStamp -and -not $vcStamp -and -not $atStamp -and -not $peStamp) { Write-Warn 'No snapshots found; check -TargetHost / -User / remote paths.' }
+    Write-Log ("OpenCode       latest: " + $(if ($ocStamp) { $ocStamp } else { '(none)' }) + "  (" + $OpenCodeRemotePath + ")")
+    if (-not $ffStamp -and -not $vcStamp -and -not $atStamp -and -not $peStamp -and -not $ocStamp) { Write-Warn 'No snapshots found; check -TargetHost / -User / remote paths.' }
     return
 }
 
@@ -474,6 +593,7 @@ $doFirefox = $Only -contains 'firefox'
 $doVicinae = $Only -contains 'vicinae'
 $doAtuin = $Only -contains 'atuin'
 $doPear = $Only -contains 'pear'
+$doOpenCode = $Only -contains 'opencode'
 if ($doFirefox -and -not $ffStamp) {
     Write-Warn 'No Firefox snapshot found; skipping Firefox.'
     $doFirefox = $false
@@ -490,7 +610,11 @@ if ($doPear -and -not $peStamp) {
     Write-Warn 'No Pear Desktop snapshot found; skipping Pear Desktop.'
     $doPear = $false
 }
-if (-not $doFirefox -and -not $doVicinae -and -not $doAtuin -and -not $doPear) {
+if ($doOpenCode -and -not $ocStamp) {
+    Write-Warn 'No OpenCode snapshot found; skipping OpenCode.'
+    $doOpenCode = $false
+}
+if (-not $doFirefox -and -not $doVicinae -and -not $doAtuin -and -not $doPear -and -not $doOpenCode) {
     throw 'Nothing to restore. Run -List to see the available snapshots.'
 }
 
@@ -511,7 +635,7 @@ if ($doPear -and $pearRunning.Count -gt 0 -and -not $DryRun) {
     Start-Sleep -Seconds 2
 }
 
-$restoreStamp = @($ffStamp, $vcStamp, $atStamp, $peStamp) | Where-Object { $_ } | Select-Object -First 1
+$restoreStamp = @($ffStamp, $vcStamp, $atStamp, $peStamp, $ocStamp) | Where-Object { $_ } | Select-Object -First 1
 $stage = Join-Path $restoreRoot $restoreStamp
 if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $stage | Out-Null }
 
@@ -556,6 +680,17 @@ try {
             throw 'Downloaded Pear Desktop snapshot is empty.'
         }
         Restore-PearDesktop -StageRoot $stage -TheStamp $peStamp
+    }
+
+    if ($doOpenCode) {
+        $remoteFolder = Get-SnapshotRemotePath -BasePath $OpenCodeRemotePath -FolderName 'opencode' -TheStamp $ocStamp
+        Write-Log ("restoring OpenCode from " + $peer + ':' + $remoteFolder)
+        if (-not $DryRun) { Save-Snapshot -RemoteFolder $remoteFolder -StageRoot $stage -FolderName 'opencode' }
+        $ocFiles = if ($DryRun) { @() } else { @(Get-ChildItem -LiteralPath (Join-Path $stage 'opencode') -Recurse -File -ErrorAction SilentlyContinue) }
+        if (-not $DryRun -and $ocFiles.Count -lt 1) {
+            throw 'Downloaded OpenCode snapshot is empty.'
+        }
+        Restore-OpenCode -StageRoot $stage -TheStamp $ocStamp
     }
 
     if ($DryRun) {

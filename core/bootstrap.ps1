@@ -24,7 +24,8 @@
 # running (SKOOP_NO_AUTO_HERDR=1 opts out).
 # After Tailscale connects, restores Vicinae and Pear Desktop from the backup once
 # per machine via apps\tailscale\configure.ps1 -RestoreVicinae -RestorePearDesktop
-# (SKOOP_BACKUP_USER supplies the SSH user).
+# (SKOOP_BACKUP_USER supplies the SSH user); OpenCode config/credentials are
+# restored after the app phases with -RestoreOpenCode.
 [CmdletBinding()]
 param(
     [switch]$ForceUniKey,
@@ -420,13 +421,15 @@ if (Test-Path $unikeyConfig) {
     catch { Write-Host "UniKey config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
-# 6. Start Tailscale (daemon/service only; login stays manual), then tag this
-#    device in the tailnet (idempotent and non-fatal when not signed in).
+# 6. Start Tailscale (daemon/service only; login stays manual), restore OpenCode
+#    config/credentials from the shutdown backup (the app phases installed its
+#    CLI), then tag this device in the tailnet (idempotent and non-fatal when not
+#    signed in).
 Start-TailscaleDaemon
 $tailscaleConfig = Join-Path $repo 'apps\tailscale\configure.ps1'
 if (Test-Path $tailscaleConfig) {
-    try { & $tailscaleConfig }
-    catch { Write-Host "Tailnet tagging failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+    try { & $tailscaleConfig -RestoreOpenCode }
+    catch { Write-Host "OpenCode restore / tailnet tagging failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
 # 7. Offer a temporary SSH key + Herdr remote setup (interactive).

@@ -1,17 +1,18 @@
 <#
 .SYNOPSIS
-    Back up Firefox profiles, Vicinae, Atuin and Pear Desktop data to acer-ubuntu
-    over Tailscale SSH, then remove local sign-ins (GitHub, Tailscale, Pear
-    Desktop, Firefox).
+    Back up Firefox profiles, Vicinae, Atuin, Pear Desktop and OpenCode data to
+    acer-ubuntu over Tailscale SSH, then remove local sign-ins (GitHub, Tailscale,
+    Pear Desktop, OpenCode, Firefox).
 
 .DESCRIPTION
     Intended for public/shared PCs: run it before turning the machine off to leave
     no signed-in accounts behind. It copies every Firefox profile found in
     profiles.ini, Vicinae's config/data/state folders, Atuin's config + data
-    (history/records/meta databases and the encryption key) and Pear Desktop's
-    signed-in userData into local staging folders, uploads them to the tailnet
-    machine acer-ubuntu with scp, verifies the remote copies over ssh, and only
-    then removes local credentials:
+    (history/records/meta databases and the encryption key), Pear Desktop's
+    signed-in userData and OpenCode's config/state plus an `opencode auth export`
+    credential dump into local staging folders, uploads them to the tailnet machine
+    acer-ubuntu with scp, verifies the remote copies over ssh, and only then
+    removes local credentials:
 
       - gh auth logout for github.com (plus the hosts.yml file as a fallback)
       - git's GitHub credential helper/username and ~/.git-credentials
@@ -25,15 +26,17 @@
 
     The SSH user is asked for at runtime (pass -User to skip the prompt). Firefox
     lands in ~/<RemotePath>/<timestamp>/firefox, Vicinae in
-    ~/<VicinaeRemotePath>/<timestamp>/vicinae and Atuin in
-    ~/<AtuinRemotePath>/<timestamp>/atuin, and Pear Desktop in
-    ~/<PearRemotePath>/<timestamp>/pear on acer-ubuntu, so restore-backup.ps1 can
-    pick the latest of each app independently. Nothing is deleted until each remote
-    copy has been verified; if verification fails, the staging copy is kept and the
-    script stops. Close active Atuin shells before running where possible: SQLite
-    WAL/SHM sidecars are copied alongside the databases, but a write during the copy
-    can still leave an inconsistent snapshot. -DryRun previews without changing
-    anything. The script never shuts the PC down.
+    ~/<VicinaeRemotePath>/<timestamp>/vicinae, Atuin in
+    ~/<AtuinRemotePath>/<timestamp>/atuin, Pear Desktop in
+    ~/<PearRemotePath>/<timestamp>/pear and OpenCode in
+    ~/<OpenCodeRemotePath>/<timestamp>/opencode on acer-ubuntu, so
+    restore-backup.ps1 can pick the latest of each app independently. Nothing is
+    deleted until each remote copy has been verified; if verification fails, the
+    staging copy is kept and the script stops. Close active Atuin shells before
+    running where possible: SQLite WAL/SHM sidecars are copied alongside the
+    databases, but a write during the copy can still leave an inconsistent
+    snapshot. -DryRun previews without changing anything. The script never shuts
+    the PC down.
 
 .PARAMETER User
     SSH user on acer-ubuntu. When omitted, the script prompts for it.
@@ -72,6 +75,14 @@
 .PARAMETER NoPear
     Leave Pear Desktop alone: skip both its snapshot and the sign-out wipe, so the
     saved Google login stays on this machine.
+
+.PARAMETER OpenCodeRemotePath
+    OpenCode destination folder relative to the remote home (default
+    'skoop-backups/opencode').
+
+.PARAMETER NoOpenCode
+    Leave OpenCode alone: skip both the snapshot and the credential wipe, so the
+    stored integration login stays on this machine.
 
 .PARAMETER StagingDir
     Local folder used to assemble the backup before upload. Defaults to
@@ -113,11 +124,13 @@ param(
     [string] $AtuinRemotePath = 'skoop-backups/atuin',
     [string] $AtuinHome = (Join-Path $env:USERPROFILE '.atuin'),
     [string] $PearRemotePath = 'skoop-backups/pear',
+    [string] $OpenCodeRemotePath = 'skoop-backups/opencode',
     [string] $StagingDir,
     [string] $LogPath,
     [switch] $NoVicinae,
     [switch] $NoAtuin,
     [switch] $NoPear,
+    [switch] $NoOpenCode,
     [switch] $SkipBackup,
     [switch] $KeepFirefoxLogins,
     [switch] $BackupOnly,
@@ -377,6 +390,148 @@ function Copy-PearDesktopData {
     return ($copied -gt 0)
 }
 
+function Get-OpenCodePaths {
+    # Resolve the CLI's own view first (it honours XDG_* overrides), falling back
+    # to OpenCode's documented defaults on this platform.
+    $homeDir = $env:USERPROFILE
+    $paths = [ordered] @{
+        Config       = Join-Path $homeDir '.config\opencode'
+        Data         = Join-Path $homeDir '.local\share\opencode'
+        State        = Join-Path $homeDir '.local\state\opencode'
+        LocalAppData = Join-Path $env:LOCALAPPDATA 'opencode'
+    }
+    $opencode = Get-Command opencode -ErrorAction SilentlyContinue
+    if ($opencode) {
+        try {
+            $out = & cmd /c ('"{0}" debug paths 2>nul' -f $opencode.Source)
+            foreach ($line in @($out)) {
+                if ($line -match '^(config|data|state)\s+(.+)$') {
+                    $value = $Matches[2].Trim()
+                    if (-not $value) { continue }
+                    switch ($Matches[1]) {
+                        'config' { $paths.Config = $value }
+                        'data'   { $paths.Data = $value }
+                        'state'  { $paths.State = $value }
+                    }
+                }
+            }
+        } catch {
+            Write-Log ('could not read opencode paths, using defaults: ' + $_.Exception.Message)
+        }
+    }
+    return [pscustomobject] $paths
+}
+
+function Test-OpenCodeHasCredentials {
+    $opencode = Get-Command opencode -ErrorAction SilentlyContinue
+    if (-not $opencode) { return $false }
+    try {
+        $raw = & cmd /c ('"{0}" auth list --format json 2>nul' -f $opencode.Source) | Out-String
+        if (-not $raw.Trim()) { return $false }
+        foreach ($integration in @($raw | ConvertFrom-Json -ErrorAction Stop)) {
+            if ($integration -and @($integration.connections | Where-Object { $_ }).Count -gt 0) { return $true }
+        }
+    } catch {
+        Write-Log ('could not read opencode auth list: ' + $_.Exception.Message)
+    }
+    return $false
+}
+
+function Export-OpenCodeAuth {
+    param([string] $Destination)
+
+    $opencode = Get-Command opencode -ErrorAction SilentlyContinue
+    if (-not $opencode) {
+        Write-Log 'opencode CLI not found - skipping credential export'
+        return $false
+    }
+    if (-not (Test-OpenCodeHasCredentials)) {
+        Write-Log 'opencode has no stored credentials - skipping credential export'
+        return $false
+    }
+
+    $file = Join-Path $Destination 'export.json'
+    # The background service may already be gone during shutdown; retry with a
+    # private server before giving up on the credentials.
+    foreach ($prefix in @('', '--standalone ')) {
+        if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force }
+        & cmd /c ('"{0}" {1}auth export > "{2}" 2>nul' -f $opencode.Source, $prefix, $file)
+        if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $file)) {
+            $raw = [System.IO.File]::ReadAllText($file)
+            if ($raw.Trim()) {
+                # Never log the contents: this file contains the access token.
+                Write-Log 'staged opencode/auth/export.json'
+                return $true
+            }
+        }
+    }
+    throw 'opencode auth export failed; refusing to remove credentials without a verified backup.'
+}
+
+function Copy-OpenCodeData {
+    param([string] $Destination)
+
+    $paths = Get-OpenCodePaths
+    $copied = $false
+
+    foreach ($tree in @(
+        [pscustomobject] @{
+            Name = 'config'
+            Source = $paths.Config
+            ExcludeDirs = @()
+            # service.json holds a runtime server password; one of these files is
+            # the legacy v1 credential store, captured separately below.
+            ExcludeFiles = @('service.json', 'auth.json')
+        },
+        [pscustomobject] @{
+            Name = 'state'
+            Source = $paths.State
+            ExcludeDirs = @('locks', 'pty')
+            ExcludeFiles = @('service.json')
+        }
+    )) {
+        if (-not (Test-Path -LiteralPath $tree.Source)) { continue }
+        $target = Join-Path $Destination $tree.Name
+        Write-Log ("staging opencode/" + $tree.Name)
+        New-Item -ItemType Directory -Force -Path $target | Out-Null
+        if (Get-Command robocopy -ErrorAction SilentlyContinue) {
+            $copyArgs = @($tree.Source, $target, '/E', '/COPY:DAT', '/R:1', '/W:1', '/NFL', '/NDL', '/NJH', '/NP')
+            if ($tree.ExcludeDirs.Count) { $copyArgs += @('/XD') + $tree.ExcludeDirs }
+            if ($tree.ExcludeFiles.Count) { $copyArgs += @('/XF') + $tree.ExcludeFiles }
+            $copyOutput = (& robocopy @copyArgs 2>&1 | Out-String)
+            $code = $LASTEXITCODE
+            foreach ($line in (@($copyOutput -split '\r?\n' | Where-Object { $_.Trim() }) | Select-Object -Last 8)) {
+                Write-Log ("robocopy: " + $line.Trim())
+            }
+            if ($code -ge 16) { throw "robocopy failed with code $code for " + $tree.Source }
+            if ($code -ge 8) { Write-Log ("warning: robocopy skipped some files in " + $tree.Source) }
+        } else {
+            Copy-Item -LiteralPath $tree.Source -Destination $target -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        $files = @(Get-ChildItem -LiteralPath $target -Recurse -File -ErrorAction SilentlyContinue)
+        if ($files.Count -gt 0) { $copied = $true }
+    }
+
+    $authTarget = Join-Path $Destination 'auth'
+    New-Item -ItemType Directory -Force -Path $authTarget | Out-Null
+    if (Export-OpenCodeAuth -Destination $authTarget) { $copied = $true }
+
+    # v1 builds kept auth.json under config/data instead of the current database.
+    foreach ($legacy in @(
+        @{ Name = 'config-auth.json'; Path = (Join-Path $paths.Config 'auth.json') },
+        @{ Name = 'data-auth.json'; Path = (Join-Path $paths.Data 'auth.json') },
+        @{ Name = 'localappdata-auth.json'; Path = (Join-Path $paths.LocalAppData 'auth.json') }
+    )) {
+        if (Test-Path -LiteralPath $legacy.Path) {
+            Copy-Item -LiteralPath $legacy.Path -Destination (Join-Path $authTarget $legacy.Name) -Force
+            Write-Log ("staging opencode/auth/" + $legacy.Name)
+            $copied = $true
+        }
+    }
+
+    return $copied
+}
+
 function Invoke-RemoteBackup {
     param(
         [string] $Source,
@@ -597,17 +752,38 @@ function Remove-OpenCodeAuth {
         if ($DryRun) {
             Write-Log 'DRYRUN would log out all opencode credentials'
         } else {
-            $accounts = @(& opencode auth list 2>$null)
-            foreach ($line in $accounts) {
-                $parts = @($line -split '\s{2,}') | Where-Object { $_.Trim() }
-                if ($parts.Count -lt 2) { continue }
-                $integration = $parts[0].Trim()
-                $credential = $parts[1].Trim()
+            $targets = @()
+            # Current builds expose stable IDs through --format json; the plain
+            # table is kept as a fallback for older CLIs.
+            try {
+                $raw = & cmd /c ('"{0}" auth list --format json 2>nul' -f $opencode.Source) | Out-String
+                if ($raw.Trim()) {
+                    foreach ($integration in @($raw | ConvertFrom-Json -ErrorAction Stop)) {
+                        if (-not $integration -or -not $integration.id) { continue }
+                        foreach ($connection in @($integration.connections)) {
+                            if (-not $connection -or -not $connection.id) { continue }
+                            $targets += [pscustomobject] @{ Integration = $integration.id; Credential = $connection.id }
+                        }
+                    }
+                }
+            } catch {
+                Write-Log ('could not read opencode credentials as JSON, using the table output: ' + $_.Exception.Message)
+            }
+            if ($targets.Count -eq 0) {
+                $accounts = @(& cmd /c ('"{0}" auth list 2>nul' -f $opencode.Source))
+                foreach ($line in $accounts) {
+                    $parts = @($line -split '\s{2,}') | Where-Object { $_.Trim() }
+                    if ($parts.Count -lt 2) { continue }
+                    $targets += [pscustomobject] @{ Integration = $parts[0].Trim(); Credential = $parts[1].Trim() }
+                }
+            }
+            foreach ($target in $targets) {
                 try {
-                    & opencode auth logout $integration $credential 2>&1 | ForEach-Object { Write-Log $_ }
-                    Write-Log ("opencode logout: " + $integration + ' / ' + $credential)
+                    & cmd /c ('"{0}" auth logout "{1}" "{2}" 2>&1' -f $opencode.Source, $target.Integration, $target.Credential) |
+                        ForEach-Object { Write-Log $_ }
+                    Write-Log ("opencode logout: " + $target.Integration + ' / ' + $target.Credential)
                 } catch {
-                    Write-Log ("opencode logout failed for $integration/$credential : " + $_.Exception.Message)
+                    Write-Log ("opencode logout failed for " + $target.Integration + '/' + $target.Credential + ' : ' + $_.Exception.Message)
                 }
             }
         }
@@ -699,7 +875,7 @@ if (-not $SkipBackup) {
 
     $stagingRoot = Join-Path $logDir $stamp
     if ($DryRun) {
-        Write-Log 'DRYRUN would stage Firefox + Vicinae + Atuin + Pear Desktop locally, upload each, verify over ssh, then delete staging'
+        Write-Log 'DRYRUN would stage Firefox + Vicinae + Atuin + Pear Desktop + OpenCode locally, upload each, verify over ssh, then delete staging'
     } else {
         $firefoxRoot = Join-Path $stagingRoot 'firefox'
         New-Item -ItemType Directory -Force -Path $firefoxRoot | Out-Null
@@ -744,6 +920,18 @@ if (-not $SkipBackup) {
                     -RemotePath $PearRemotePath -RequiredPaths @() -MinFiles 2
             }
         }
+
+        if (-not $NoOpenCode) {
+            $openCodeRoot = Join-Path $stagingRoot 'opencode'
+            if (Copy-OpenCodeData -Destination $openCodeRoot) {
+                $required = @()
+                if (Test-Path -LiteralPath (Join-Path $openCodeRoot 'auth\export.json')) {
+                    $required += 'auth/export.json'
+                }
+                $remoteBackups += Invoke-RemoteBackup -Source $openCodeRoot -Stamp $stamp -SshUser $sshUser `
+                    -RemotePath $OpenCodeRemotePath -RequiredPaths $required -MinFiles 2
+            }
+        }
         Write-Log 'remote backups verified - auth cleanup may proceed'
         Remove-Path $stagingRoot -Recurse
     }
@@ -755,7 +943,7 @@ if ($BackupOnly) {
     Remove-GitHubAuth
     Remove-SshKeys
     Remove-HerdrMachines
-    Remove-OpenCodeAuth
+    if (-not $NoOpenCode) { Remove-OpenCodeAuth }
     Remove-TailscaleAuth
     if (-not $NoPear) { Remove-PearDesktopData }
 

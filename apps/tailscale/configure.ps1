@@ -11,12 +11,13 @@
     with `tailscale up` first. Native stderr is merged through cmd.exe because
     Windows PowerShell 5.1 turns it into a terminating NativeCommandError.
 
-    With -RestoreVicinae and/or -RestorePearDesktop, a connected node also restores
-    that app from the latest acer-ubuntu snapshot through
-    core/restore-backup.ps1 (-Only vicinae / -Only pear). A marker under
+    With -RestoreVicinae, -RestorePearDesktop and/or -RestoreOpenCode, a connected
+    node also restores that app from the latest acer-ubuntu snapshot through
+    core/restore-backup.ps1 (-Only vicinae / pear / opencode). A marker under
     %LOCALAPPDATA%\skoop keeps re-runs from downloading it again; failures are
-    non-fatal. -ForceVicinaeRestore / -ForcePearDesktopRestore repeat one app even
-    when its marker exists.
+    non-fatal. -ForceVicinaeRestore / -ForcePearDesktopRestore /
+    -ForceOpenCodeRestore repeat one app even when its marker exists. OpenCode is
+    restored after the app phases (its CLI must exist to import credentials).
 
 .PARAMETER Tag
     ACL tag to advertise. The `tag:` prefix is added when omitted.
@@ -40,11 +41,19 @@
     DPAPI-encrypted, so a different Windows user/machine may still ask for a
     Google sign-in.
 
+.PARAMETER RestoreOpenCode
+    Restore OpenCode config/state and credentials from the shutdown backup once
+    per machine. Run it after the app phases: the CLI must be installed for
+    `opencode auth import`.
+
 .PARAMETER ForceVicinaeRestore
     Ignore the "already restored" marker and restore Vicinae again.
 
 .PARAMETER ForcePearDesktopRestore
     Ignore the "already restored" marker and restore Pear Desktop again.
+
+.PARAMETER ForceOpenCodeRestore
+    Ignore the "already restored" marker and restore OpenCode again.
 
 .PARAMETER BackupUser
     SSH user on acer-ubuntu for the optional Vicinae restore. Defaults to
@@ -57,6 +66,9 @@
     .\apps\tailscale\configure.ps1 -SignIn -RestoreVicinae -RestorePearDesktop
 
 .EXAMPLE
+    .\apps\tailscale\configure.ps1 -RestoreOpenCode -BackupUser keios
+
+.EXAMPLE
     .\apps\tailscale\configure.ps1 -Tag tag:public-client
 #>
 [CmdletBinding()]
@@ -66,8 +78,10 @@ param(
     [switch]$SignIn,
     [switch]$RestoreVicinae,
     [switch]$RestorePearDesktop,
+    [switch]$RestoreOpenCode,
     [switch]$ForceVicinaeRestore,
     [switch]$ForcePearDesktopRestore,
+    [switch]$ForceOpenCodeRestore,
     [string]$BackupUser = "$env:SKOOP_BACKUP_USER"
 )
 
@@ -101,15 +115,17 @@ function Test-TailscaleConnected {
 }
 
 function Invoke-RestoreOnConnect {
-    # The shutdown backup uploads Vicinae's config/data and Pear Desktop's
-    # signed-in userData, so a reconnected (or freshly installed) machine can put
-    # them straight back. One marker per app keeps re-runs idempotent.
+    # The shutdown backup uploads Vicinae's config/data, Pear Desktop's signed-in
+    # userData and OpenCode's config/state/credentials, so a reconnected (or
+    # freshly installed) machine can put them straight back. One marker per app
+    # keeps re-runs idempotent.
     param(
-        [ValidateSet('vicinae', 'pear')]
+        [ValidateSet('vicinae', 'pear', 'opencode')]
         [string] $App,
         [string] $Label,
         [switch] $ForceRestore,
-        [string] $ForceSwitch
+        [string] $ForceSwitch,
+        [string] $MarkerName
     )
 
     $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
@@ -118,9 +134,14 @@ function Invoke-RestoreOnConnect {
         Write-Warn "core/restore-backup.ps1 not found - skipping $Label auto-restore."
         return
     }
-    $marker = Join-Path $env:LOCALAPPDATA "skoop\$App-restore-on-connect.done"
+    if ($App -eq 'opencode' -and -not (Get-Command opencode -ErrorAction SilentlyContinue)) {
+        Write-Warn 'opencode is not installed yet - its config/credentials are restored after the app phases.'
+        return
+    }
+    if (-not $MarkerName) { $MarkerName = "$App-restore-on-connect.done" }
+    $marker = Join-Path $env:LOCALAPPDATA "skoop\$MarkerName"
     if ((Test-Path -LiteralPath $marker) -and -not $ForceRestore) {
-        Write-Ok "$Label already restored on Tailscale connect - skipping (pass -$ForceSwitch to repeat)"
+        Write-Ok "$Label already restored - skipping (pass -$ForceSwitch to repeat)"
         return
     }
     if (-not $BackupUser -and -not [Environment]::UserInteractive) {
@@ -173,6 +194,9 @@ if ($RestoreVicinae -and $connected) {
 }
 if ($RestorePearDesktop -and $connected) {
     Invoke-RestoreOnConnect -App pear -Label 'Pear Desktop' -ForceRestore:$ForcePearDesktopRestore -ForceSwitch 'ForcePearDesktopRestore'
+}
+if ($RestoreOpenCode -and $connected) {
+    Invoke-RestoreOnConnect -App opencode -Label 'OpenCode' -ForceRestore:$ForceOpenCodeRestore -ForceSwitch 'ForceOpenCodeRestore' -MarkerName 'opencode-restore.done'
 }
 
 if ($SkipTag) { Write-Ok 'Tailnet tagging skipped (-SkipTag).'; return }

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Run the Firefox/Vicinae/Atuin/Pear Desktop backup and auth cleanup on shutdown only when the last one is old.
+    Run the Firefox/Vicinae/Atuin/Pear Desktop/OpenCode backup and auth cleanup on shutdown only when the last one is old.
 
 .DESCRIPTION
     Used as the scheduled-task action for SkoopCleanupOnShutdown. If a successful
