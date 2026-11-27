@@ -65,7 +65,7 @@ $patch = {
     # Nerd Font supplies the F0xxx/EAF8 glyphs, Segoe Fluent Icons supplies E972
     # and the Windows system glyphs; neither alone covers every theme label.
     $text = $text -replace '(?m)^(\s*--icons-font(?:-fallback)?:\s*).*$', '$1"JetBrainsMono NFP", "Segoe Fluent Icons";'
-    $text = $text -replace '(?m)^(\s*font-family:\s*)"Segoe Fluent Icons".*$', '$1"JetBrainsMono NFP", "Segoe Fluent Icons";'
+    $text = $text -replace '(?m)^(\s*font-family:\s*)"Segoe Fluent Icons".*$', '$1"Segoe Fluent Icons", "JetBrainsMono NFP";'
     return $text
 }
 
@@ -95,6 +95,18 @@ foreach ($file in @('config.yaml', 'styles.css')) {
     try {
         $raw = (Invoke-WebRequest -Uri "$themeBase/$file" -UseBasicParsing -TimeoutSec 45).Content
         $content = & $patch $raw
+        if ($file -eq 'styles.css') {
+            # Many themes only style icon colour/size per widget and rely on the
+            # global '*' font, so Nerd Font glyphs fall back to Segoe UI boxes.
+            $content = $content.TrimEnd() + @"
+
+/* skoop: render Nerd Font glyphs inside widget labels/icons */
+.widget .icon,
+.widget .label span {
+    font-family: "JetBrainsMono NFP", "Segoe Fluent Icons";
+}
+"@
+        }
         Set-DeployedFile -Name $file -Content $content
     } catch {
         Write-Host "Could not fetch $file for '$themeName' ($($_.Exception.Message)) - existing file left untouched." -ForegroundColor Yellow
