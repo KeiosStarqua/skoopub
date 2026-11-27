@@ -1,15 +1,21 @@
 # apps/yasb/configure.ps1
-# Deploy the repo-managed YASB bar config (config.yaml + styles.css) into
-# ~/.config/yasb, create a .env from the template when missing, and start YASB.
+# Deploy a repo-managed YASB theme (config.yaml + styles.css) into ~/.config/yasb,
+# create a .env from the template when missing, and start YASB. Adaptive Islands
+# is the default; the previous Komorebi bar theme is preserved under
+# themes/komorebi/ and can be restored with -Theme komorebi.
 # The config watches for changes, so a restart is only needed with -Restart.
 #
 #   powershell -ExecutionPolicy Bypass -File .\apps/yasb/configure.ps1
+#   powershell -ExecutionPolicy Bypass -File .\apps/yasb/configure.ps1 -Theme komorebi
 #   powershell -ExecutionPolicy Bypass -File .\apps/yasb/configure.ps1 -Restart
 [CmdletBinding()]
 param(
     # Resolved in the body: $PSScriptRoot is empty during param binding in PS 5.1.
     [string]$SourceDir = '',
     [string]$ConfigDir = '',
+    # Which repo-managed theme to deploy (default: Adaptive Islands).
+    [ValidateSet('adaptive-islands', 'komorebi')]
+    [string]$Theme = 'adaptive-islands',
     # Overwrite changed files directly instead of keeping a timestamped .bak.
     [switch]$NoBackup,
     # Stop and relaunch YASB so the config is reloaded immediately.
@@ -33,6 +39,13 @@ if (-not (Test-Path -LiteralPath $SourceDir)) {
     Write-Host "YASB config source not found: $SourceDir" -ForegroundColor Yellow
     return
 }
+
+$themeDir = if ($Theme -eq 'komorebi') { Join-Path $SourceDir 'themes\komorebi' } else { $SourceDir }
+if (-not (Test-Path -LiteralPath $themeDir)) {
+    Write-Host "YASB theme '$Theme' not found at $themeDir" -ForegroundColor Yellow
+    return
+}
+Write-Host "Deploying YASB theme: $Theme"
 
 New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
 
@@ -61,7 +74,7 @@ function Copy-YasbFile {
 }
 
 foreach ($file in @('config.yaml', 'styles.css')) {
-    $source = Join-Path $SourceDir $file
+    $source = Join-Path $themeDir $file
     if (Test-Path -LiteralPath $source) {
         Copy-YasbFile -Source $source -Destination (Join-Path $ConfigDir $file)
     }
@@ -108,7 +121,7 @@ if (-not $running) {
 }
 
 if (Get-Process -Name yasb -ErrorAction SilentlyContinue) {
-    Write-Host "YASB is running with the Komorebi bar ($ConfigDir)." -ForegroundColor Green
+    Write-Host "YASB is running with the '$Theme' theme ($ConfigDir)." -ForegroundColor Green
 } else {
     Write-Host 'YASB did not stay running; check `yasbc log`.' -ForegroundColor Yellow
 }
