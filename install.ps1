@@ -70,7 +70,7 @@
       config import (existing Vicinae settings are preserved).
     - Deploys a conflict-free whkdrc and a Komorebi config (tight 4px workspace /
       2px container padding plus initial-workspace rules: Rio/Firefox on 1,
-      Zed/VS Code/Pear Desktop on 2, Columns on workspace 1) to ~/.config via
+      Zed/VS Code/Pear Desktop/YASB Themes on 2, Columns on workspace 1) to ~/.config via
       apps/komorebi/configure.ps1, then starts/reloads whkd (and Komorebi when needed)
       and a watcher that keeps Rio left / Firefox right in the Terminal workspace. It
       also auto-hides the Windows taskbar via apps/komorebi/set-taskbar-autohide.ps1 so

@@ -22,7 +22,8 @@
           "initial_workspace_rules": [
             { "kind": "Exe", "id": "zed.exe" },
             { "kind": "Exe", "id": "Code.exe" },
-            { "kind": "Exe", "id": "YouTube Music.exe" }
+            { "kind": "Exe", "id": "YouTube Music.exe" },
+            { "kind": "Exe", "id": "yasb_themes.exe" }
           ]
         },
         {
