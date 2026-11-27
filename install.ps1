@@ -116,7 +116,10 @@
       blocks physical wheel events while active, so pause it (tray -> Pause)
       before running skoopub-mouse diagnostics; failures are non-fatal.
     - Creates ~/repos and clones skoopub into ~/repos\skoopub when it is missing.
-      An existing directory is never overwritten, so this is safe to re-run.
+      It also clones the repos registered in manifests/repos.json (kirector,
+      tinygrad, …) into ~/repos, skipping existing checkouts and repos without
+      an origin. Nothing existing is overwritten; -SkipRepoClones /
+      SKOOP_NO_REPO_CLONES=1 opts out.
     - Installs Rio before Herdr in phase 1, then opens Rio in ~/repos with Herdr
       already running. Skipped for non-interactive shells and Herdr panes;
       -NoAutoHerdr / SKOOP_NO_AUTO_HERDR=1 opts out.
@@ -219,6 +222,10 @@
     Do not restore the SSH key from acer-ubuntu (also
     $env:SKOOP_NO_SSH_RESTORE=1).
 
+.PARAMETER SkipRepoClones
+    Do not clone the repos registered in manifests/repos.json into ~/repos
+    (also $env:SKOOP_NO_REPO_CLONES=1).
+
 .PARAMETER ForceFirefoxRestore
     Repeat the one-time Firefox profile restore from the acer-ubuntu backup even
     when the marker exists (also $env:SKOOP_FORCE_FIREFOX_RESTORE=1). Firefox is
@@ -276,6 +283,7 @@ param(
     [string]$BackupUser = "$env:SKOOP_BACKUP_USER",
     [switch]$SkipShutdownHook,
     [switch]$SkipSshRestore,
+    [switch]$SkipRepoClones,
     # Skip the one-time wallpaper collection clone (also SKOOP_NO_WALLPAPERS=1).
     [switch]$NoWallpapers,
     # Optional wallpaper file; when empty a random image from the cloned collection is used.
@@ -298,6 +306,7 @@ if ($env:SKOOP_NO_AUTO_HERDR -eq '1')
 if ($env:SKOOP_NO_MOUSE_DPI -eq '1')
 { $SkipMouseDpi = $true 
 }
+if ($env:SKOOP_NO_REPO_CLONES -eq '1') { $SkipRepoClones = $true }
 if ($env:SKOOP_NO_SSH_RESTORE -eq '1')
 { $SkipSshRestore = $true 
 }
@@ -350,8 +359,8 @@ Usage:
   .\install.ps1 -SkipHerdrConnect        # configure only
   irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
-Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -ForceFirefoxRestore -ForceAtuinRestore -SkipFirefoxRestore -SkipAtuinRestore -SkipSshRestore -EssentialsOnly -BackupUser -SkipShutdownHook -Help
-Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_FORCE_FIREFOX_RESTORE, SKOOP_FORCE_ATUIN_RESTORE, SKOOP_NO_FIREFOX_RESTORE, SKOOP_NO_ATUIN_RESTORE, SKOOP_NO_SSH_RESTORE, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL
+Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -ForceFirefoxRestore -ForceAtuinRestore -SkipFirefoxRestore -SkipAtuinRestore -SkipSshRestore -SkipRepoClones -EssentialsOnly -BackupUser -SkipShutdownHook -Help
+Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_FORCE_FIREFOX_RESTORE, SKOOP_FORCE_ATUIN_RESTORE, SKOOP_NO_FIREFOX_RESTORE, SKOOP_NO_ATUIN_RESTORE, SKOOP_NO_SSH_RESTORE, SKOOP_NO_REPO_CLONES, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL
 '@
     return
 }
@@ -417,6 +426,7 @@ function Get-SkoopReLaunchArgs
     if ($SkipAtuinRestore)
     { $list += '-SkipAtuinRestore' 
     }
+    if ($SkipRepoClones) { $list += '-SkipRepoClones' }
     if ($SkipSshRestore)
     { $list += '-SkipSshRestore' 
     }
@@ -1163,6 +1173,65 @@ function Ensure-SkoopClone
     }
 }
 
+function Ensure-RegisteredRepos
+{
+    param([string] $Manifest)
+
+    if (-not (Test-Path -LiteralPath $Manifest))
+    {
+        Write-Ok "$Manifest not found - skipping registered repo clones"
+        return
+    }
+    try
+    {
+        $data = Get-Content -Raw -LiteralPath $Manifest | ConvertFrom-Json
+    } catch
+    {
+        Write-Host "    Could not read $Manifest (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        return
+    }
+    $reposDir = Join-Path $env:USERPROFILE 'repos'
+    New-Item -ItemType Directory -Force -Path $reposDir | Out-Null
+    $gitExe = (Get-Command git -ErrorAction SilentlyContinue)
+    if (-not $gitExe) { Write-Host '    git not on PATH - skipping registered repo clones' -ForegroundColor Yellow; return }
+
+    foreach ($entry in @($data.repos))
+    {
+        if (-not $entry.name) { continue }
+        if (-not $entry.url)
+        {
+            Write-Ok "$($entry.name) has no origin - nothing to clone"
+            continue
+        }
+        $target = Join-Path $reposDir $entry.name
+        if (Test-Path -LiteralPath (Join-Path $target '.git'))
+        {
+            Write-Ok "$($entry.name) already cloned at $target"
+            continue
+        }
+        if (Test-Path -LiteralPath $target)
+        {
+            Write-Host "    $target exists but is not a git checkout - skipping" -ForegroundColor Yellow
+            continue
+        }
+        $cloneArgs = @('clone')
+        if ($entry.branch) { $cloneArgs += @('-b', $entry.branch) }
+        $cloneArgs += @($entry.url, $target)
+        Write-Step "Cloning $($entry.name) into $target"
+        # git writes progress to stderr; merge through cmd so PowerShell 5.1
+        # does not raise a terminating NativeCommandError under ErrorAction=Stop.
+        $quoted = (@($cloneArgs) | ForEach-Object { '"' + $_ + '"' }) -join ' '
+        $out = (& cmd /c ('"{0}" {1} 2>&1' -f $gitExe.Source, $quoted) | Out-String)
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $target '.git')))
+        {
+            Write-Host "    clone failed for $($entry.name) (non-fatal): $(($out -split "`r?`n" | Select-Object -Last 2) -join ' ')" -ForegroundColor Yellow
+        } else
+        {
+            Write-Ok "cloned $($entry.name)"
+        }
+    }
+}
+
 function Start-HerdrInRio
 {
     # Open the terminal first with Herdr already running, so a fresh machine is
@@ -1259,7 +1328,7 @@ if (-not $repoRoot)
     $repoRoot = Join-Path $env:LOCALAPPDATA 'skoop'
     New-Item -ItemType Directory -Force -Path $repoRoot | Out-Null
     $repoFiles = @(
-        'manifests/scoop.json', 'manifests/phases.json', 'core/scoop-phases.ps1',
+        'manifests/scoop.json', 'manifests/phases.json', 'manifests/repos.json', 'core/scoop-phases.ps1',
         'core/set-dark-mode.ps1', 'core/restore-backup.ps1', 'shell/profile.ps1',
         'apps/sharex/fix-printscreen.ps1', 'apps/sharex/hotkeys.template.json',
         'apps/firefox/policies.template.json',
@@ -1458,6 +1527,10 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue))
     & $scoop install git
 }
 Ensure-SkoopClone
+if (-not $SkipRepoClones -and $env:SKOOP_NO_REPO_CLONES -ne '1')
+{
+    Ensure-RegisteredRepos -Manifest (Join-Path $repoRoot 'manifests\repos.json')
+}
 
 # --- 7. Install the phase manifests in order --------------------------------
 # manifests/phases.json assigns every app in manifests/scoop.json to an ordered

@@ -1,0 +1,27 @@
+{
+  "_comment": "Repos registered from C:\\Users\\Administrator\\repos. install.ps1 clones any missing checkout into ~/repos. Entries without a url are local-only and are skipped.",
+  "repos": [
+    {
+      "name": "skoopub",
+      "url": "https://github.com/KeiosStarqua/skoopub.git",
+      "branch": "main",
+      "note": "Already handled by Ensure-SkoopClone; this entry is a no-op on re-runs."
+    },
+    {
+      "name": "kirector",
+      "url": "https://github.com/KeiosStarqua/kirector.git",
+      "branch": "main"
+    },
+    {
+      "name": "tinygrad",
+      "url": "https://github.com/tinygrad/tinygrad.git",
+      "branch": "master"
+    },
+    {
+      "name": "learn-tinygrad",
+      "url": "",
+      "branch": "",
+      "note": "Local-only repo on this machine (no origin); nothing to clone."
+    }
+  ]
+}
