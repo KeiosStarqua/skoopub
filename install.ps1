@@ -1459,6 +1459,22 @@ Ensure-SkoopClone
 # generated at run time so scoop.json stays the single source of truth.
 function Invoke-EssentialTerminalSetup
 {
+    # Restore backed-up app state BEFORE configuring/starting Vicinae. On a
+    # fresh machine the snapshot contains its database/config/state; applying
+    # the repo-managed keybinds afterwards keeps them authoritative, and the
+    # server then starts with the restored data already in place.
+    Start-TailscaleDaemon
+    if (Test-Path $tailscaleConfig)
+    {
+        try
+        {
+            & $tailscaleConfig -SignIn -RestoreVicinae -RestorePearDesktop -BackupUser $BackupUser @restoreAppsArgs
+        } catch
+        {
+            Write-Host "    Tailscale sign-in / restore failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+
     # Finish the phase-1 apps before phase 2 starts downloading anything else.
     Write-Step 'Finishing the Rio, Vicinae and Herdr TUI setup'
     foreach ($step in @(
@@ -1489,24 +1505,10 @@ function Invoke-EssentialTerminalSetup
         Write-Host '    herdr is not on PATH yet - open a new shell after the install' -ForegroundColor Yellow
     }
 
-    # Tailscale is part of phase 1 so the `tailscale up --qr` sign-in (URL/QR)
-    # happens before the slower phases, and well before Firefox is installed.
-    # Once it is connected, restore Vicinae, Pear Desktop, Firefox and Atuin from
-    # the shutdown backup (once per machine) so a fresh PC has their config/data
-    # back. Firefox/Atuin are only files here (no CLI dependency); the end-of-run
-    # step retries them idempotently in case this early call was skipped.
-    Start-TailscaleDaemon
-    if (Test-Path $tailscaleConfig)
-    {
-        try
-        {
-            & $tailscaleConfig -SignIn -RestoreVicinae -RestorePearDesktop -BackupUser $BackupUser @restoreAppsArgs
-        } catch
-        {
-            Write-Host "    Tailscale sign-in / restore failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
-        }
-    }
-
+    # Tailscale was started and the restore attempted above, before Vicinae was
+    # configured/launched, so the sign-in (URL/QR) still happens well before the
+    # slower phases and Firefox. Firefox/Atuin are only file copies here (no CLI
+    # dependency) and are retried idempotently at the end of the run.
     # Rio was installed before Herdr in this phase, so open it in ~/repos with
     # Herdr already running. The helper scrubs inherited HERDR_* markers.
     Start-HerdrInRio
