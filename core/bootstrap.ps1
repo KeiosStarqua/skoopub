@@ -1,5 +1,7 @@
 # bootstrap.ps1 - restore this Scoop + shell setup on a Windows machine.
 # Usage:  powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
+# Installs manifests/scoop.json in the phases from manifests/phases.json: phase 1
+# is PowerShell 7 + Rio + Vicinae + the Herdr TUI, the heavy apps come last.
 # Use -ForceUniKey to replace an already installed UniKey with the Scoop build.
 # Use -SkipGhLogin to avoid the interactive `gh auth login` prompt.
 # Sets the global git author identity to Keios <git@taquangkhoi.com>.
@@ -245,30 +247,41 @@ Install-ProfileHook
 # 3. Clear the Task Manager policy.
 Enable-TaskManager
 
-# 4. Install Firefox, then WezTerm, then Herdr.
-$extrasBucket = scoop bucket list 2>$null | Select-String -Pattern '^\s*extras\b' -Quiet
-if (-not $extrasBucket) { scoop bucket add extras }
-$firefoxInstalled = scoop list 2>$null | Select-String -Pattern '^\s*firefox\b' -Quiet
-if (-not $firefoxInstalled) { scoop install extras/firefox } else { Write-Host 'Firefox already installed.' }
+# 4. Buckets are git repos, so git must exist before the phase import.
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) { scoop install git }
+
+# 5. Install manifests/scoop.json in phases: phase 1 is the fast essentials
+#    (PowerShell 7, Rio, Vicinae, Herdr), the heavy downloads come last.
+. (Join-Path $repo 'core\scoop-phases.ps1')
+$skipUniKey = (-not $ForceUniKey) -and (Test-UniKeyInstalled)
+if ($skipUniKey) {
+    Write-Host 'UniKey already installed - keeping the existing copy (-ForceUniKey overrides).'
+}
+$phaseResult = Invoke-SkoopPhases -Scoop 'scoop' `
+    -ManifestPath (Join-Path $repo 'manifests\scoop.json') `
+    -PhasesPath (Join-Path $repo 'manifests\phases.json') `
+    -ExcludeApps $(if ($skipUniKey) { @('unikey') } else { @() }) `
+    -AfterPhase {
+        param($phase)
+        if ($phase.Name -ne 'core-terminal') { return }
+        # Finish Rio and Vicinae before the slower phases start.
+        foreach ($script in @('apps\rio\configure.ps1', 'apps\vicinae\configure.ps1', 'apps\vicinae\enable-autostart.ps1')) {
+            $path = Join-Path $repo $script
+            if (-not (Test-Path $path)) { continue }
+            try { & $path }
+            catch { Write-Host "  $script failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+        }
+        # Tailscale is in this phase so the QR/URL sign-in happens before Firefox.
+        Start-TailscaleDaemon
+        $tailscaleConfig = Join-Path $repo 'apps\tailscale\configure.ps1'
+        if (Test-Path $tailscaleConfig) {
+            try { & $tailscaleConfig -SignIn }
+            catch { Write-Host "  Tailscale sign-in failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+        }
+    }
+
 Install-FirefoxPolicies (Join-Path $repo 'apps\firefox\policies.template.json')
 Set-FirefoxDefaultBrowser
-$weztermInstalled = scoop list 2>$null | Select-String -Pattern '^\s*wezterm\b' -Quiet
-if (-not $weztermInstalled) { scoop install wezterm } else { Write-Host 'WezTerm already installed.' }
-foreach ($app in @('herdr', 'herdr-core')) {
-    $installed = scoop list 2>$null | Select-String -Pattern ("^\s*" + [regex]::Escape($app) + '\b') -Quiet
-    if (-not $installed) { scoop install $app } else { Write-Host "$app already installed." }
-}
-
-# 5. Restore buckets + apps declared in scoop.json.
-$manifest = Join-Path $repo 'manifests\scoop.json'
-if (-not $ForceUniKey -and (Test-UniKeyInstalled)) {
-    Write-Host 'UniKey already installed - keeping the existing copy (-ForceUniKey overrides).'
-    $json = Get-Content -Raw $manifest | ConvertFrom-Json
-    $json.apps = @($json.apps | Where-Object { $_.Name -ne 'unikey' })
-    $manifest = Join-Path $env:TEMP 'skoop-scoop-no-unikey.json'
-    $json | ConvertTo-Json -Depth 10 | Set-Content -Path $manifest -Encoding UTF8
-}
-scoop import $manifest
 
 # 6. Start Tailscale (daemon/service only; login stays manual), then tag this
 #    device in the tailnet (idempotent and non-fatal when not signed in).
@@ -337,49 +350,28 @@ if (Test-Path $zedConfig) {
     catch { Write-Host "Zed config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
-# 13. Apply the repo-managed Rio config (font size / zoom 16).
-$rioConfig = Join-Path $repo 'apps\rio\configure.ps1'
-if (Test-Path $rioConfig) {
-    try { & $rioConfig }
-    catch { Write-Host "Rio config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
-}
-
-# 14. Auto-start Vicinae (Startup shortcut + start the server now).
-$vicinae = Join-Path $repo 'apps\vicinae\enable-autostart.ps1'
-if (Test-Path $vicinae) {
-    try { & $vicinae }
-    catch { Write-Host "Vicinae autostart setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
-}
-
-# 15. Set the Vicinae global shortcut to Ctrl+Space (config import).
-$vicinaeConfig = Join-Path $repo 'apps\vicinae\configure.ps1'
-if (Test-Path $vicinaeConfig) {
-    try { & $vicinaeConfig }
-    catch { Write-Host "Vicinae shortcut setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
-}
-
-# 16. Deploy ~/.config/whkdrc and start/reload Komorebi's hotkey daemon.
+# 13. Deploy ~/.config/whkdrc and start/reload Komorebi's hotkey daemon.
 $komorebiConfig = Join-Path $repo 'apps\komorebi\configure.ps1'
 if (Test-Path $komorebiConfig) {
     try { & $komorebiConfig }
     catch { Write-Host "Komorebi hotkey setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
-# 17. Deploy the repo-managed YASB status bar config and start YASB.
+# 14. Deploy the repo-managed YASB status bar config and start YASB.
 $yasbConfig = Join-Path $repo 'apps\yasb\configure.ps1'
 if (Test-Path $yasbConfig) {
     try { & $yasbConfig }
     catch { Write-Host "YASB config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
-# 18. Add the `n` Nushell shortcut for PowerShell (profile.ps1) and cmd (AutoRun).
+# 15. Add the `n` Nushell shortcut for PowerShell (profile.ps1) and cmd (AutoRun).
 $nuSetup = Join-Path $repo 'apps\nushell\setup.ps1'
 if (Test-Path $nuSetup) {
     try { & $nuSetup }
     catch { Write-Host "Nushell shortcut setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
-# 19. Deploy the Starship prompt (config for PowerShell, Clink loader for cmd).
+# 16. Deploy the Starship prompt (config for PowerShell, Clink loader for cmd).
 $starshipConfig = Join-Path $repo 'apps\starship\configure.ps1'
 if (Test-Path $starshipConfig) {
     try { & $starshipConfig }

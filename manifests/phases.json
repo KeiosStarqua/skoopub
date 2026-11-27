@@ -1,0 +1,78 @@
+{
+    "phases": [
+        {
+            "Name": "core-terminal",
+            "Description": "PowerShell 7, Rio, Vicinae, the Herdr TUI and Tailscale sign-in",
+            "Buckets": [ "main", "extras", "nerd-fonts" ],
+            "Apps": [
+                "git",
+                "pwsh",
+                "herdr",
+                "herdr-core",
+                "vicinae",
+                "rio",
+                "JetBrainsMono-NF",
+                "tailscale"
+            ]
+        },
+        {
+            "Name": "shell",
+            "Description": "CLI tools, prompt and history search",
+            "Buckets": [ "main", "extras" ],
+            "Apps": [
+                "7zip",
+                "charm-gum",
+                "nu",
+                "zoxide",
+                "atuin",
+                "starship",
+                "clink",
+                "delta",
+                "fzf",
+                "ripgrep",
+                "fd",
+                "bat",
+                "jq",
+                "less",
+                "btop-lhm",
+                "mise",
+                "uv",
+                "gh",
+                "opencode",
+                "cursor-cli"
+            ]
+        },
+        {
+            "Name": "editors",
+            "Description": "Editors and language toolchains (larger downloads)",
+            "Buckets": [ "main", "extras" ],
+            "Apps": [
+                "vscode",
+                "zed",
+                "lazygit",
+                "rustup",
+                "mingw",
+                "bun"
+            ]
+        },
+        {
+            "Name": "apps",
+            "Description": "Browsers, desktop shell and the heavy applications",
+            "Buckets": [ "main", "extras", "lemon", "zeldrisho", "kbots" ],
+            "Apps": [
+                "firefox",
+                "sharex",
+                "grok-bot",
+                "pear-desktop",
+                "chatgpt",
+                "blender",
+                "yasb",
+                "komorebi",
+                "whkd",
+                "cava",
+                "unikey",
+                "kbots"
+            ]
+        }
+    ]
+}

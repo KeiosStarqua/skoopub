@@ -17,8 +17,16 @@
 .PARAMETER SkipTag
     Leave this device's advertised tags untouched.
 
+.PARAMETER SignIn
+    Run `tailscale up --qr` when this node is not signed in, so the login URL
+    and QR code are printed in the terminal. Used by the core-terminal phase so
+    Tailscale is connected before the slower phases (and Firefox) start.
+
 .EXAMPLE
     .\apps\tailscale\configure.ps1
+
+.EXAMPLE
+    .\apps\tailscale\configure.ps1 -SignIn
 
 .EXAMPLE
     .\apps\tailscale\configure.ps1 -Tag tag:public-client
@@ -26,7 +34,8 @@
 [CmdletBinding()]
 param(
     [string]$Tag = 'tag:public-client',
-    [switch]$SkipTag
+    [switch]$SkipTag,
+    [switch]$SignIn
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,6 +57,33 @@ function Resolve-TailscaleCli {
         if ($candidate -and (Test-Path $candidate)) { return $candidate }
     }
     return $null
+}
+
+if ($SignIn) {
+    # Connect before the slow phases so `tailscale up --qr` can show its login
+    # URL/QR in the terminal. Already-connected nodes are left alone.
+    $cli = Resolve-TailscaleCli
+    if (-not $cli) {
+        Write-Warn 'tailscale.exe not found - skipping Tailscale sign-in.'
+    } else {
+        $statusRaw = (& cmd /c "`"$cli`" status --json 2>&1" | Out-String)
+        $status = try { $statusRaw | ConvertFrom-Json -ErrorAction Stop } catch { $null }
+        if ($status -and $status.BackendState -eq 'Running' -and $status.Self.Online) {
+            Write-Ok 'Tailscale is already signed in'
+        } elseif (-not [Environment]::UserInteractive) {
+            Write-Warn 'Tailscale sign-in needs a terminal - run `tailscale up --qr` yourself.'
+        } else {
+            Write-Step 'Signing in to Tailscale (scan the QR code or open the URL below)'
+            # Stream the output: --qr draws the login QR code and the URL stays
+            # clickable. cmd merges stderr so 5.1 does not raise NativeCommandError.
+            & cmd /c "`"$cli`" up --qr 2>&1"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warn "Tailscale sign-in did not finish (exit $LASTEXITCODE) - run ``tailscale up --qr`` later."
+            } else {
+                Write-Ok 'Tailscale sign-in complete'
+            }
+        }
+    }
 }
 
 if ($SkipTag) { Write-Ok 'Tailnet tagging skipped (-SkipTag).'; return }
