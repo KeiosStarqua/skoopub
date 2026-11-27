@@ -359,11 +359,6 @@ function Copy-PearDesktopData {
         } else {
             Copy-Item -LiteralPath $root.Path -Destination $target -Recurse -Force -ErrorAction SilentlyContinue
         }
-        $files = @(Get-ChildItem -LiteralPath $target -Recurse -File -ErrorAction SilentlyContinue)
-        if ($files.Count -lt 1) {
-            Write-Log ("Pear Desktop data at " + $root.Path + " had no files to back up")
-            continue
-        }
         # A cookie database present at the source must make it into the snapshot;
         # otherwise the sign-out below would destroy a login we did not save.
         foreach ($required in @('Network\Cookies', 'Local State')) {
@@ -371,6 +366,11 @@ function Copy-PearDesktopData {
                 -not (Test-Path -LiteralPath (Join-Path $target $required))) {
                 throw ("Pear Desktop backup is missing " + $required + " from " + $root.Path + " (is the app still running?)")
             }
+        }
+        $files = @(Get-ChildItem -LiteralPath $target -Recurse -File -ErrorAction SilentlyContinue)
+        if ($files.Count -lt 1) {
+            Write-Log ("Pear Desktop data at " + $root.Path + " had no files to back up")
+            continue
         }
         $copied++
     }
