@@ -450,7 +450,8 @@ if (Get-Command rustup -ErrorAction SilentlyContinue) {
     }
 }
 
-# 9. Let ShareX own PrtSc: Windows otherwise hands the key to the Snipping Tool.
+# 9. Check (and only if needed) let ShareX own PrtSc: Windows otherwise hands
+#    the key to the Snipping Tool. Re-runs leave an applied fix untouched.
 $sharexFix = Join-Path $repo 'apps\sharex\fix-printscreen.ps1'
 if (Test-Path $sharexFix) {
     try { & $sharexFix }

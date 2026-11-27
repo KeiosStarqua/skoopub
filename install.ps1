@@ -53,8 +53,9 @@
       machine-wide when elevated); a failure is reported but does not abort.
     - Checks the Windows theme and turns on Dark Mode for apps and the system via
       core/set-dark-mode.ps1; re-runs leave an already-dark theme untouched.
-    - Applies apps/sharex/fix-printscreen.ps1 so ShareX owns the PrtSc key; a failure
-      there is reported but does not abort the bootstrap.
+    - Checks first, then only applies what is missing via apps/sharex/fix-printscreen.ps1
+      so ShareX owns the PrtSc key; an already-applied fix is left untouched (no registry
+      write, no ShareX restart). A failure is reported but does not abort the bootstrap.
     - Copies the repo-managed Zed settings/keymap/tasks into %APPDATA%\Zed (old
       files are backed up); Zed installs its declared extensions on next start.
     - Copies the repo-managed Rio config into %LOCALAPPDATA%\rio\config.toml,
@@ -990,7 +991,7 @@ if (Get-Command rustup -ErrorAction SilentlyContinue) {
 
 # --- 12. Let ShareX own the PrtSc key ---------------------------------------
 if (Test-Path $sharexFix) {
-    Write-Step 'Applying ShareX PrtSc fix'
+    Write-Step 'Checking ShareX PrtSc fix'
     try {
         & $sharexFix
     } catch {
