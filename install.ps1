@@ -80,7 +80,7 @@
       tiling windows use the full screen (YASB is the visible bar).
     - Deploys the YASB status bar via apps/yasb/configure.ps1: it downloads the
       chosen theme's config.yaml/styles.css from the community YASB themes
-      catalog (default Shibumi, id 92a8f104-ab80-45c0-95f1-82ebb2e12df6;
+      catalog (default dots windows, id d513044f-9218-46e1-ab62-c15705b80341;
       -ThemeId / SKOOP_YASB_THEME_ID picks another) and writes them to ~/.config/yasb
       with backups, plus a .env template; no theme files are committed here.
       apps/yasb/setup-wallpapers.ps1 shallow-clones D3Ext/aesthetic-wallpapers once

@@ -16,8 +16,8 @@ param(
     # Resolved in the body: $PSScriptRoot is empty during param binding in PS 5.1.
     [string]$SourceDir = '',
     [string]$ConfigDir = '',
-    # Catalog theme id to apply on fresh installs (default: Shibumi).
-    [string]$ThemeId = '92a8f104-ab80-45c0-95f1-82ebb2e12df6',
+    # Catalog theme id to apply on fresh installs (default: dots windows).
+    [string]$ThemeId = 'd513044f-9218-46e1-ab62-c15705b80341',
     # Overwrite changed files directly instead of keeping a timestamped .bak.
     [switch]$NoBackup,
     # Stop and relaunch YASB so the config is reloaded immediately.
@@ -95,6 +95,9 @@ foreach ($file in @('config.yaml', 'styles.css')) {
     try {
         $raw = (Invoke-WebRequest -Uri "$themeBase/$file" -UseBasicParsing -TimeoutSec 45).Content
         $content = & $patch $raw
+        if ($file -eq 'config.yaml' -and $content -notmatch '(?m)^update_check:') {
+            $content = "update_check: false`r`n" + $content
+        }
         if ($file -eq 'styles.css') {
             # Many themes only style icon colour/size per widget and rely on the
             # global '*' font, so Nerd Font glyphs fall back to Segoe UI boxes.
@@ -129,6 +132,12 @@ $fontPackages = @{
     'Symbols Nerd Font Mono'         = 'NerdFontsSymbolsOnly'
     'Font Awesome'                   = 'Font-Awesome'
     'Font Awesome 6 Free'            = 'Font-Awesome'
+}
+# Google Fonts families with no Scoop package; installed per-user from the
+# upstream google/fonts repo (OFL). The variable Rubik file exposes the
+# "Rubik Light" family used by the dots windows theme.
+$googleFonts = @{
+    'Rubik Light' = 'https://raw.githubusercontent.com/google/fonts/main/ofl/rubik/Rubik%5Bwght%5D.ttf'
 }
 # Some themes spell the Nerd Font family differently from its Windows name.
 $fontAliases = @{
@@ -175,6 +184,22 @@ function Install-SegoeFluentIcons {
         Write-Host '    Download it from https://aka.ms/SegoeFluentIcons and accept the EULA.' -ForegroundColor Yellow
     }
 }
+function Install-GoogleFont {
+    param([string]$Family, [string]$Url)
+    try {
+        $fontDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts'
+        New-Item -ItemType Directory -Force -Path $fontDir | Out-Null
+        $fileName = (($Family -replace '[^A-Za-z0-9]+', '-').Trim('-')) + '.ttf'
+        $destination = Join-Path $fontDir $fileName
+        Write-Host "Downloading $Family from Google Fonts..."
+        Invoke-WebRequest -Uri $Url -OutFile $destination -UseBasicParsing -TimeoutSec 60
+        $key = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
+        New-ItemProperty -Path $key -Name "$Family (TrueType)" -Value $destination -PropertyType String -Force | Out-Null
+        Write-Host "Installed $Family at $destination"
+    } catch {
+        Write-Host "Could not install $Family (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
 function Ensure-ThemeFonts {
     param([string]$StylesPath)
     if (-not (Test-Path -LiteralPath $StylesPath)) { return }
@@ -195,6 +220,10 @@ function Ensure-ThemeFonts {
         if ($name -eq 'Segoe UI Variable') { continue } # Windows 11 only; CSS falls back to Segoe UI
         if ($name -eq 'Segoe Fluent Icons') {
             if ($installed -notcontains 'Segoe Fluent Icons') { Install-SegoeFluentIcons }
+            continue
+        }
+        if ($googleFonts.ContainsKey($name)) {
+            Install-GoogleFont -Family $name -Url $googleFonts[$name]
             continue
         }
         if ($fontPackages.ContainsKey($name)) {
