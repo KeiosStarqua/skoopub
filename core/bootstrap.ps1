@@ -22,10 +22,14 @@
 # Creates ~/repos and clones skoopub there when missing (idempotent).
 # Installs Rio before Herdr in phase 1, then opens Rio in ~/repos with Herdr
 # running (SKOOP_NO_AUTO_HERDR=1 opts out).
-# After Tailscale connects, restores Vicinae and Pear Desktop from the backup once
-# per machine via apps\tailscale\configure.ps1 -RestoreVicinae -RestorePearDesktop
-# (SKOOP_BACKUP_USER supplies the SSH user); OpenCode config/credentials are
-# restored after the app phases with -RestoreOpenCode.
+# After Tailscale connects, restores Vicinae, Pear Desktop, Firefox and Atuin from
+# the backup once per machine via apps\tailscale\configure.ps1 -RestoreVicinae
+# -RestorePearDesktop -RestoreFirefox -RestoreAtuin (-BackupUser /
+# SKOOP_BACKUP_USER supplies the SSH user). Firefox/Atuin are retried at the end
+# of the run; -ForceFirefoxRestore / -ForceAtuinRestore repeat one,
+# -SkipFirefoxRestore / -SkipAtuinRestore opt out (also SKOOP_FORCE_* /
+# SKOOP_NO_* env vars). OpenCode config/credentials are restored after the app
+# phases with -RestoreOpenCode.
 [CmdletBinding()]
 param(
     [switch]$ForceUniKey,
@@ -34,13 +38,34 @@ param(
     [switch]$SkipGhLogin,
     # Optional wallpaper file; empty means a random image from the cloned collection.
     [string]$Wallpaper = "$env:SKOOP_WALLPAPER",
-    [switch]$NoWallpaper
+    [switch]$NoWallpaper,
+    [string]$BackupUser = "$env:SKOOP_BACKUP_USER",
+    [switch]$ForceFirefoxRestore,
+    [switch]$ForceAtuinRestore,
+    [switch]$SkipFirefoxRestore,
+    [switch]$SkipAtuinRestore
 )
 
 if ($env:SKOOP_FORCE_INSTALL -eq '1') { $ForceInstall = $true }
+if ($env:SKOOP_FORCE_FIREFOX_RESTORE -eq '1') { $ForceFirefoxRestore = $true }
+if ($env:SKOOP_FORCE_ATUIN_RESTORE -eq '1') { $ForceAtuinRestore = $true }
+if ($env:SKOOP_NO_FIREFOX_RESTORE -eq '1') { $SkipFirefoxRestore = $true }
+if ($env:SKOOP_NO_ATUIN_RESTORE -eq '1') { $SkipAtuinRestore = $true }
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
+# Firefox and Atuin restore happens right after Tailscale connects (phase 1) and
+# is retried at the end of the run. Markers make the retry a no-op; both apps are
+# installed later, but these restores only lay down files (no CLI dependency).
+$restoreAppsArgs = @()
+if (-not $SkipFirefoxRestore) {
+    $restoreAppsArgs += '-RestoreFirefox'
+    if ($ForceFirefoxRestore) { $restoreAppsArgs += '-ForceFirefoxRestore' }
+}
+if (-not $SkipAtuinRestore) {
+    $restoreAppsArgs += '-RestoreAtuin'
+    if ($ForceAtuinRestore) { $restoreAppsArgs += '-ForceAtuinRestore' }
+}
 
 function Ensure-SkoopClone {
     # Keep every checkout under ~/repos, including this repo. A piped install
@@ -477,13 +502,13 @@ $phaseResult = Invoke-SkoopPhases -Scoop 'scoop' `
             catch { Write-Host "  $script failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
         }
         # Tailscale is in this phase so the QR/URL sign-in happens before Firefox.
-        # Once connected, restore Vicinae and Pear Desktop from the shutdown backup
-        # (once per machine) and open Rio with Herdr in ~/repos.
+        # Once connected, restore Vicinae, Pear Desktop, Firefox and Atuin from the
+        # shutdown backup (once per machine) and open Rio with Herdr in ~/repos.
         Start-TailscaleDaemon
         $tailscaleConfig = Join-Path $repo 'apps\tailscale\configure.ps1'
         if (Test-Path $tailscaleConfig) {
-            try { & $tailscaleConfig -SignIn -RestoreVicinae -RestorePearDesktop }
-            catch { Write-Host "  Tailscale sign-in failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+            try { & $tailscaleConfig -SignIn -RestoreVicinae -RestorePearDesktop -BackupUser $BackupUser @restoreAppsArgs }
+            catch { Write-Host "  Tailscale sign-in / restore failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
         }
         Start-HerdrInRio
     }
@@ -500,13 +525,14 @@ if (Test-Path $unikeyConfig) {
 
 # 6. Start Tailscale (daemon/service only; login stays manual), restore OpenCode
 #    config/credentials from the shutdown backup (the app phases installed its
-#    CLI), then tag this device in the tailnet (idempotent and non-fatal when not
-#    signed in).
+#    CLI) and retry the Firefox/Atuin restores from phase 1 (markers make an
+#    earlier success a no-op), then tag this device in the tailnet (idempotent
+#    and non-fatal when not signed in).
 Start-TailscaleDaemon
 $tailscaleConfig = Join-Path $repo 'apps\tailscale\configure.ps1'
 if (Test-Path $tailscaleConfig) {
-    try { & $tailscaleConfig -RestoreOpenCode }
-    catch { Write-Host "OpenCode restore / tailnet tagging failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+    try { & $tailscaleConfig -RestoreOpenCode -BackupUser $BackupUser @restoreAppsArgs }
+    catch { Write-Host "OpenCode / Firefox / Atuin restore or tailnet tagging failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
 # 7. Offer a temporary SSH key + Herdr remote setup (interactive).
@@ -627,4 +653,5 @@ Write-Host "YASB status bar is configured; fill ~\.config\yasb\.env for weather/
 Write-Host "Type 'n' in PowerShell or cmd to open Nushell." -ForegroundColor Green
 Write-Host "Starship is the prompt in new PowerShell and cmd windows." -ForegroundColor Green
 Write-Host "Dark Mode is on for apps and the system." -ForegroundColor Green
+Write-Host "Firefox profile and Atuin history restored from acer-ubuntu once per machine (markers firefox-restore.done / atuin-restore.done; -ForceFirefoxRestore / -ForceAtuinRestore repeat, -SkipFirefoxRestore / -SkipAtuinRestore opt out)." -ForegroundColor Green
 Write-Host "Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL)." -ForegroundColor Green

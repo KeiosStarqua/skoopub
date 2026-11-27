@@ -1413,6 +1413,7 @@ Write-Host 'YASB status bar is configured; fill ~/.config/yasb/.env for weather/
 Write-Host 'Type `n` in PowerShell or cmd to open Nushell.' -ForegroundColor Green
 Write-Host 'Starship is the prompt in new PowerShell and cmd windows.' -ForegroundColor Green
 Write-Host 'Dark Mode is on for apps and the system.' -ForegroundColor Green
+Write-Host 'Firefox profile and Atuin history restored from acer-ubuntu once per machine (markers firefox-restore.done / atuin-restore.done; -ForceFirefoxRestore / -ForceAtuinRestore repeat, -SkipFirefoxRestore / -SkipAtuinRestore opt out).' -ForegroundColor Green
 Write-Host 'Wheel diagnostics: .\apps\mouse\mouse.ps1 diagnose (fix/restore are opt-in).' -ForegroundColor Green
 if (-not $SkipShutdownHook) {
     Write-Host 'Shutdown cleanup is registered: Firefox/Vicinae/Atuin/Pear Desktop/OpenCode back up to acer-ubuntu and local sign-ins (GitHub, Tailscale, Pear Desktop, OpenCode, Firefox) are cleared on shutdown/logoff.' -ForegroundColor Green
