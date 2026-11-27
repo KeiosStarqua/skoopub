@@ -97,10 +97,11 @@
       repeated installs do not re-download it. Non-fatal; supply -BackupUser or
       SKOOP_BACKUP_USER when running unattended.
 
-    Interactive CLI: when gum (charm-gum) is available, the script opens a menu
-    to choose Full setup / Configure only / Connect Herdr only / Quit. It falls
-    back to a numbered prompt, and skips the menu when -NoMenu or any other
-    option is given (or the shell is non-interactive).
+    By default the script runs the Full setup immediately with no options to
+    choose. Pass -Menu (or $env:SKOOP_MENU=1) to open the optional interactive
+    menu: Full setup / Essentials only / Configure only / Connect Herdr only /
+    Quit, using gum when available and a numbered prompt otherwise. -NoMenu is
+    kept as a no-op for older scripts.
 
     Works two ways:
       Local :  .\install.ps1
@@ -137,9 +138,14 @@
 .PARAMETER SkipHerdrConnect
     Do not run the Herdr remote step (useful for unattended installs).
 
+.PARAMETER Menu
+    Open the interactive setup menu (gum when available, numbered prompt
+    otherwise). The default is a direct Full setup with no menu (also
+    $env:SKOOP_MENU=1 for piped runs).
+
 .PARAMETER NoMenu
-    Skip the interactive gum menu and run the full setup directly. The menu is
-    also skipped for non-interactive shells and when any other option is passed.
+    Kept for compatibility; the menu is opt-in now, so a bare `.\install.ps1`
+    already runs the full setup without asking.
 
 .PARAMETER EssentialsOnly
     Stop after the core-terminal phase: PowerShell 7, Rio, Vicinae, the Herdr
@@ -181,6 +187,7 @@ param(
     [string]$Peer = "$env:SKOOP_HERDR_PEER",
     [string]$HerdrUser = "$env:SKOOP_HERDR_USER",
     [switch]$SkipHerdrConnect,
+    [switch]$Menu,
     [switch]$NoMenu,
     [switch]$NoGum,
     [switch]$NoPwsh,
@@ -195,6 +202,7 @@ param(
 if ($env:SKOOP_SKIP_HERDR -eq '1') { $SkipHerdrConnect = $true }
 if ($env:SKOOP_ESSENTIALS_ONLY -eq '1') { $EssentialsOnly = $true }
 if ($env:SKOOP_NO_AUTO_HERDR -eq '1') { $NoAutoHerdr = $true }
+if ($env:SKOOP_MENU -eq '1') { $Menu = $true }
 if ($NoGum) { $env:SKOOP_NO_GUM = '1' }
 
 # `--help` arrives in $args with CmdletBinding; handle it before any side effect.
@@ -206,16 +214,16 @@ if ($Help -or $RepoRawBase -in @('--help', '-h', '/?', 'help') -or
 skoop install.ps1 - interactive Windows setup
 
 Usage:
-  .\install.ps1                          # menu: Full / Essentials / Configure / Herdr / Quit
-  .\install.ps1 -NoMenu                  # skip the menu, run every phase
+  .\install.ps1                          # full setup, no options to choose
+  .\install.ps1 -Menu                    # menu: Full / Essentials / Configure / Herdr / Quit
   .\install.ps1 -EssentialsOnly          # only pwsh, Rio, Vicinae and the Herdr TUI
   .\install.ps1 -HerdrPeer              # interactive peer picker
   .\install.ps1 -Peer <machine> -HerdrUser <user>
   .\install.ps1 -SkipHerdrConnect        # configure only
   irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
-Options: -ForceUniKey -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -NoMenu -NoGum -NoPwsh -NoAutoHerdr -EssentialsOnly -BackupUser -SkipShutdownHook -Help
-Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER
+Options: -ForceUniKey -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoAutoHerdr -EssentialsOnly -BackupUser -SkipShutdownHook -Help
+Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER
 '@
     return
 }
@@ -230,6 +238,7 @@ function Get-SkoopReLaunchArgs {
     param([switch]$SkipMenu)
     $list = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
     if ($SkipMenu -or $NoMenu) { $list += '-NoMenu' }
+    if ($Menu -and -not $SkipMenu) { $list += '-Menu' }
     if ($RepoRawBase) { $list += @('-RepoRawBase', $RepoRawBase) }
     if ($ForceUniKey) { $list += '-ForceUniKey' }
     if ($SkipGhLogin) { $list += '-SkipGhLogin' }
@@ -308,7 +317,7 @@ function Invoke-SetupMenu {
         @{ Key = 'quit';       Label = 'Quit' }
     )
     if (-not [Environment]::UserInteractive) {
-        Write-Ok 'Non-interactive shell - running the full setup (use -NoMenu to silence this)'
+        Write-Ok 'Non-interactive shell - running the full setup (omit -Menu next time)'
         return 'full'
     }
 
@@ -721,10 +730,9 @@ function Start-HerdrInRio {
     }
 }
 
-# --- 0. Interactive CLI menu (gum when available) ----------------------------
+# --- 0. Mode selection: full by default, menu only when asked ---------------
 $runMode = 'full'
-if (-not $NoMenu -and -not $HerdrPeer -and $env:SKOOP_NO_MENU -ne '1' -and
-    -not ($ForceUniKey -or $SkipGhLogin -or $SkipHerdrConnect -or $Peer -or $HerdrUser -or $EssentialsOnly)) {
+if ($Menu -and -not $NoMenu -and -not $HerdrPeer -and $env:SKOOP_NO_MENU -ne '1') {
     $runMode = Invoke-SetupMenu
 }
 if ($HerdrPeer) { $runMode = 'herdr' }
@@ -926,13 +934,13 @@ $phaseResult = Invoke-SkoopPhases -Scoop $scoop -ManifestPath $manifest -PhasesP
 if ($EssentialsOnly) {
     Write-Host ''
     Write-Host 'Essentials ready: PowerShell 7, Rio, Vicinae (Ctrl+Space), the Herdr TUI and Tailscale.' -ForegroundColor Green
-    Write-Host 'Run .\install.ps1 -NoMenu later to install the remaining phases.' -ForegroundColor Green
+    Write-Host 'Run .\install.ps1 later to install the remaining phases.' -ForegroundColor Green
     return
 }
 
 if ($phaseResult.Failed.Count -gt 0) {
     Write-Host ''
-    Write-Host ("These phases failed: {0}. Re-run .\install.ps1 -NoMenu to retry them." -f ($phaseResult.Failed -join ', ')) -ForegroundColor Yellow
+    Write-Host ("These phases failed: {0}. Re-run .\install.ps1 to retry them." -f ($phaseResult.Failed -join ', ')) -ForegroundColor Yellow
 }
 
 # --- UniKey auto-config (Unicode + VNI, Vietnamese on, startup shortcut) -----
