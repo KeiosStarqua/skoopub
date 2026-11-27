@@ -89,16 +89,22 @@
     - Adds an `n` alias for Nushell in PowerShell (profile.ps1) and a cmd.exe
       AutoRun doskey macro via apps/nushell/setup.ps1, preserving existing AutoRun entries.
     - Registers a per-user scheduled task (SkoopCleanupOnShutdown) via
-      core/install-shutdown-hook.ps1 so the Firefox/Vicinae/Atuin/Pear Desktop
-      backup and local sign-in cleanup (GitHub, Tailscale, Pear Desktop, Firefox)
-      run automatically on shutdown/logoff; -BackupUser / SKOOP_BACKUP_USER
-      supplies the SSH user, and -SkipShutdownHook opts out.
+      core/install-shutdown-hook.ps1 so the Firefox/Vicinae/Atuin/Pear Desktop/
+      OpenCode backup and local sign-in cleanup (GitHub, Tailscale, Pear Desktop,
+      OpenCode, Firefox) run automatically on shutdown/logoff; -BackupUser /
+      SKOOP_BACKUP_USER supplies the SSH user, and -SkipShutdownHook opts out.
     - Installs skoopub-mouse from the GitHub Release into %LOCALAPPDATA%\skoop\mouse
       via apps/mouse/configure.ps1 (non-fatal), so `apps/mouse/mouse.ps1 diagnose`
       can capture HID Raw Input vs WM_MOUSEWHEEL. It also sets the hardware DPI
       of a Logitech HID++ mouse to 1000 via `mouse.ps1 dpi` (hidapi, no G H UB
       config editing); -MouseDpi changes the value, -SkipMouseDpi opts out. The
       correction hook remains opt-in: run `mouse.ps1 fix` / `restore` yourself.
+    - Installs and starts LibreScroll (inertial middle-button scrolling) from its
+      GitHub release via apps/librescoll/configure.ps1: the SHA-256 digest is
+      verified before extracting to %LOCALAPPDATA%\skoop\librescoll, a per-user
+      Startup shortcut is written, and the tray app is launched. LibreScroll
+      blocks physical wheel events while active, so pause it (tray -> Pause)
+      before running skoopub-mouse diagnostics; failures are non-fatal.
     - Creates ~/repos and clones skoopub into ~/repos\skoopub when it is missing.
       An existing directory is never overwritten, so this is safe to re-run.
     - Installs Rio before Herdr in phase 1, then opens Rio in ~/repos with Herdr
@@ -107,8 +113,9 @@
     - Restores Vicinae and Pear Desktop from the latest acer-ubuntu snapshot right
       after Tailscale connects (via core/restore-backup.ps1 -Only vicinae / -Only
       pear), with a marker file per app so repeated installs do not re-download
-      them. Non-fatal; supply -BackupUser or SKOOP_BACKUP_USER when running
-      unattended.
+      them. OpenCode config/state and credentials are restored at the end of the
+      install, once its CLI exists. Non-fatal; supply -BackupUser or
+      SKOOP_BACKUP_USER when running unattended.
 
     By default the script runs the Full setup immediately with no options to
     choose. Pass -Menu (or $env:SKOOP_MENU=1) to open the optional interactive
@@ -810,6 +817,7 @@ if (-not $repoRoot) {
         'apps/rio/configure.ps1', 'apps/komorebi/configure.ps1',
         'apps/yasb/configure.ps1', 'apps/yasb/setup-wallpapers.ps1', 'apps/nushell/setup.ps1',
         'apps/mouse/configure.ps1', 'apps/mouse/mouse.ps1',
+        'apps/librescoll/configure.ps1',
         'apps/starship/configure.ps1', 'apps/starship/starship.toml',
         'apps/zed/settings.json', 'apps/zed/keymap.json', 'apps/zed/tasks.json',
         'apps/vicinae/keybinds.json', 'apps/rio/config.toml',
@@ -846,6 +854,7 @@ $nuSetup         = Join-Path $repoRoot 'apps\nushell\setup.ps1'
 $starshipConfig  = Join-Path $repoRoot 'apps\starship\configure.ps1'
 $darkMode        = Join-Path $repoRoot 'core\set-dark-mode.ps1'
 $mouseConfig     = Join-Path $repoRoot 'apps\mouse\configure.ps1'
+$librescollConfig = Join-Path $repoRoot 'apps\librescoll\configure.ps1'
 Write-Ok "repo root: $repoRoot"
 
 if ($runMode -eq 'herdr') {
@@ -1144,6 +1153,20 @@ if (Test-Path $darkMode) {
     Write-Ok 'core/set-dark-mode.ps1 not found - skipping'
 }
 
+# --- 20b. Restore OpenCode settings and sign-in ------------------------------
+# OpenCode is installed by the app phases, so this cannot run in phase 1: the
+# snapshot's credentials need `opencode auth import`. Once per machine.
+if (Test-Path $tailscaleConfig) {
+    Write-Step 'Restoring OpenCode settings and sign-in from the backup'
+    try {
+        & $tailscaleConfig -RestoreOpenCode -BackupUser $BackupUser
+    } catch {
+        Write-Host "    OpenCode restore failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Ok 'apps/tailscale/configure.ps1 not found - skipping OpenCode restore'
+}
+
 # --- 21. Automatic cleanup on shutdown / logoff -----------------------------
 $shutdownHook = Join-Path $repoRoot 'core\install-shutdown-hook.ps1'
 if (-not $SkipShutdownHook -and (Test-Path $shutdownHook)) {
@@ -1181,6 +1204,19 @@ if (Test-Path $mouseConfig) {
     Write-Ok 'apps/mouse/configure.ps1 not found - skipping'
 }
 
+# --- 23. LibreScroll (inertial middle-button scrolling) ----------------------
+if (Test-Path $librescollConfig) {
+    Write-Step 'Installing and starting LibreScroll inertial scrolling'
+    try {
+        & $librescollConfig
+    } catch {
+        # Third-party tray app: a GitHub outage must not abort the setup.
+        Write-Host "    LibreScroll install failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Ok 'apps/librescoll/configure.ps1 not found - skipping'
+}
+
 Write-Host ''
 Write-Host 'Done. Open a new PowerShell window, then try: z ..' -ForegroundColor Green
 Write-Host 'git push will use your gh login (no username prompt).' -ForegroundColor Green
@@ -1196,5 +1232,5 @@ Write-Host 'Starship is the prompt in new PowerShell and cmd windows.' -Foregrou
 Write-Host 'Dark Mode is on for apps and the system.' -ForegroundColor Green
 Write-Host 'Wheel diagnostics: .\apps\mouse\mouse.ps1 diagnose (fix/restore are opt-in).' -ForegroundColor Green
 if (-not $SkipShutdownHook) {
-    Write-Host 'Shutdown cleanup is registered: Firefox/Vicinae/Atuin/Pear Desktop back up to acer-ubuntu and local sign-ins (GitHub, Tailscale, Pear Desktop, Firefox) are cleared on shutdown/logoff.' -ForegroundColor Green
+    Write-Host 'Shutdown cleanup is registered: Firefox/Vicinae/Atuin/Pear Desktop/OpenCode back up to acer-ubuntu and local sign-ins (GitHub, Tailscale, Pear Desktop, OpenCode, Firefox) are cleared on shutdown/logoff.' -ForegroundColor Green
 }
