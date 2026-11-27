@@ -78,7 +78,7 @@ if ((Get-Command starship -ErrorAction SilentlyContinue) -and
 # skoop-cleanup: short command for the shutdown backup. Uploads everything,
 # verifies it, then clears local sign-ins. -BackupOnly uploads without wiping.
 function skoop-cleanup {
-    param([switch]$BackupOnly)
+    param([switch]$BackupOnly, [switch]$DryRun)
     $roots = @()
     if ($env:SKOOP_REPO) { $roots += $env:SKOOP_REPO }
     $roots += (Join-Path $env:USERPROFILE 'repos\skoopub')
@@ -97,8 +97,10 @@ function skoop-cleanup {
         $userFile = Join-Path $env:LOCALAPPDATA 'skoop\backup-user'
         if (Test-Path -LiteralPath $userFile) { $user = (Get-Content -Raw -LiteralPath $userFile).Trim() }
     }
-    $cleanupArgs = @()
-    if ($user) { $cleanupArgs += @('-User', $user) }
-    if ($BackupOnly) { $cleanupArgs += '-BackupOnly' }
+    # Hashtable splat: an array would pass "-User" as a positional value.
+    $cleanupArgs = @{}
+    if ($user) { $cleanupArgs.User = $user }
+    if ($BackupOnly) { $cleanupArgs.BackupOnly = $true }
+    if ($DryRun) { $cleanupArgs.DryRun = $true }
     & $cleanup @cleanupArgs
 }
