@@ -1,15 +1,16 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Restore the latest Firefox, Vicinae, Atuin, Pear Desktop and/or OpenCode snapshot from acer-ubuntu onto a fresh machine.
+    Restore the latest Firefox, Vicinae, Atuin, Pear Desktop, OpenCode and/or SSH key snapshot from acer-ubuntu onto a fresh machine.
 
 .DESCRIPTION
     Companion to core/cleanup-before-shutdown.ps1. The backup keeps one folder per
     app on the tailnet host (~/skoop-backups/firefox/<timestamp>/firefox,
     ~/skoop-backups/vicinae/<timestamp>/vicinae,
     ~/skoop-backups/atuin/<timestamp>/atuin,
-    ~/skoop-backups/pear/<timestamp>/pear and
-    ~/skoop-backups/opencode/<timestamp>/opencode); this script picks the newest
+    ~/skoop-backups/pear/<timestamp>/pear,
+    ~/skoop-backups/opencode/<timestamp>/opencode and
+    ~/skoop-backups/ssh/<timestamp>/ssh); this script picks the newest
     timestamp for each app independently, downloads it with scp and merges it into
     place:
 
@@ -38,6 +39,9 @@
         integrations stay signed in. Legacy v1 `auth.json` files are copied back
         too. The CLI must be installed; run the restore after the app phase or
         install it first.
+      - SSH: private/public keys and the client config from ~/.ssh are merged
+        back (existing files get a timestamped .bak unless -NoBackup). Protect
+        the restored private key; never leave it on a public/shared PC.
 
     Nothing is uploaded or changed on the remote host. -List prints the newest
     snapshot for each app, -Stamp pins all apps to one timestamp, -Only narrows
@@ -68,12 +72,15 @@
 .PARAMETER OpenCodeRemotePath
     OpenCode snapshot parent on the remote host (default 'skoop-backups/opencode').
 
+.PARAMETER SshRemotePath
+    SSH key snapshot parent on the remote host (default 'skoop-backups/ssh').
+
 .PARAMETER Stamp
     Use this timestamp for all apps instead of each app's latest. Fails if a
     requested app has no snapshot with that timestamp.
 
 .PARAMETER Only
-    Restrict the restore to firefox, vicinae, atuin, pear and/or opencode
+    Restrict the restore to firefox, vicinae, atuin, pear, opencode and/or ssh
     (default: all).
 
 .PARAMETER List
@@ -122,9 +129,10 @@ param(
     [string] $AtuinRemotePath = 'skoop-backups/atuin',
     [string] $PearRemotePath = 'skoop-backups/pear',
     [string] $OpenCodeRemotePath = 'skoop-backups/opencode',
+    [string] $SshRemotePath = 'skoop-backups/ssh',
     [string] $Stamp,
-    [ValidateSet('firefox', 'vicinae', 'atuin', 'pear', 'opencode')]
-    [string[]] $Only = @('firefox', 'vicinae', 'atuin', 'pear', 'opencode'),
+    [ValidateSet('firefox', 'vicinae', 'atuin', 'pear', 'opencode', 'ssh')]
+    [string[]] $Only = @('firefox', 'vicinae', 'atuin', 'pear', 'opencode', 'ssh'),
     [switch] $List,
     [switch] $DryRun,
     [switch] $NoBackup,
@@ -236,6 +244,36 @@ function Save-Snapshot {
     if ($LASTEXITCODE -ne 0) {
         throw "scp download failed for $RemoteFolder"
     }
+}
+
+function Restore-Ssh {
+    param([string] $StageRoot, [string] $TheStamp)
+
+    $srcRoot = Join-Path $StageRoot 'ssh'
+    if (-not (Test-Path -LiteralPath $srcRoot)) {
+        throw 'Downloaded snapshot has no ssh folder; cannot restore SSH keys.'
+    }
+    if ($DryRun) {
+        Write-Log 'DRYRUN would restore SSH keys to ~/.ssh'
+        return
+    }
+    $sshDir = Join-Path $env:USERPROFILE '.ssh'
+    New-Item -ItemType Directory -Force -Path $sshDir | Out-Null
+    $files = @(Get-ChildItem -LiteralPath $srcRoot -File -ErrorAction SilentlyContinue)
+    if ($files.Count -eq 0) {
+        Write-Warn 'SSH snapshot is empty; nothing restored.'
+        return
+    }
+    foreach ($file in $files) {
+        $target = Join-Path $sshDir $file.Name
+        if ((Test-Path -LiteralPath $target) -and -not $NoBackup) {
+            $backup = '{0}.bak.{1}' -f $target, (Get-Date -Format 'yyyyMMdd-HHmmss')
+            Copy-Item -LiteralPath $target -Destination $backup -Force
+        }
+        Copy-Item -LiteralPath $file.FullName -Destination $target -Force
+        Write-Log ("restore ssh/" + $file.Name + " -> " + $target)
+    }
+    Write-Warn 'Private SSH key restored - keep it secret; never leave it on a public PC.'
 }
 
 function Restore-Firefox {
@@ -566,18 +604,21 @@ if ($Stamp) {
     $atStamps = @($Stamp)
     $peStamps = @($Stamp)
     $ocStamps = @($Stamp)
+    $ssStamps = @($Stamp)
 } else {
     $ffStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $FirefoxRemotePath)
     $vcStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $VicinaeRemotePath)
     $atStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $AtuinRemotePath)
     $peStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $PearRemotePath)
     $ocStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $OpenCodeRemotePath)
+    $ssStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $SshRemotePath)
 }
 $ffStamp = if ($ffStamps.Count) { $ffStamps[0] } else { $null }
 $vcStamp = if ($vcStamps.Count) { $vcStamps[0] } else { $null }
 $atStamp = if ($atStamps.Count) { $atStamps[0] } else { $null }
 $peStamp = if ($peStamps.Count) { $peStamps[0] } else { $null }
 $ocStamp = if ($ocStamps.Count) { $ocStamps[0] } else { $null }
+$ssStamp = if ($ssStamps.Count) { $ssStamps[0] } else { $null }
 
 if ($List) {
     Write-Log ("Firefox        latest: " + $(if ($ffStamp) { $ffStamp } else { '(none)' }) + "  (" + $FirefoxRemotePath + ")")
@@ -585,7 +626,8 @@ if ($List) {
     Write-Log ("Atuin          latest: " + $(if ($atStamp) { $atStamp } else { '(none)' }) + "  (" + $AtuinRemotePath + ")")
     Write-Log ("Pear Desktop   latest: " + $(if ($peStamp) { $peStamp } else { '(none)' }) + "  (" + $PearRemotePath + ")")
     Write-Log ("OpenCode       latest: " + $(if ($ocStamp) { $ocStamp } else { '(none)' }) + "  (" + $OpenCodeRemotePath + ")")
-    if (-not $ffStamp -and -not $vcStamp -and -not $atStamp -and -not $peStamp -and -not $ocStamp) { Write-Warn 'No snapshots found; check -TargetHost / -User / remote paths.' }
+    Write-Log ("SSH key        latest: " + $(if ($ssStamp) { $ssStamp } else { '(none)' }) + "  (" + $SshRemotePath + ")")
+    if (-not $ffStamp -and -not $vcStamp -and -not $atStamp -and -not $peStamp -and -not $ocStamp -and -not $ssStamp) { Write-Warn 'No snapshots found; check -TargetHost / -User / remote paths.' }
     return
 }
 
@@ -594,6 +636,7 @@ $doVicinae = $Only -contains 'vicinae'
 $doAtuin = $Only -contains 'atuin'
 $doPear = $Only -contains 'pear'
 $doOpenCode = $Only -contains 'opencode'
+$doSsh = $Only -contains 'ssh'
 if ($doFirefox -and -not $ffStamp) {
     Write-Warn 'No Firefox snapshot found; skipping Firefox.'
     $doFirefox = $false
@@ -614,7 +657,11 @@ if ($doOpenCode -and -not $ocStamp) {
     Write-Warn 'No OpenCode snapshot found; skipping OpenCode.'
     $doOpenCode = $false
 }
-if (-not $doFirefox -and -not $doVicinae -and -not $doAtuin -and -not $doPear -and -not $doOpenCode) {
+if ($doSsh -and -not $ssStamp) {
+    Write-Warn 'No SSH key snapshot found; skipping SSH.'
+    $doSsh = $false
+}
+if (-not $doFirefox -and -not $doVicinae -and -not $doAtuin -and -not $doPear -and -not $doOpenCode -and -not $doSsh) {
     throw 'Nothing to restore. Run -List to see the available snapshots.'
 }
 
@@ -635,7 +682,7 @@ if ($doPear -and $pearRunning.Count -gt 0 -and -not $DryRun) {
     Start-Sleep -Seconds 2
 }
 
-$restoreStamp = @($ffStamp, $vcStamp, $atStamp, $peStamp, $ocStamp) | Where-Object { $_ } | Select-Object -First 1
+$restoreStamp = @($ffStamp, $vcStamp, $atStamp, $peStamp, $ocStamp, $ssStamp) | Where-Object { $_ } | Select-Object -First 1
 $stage = Join-Path $restoreRoot $restoreStamp
 if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $stage | Out-Null }
 
@@ -691,6 +738,17 @@ try {
             throw 'Downloaded OpenCode snapshot is empty.'
         }
         Restore-OpenCode -StageRoot $stage -TheStamp $ocStamp
+    }
+
+    if ($doSsh) {
+        $remoteFolder = Get-SnapshotRemotePath -BasePath $SshRemotePath -FolderName 'ssh' -TheStamp $ssStamp
+        Write-Log ("restoring SSH key from " + $peer + ':' + $remoteFolder)
+        if (-not $DryRun) { Save-Snapshot -RemoteFolder $remoteFolder -StageRoot $stage -FolderName 'ssh' }
+        $ssFiles = if ($DryRun) { @() } else { @(Get-ChildItem -LiteralPath (Join-Path $stage 'ssh') -Recurse -File -ErrorAction SilentlyContinue) }
+        if (-not $DryRun -and $ssFiles.Count -lt 1) {
+            throw 'Downloaded SSH snapshot is empty.'
+        }
+        Restore-Ssh -StageRoot $stage -TheStamp $ssStamp
     }
 
     if ($DryRun) {

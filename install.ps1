@@ -123,6 +123,9 @@
       an idempotent fallback; Firefox is closed and relaunched around the copy and
       Atuin warns you to close other Atuin shells. OpenCode config/state and
       credentials are restored at the end of the install, once its CLI exists.
+      The SSH key from ~/.ssh is also restored once at the end of the install
+      (core/restore-backup.ps1 -Only ssh) so the backup made by the shutdown
+      cleanup comes back on a fresh machine; -SkipSshRestore opts out.
       Non-fatal; supply -BackupUser or SKOOP_BACKUP_USER when running unattended.
       -SkipFirefoxRestore / -SkipAtuinRestore opt out (also
       SKOOP_NO_FIREFOX_RESTORE=1 / SKOOP_NO_ATUIN_RESTORE=1);
@@ -207,6 +210,10 @@
 .PARAMETER SkipMouseDpi
     Do not touch the mouse DPI (also $env:SKOOP_NO_MOUSE_DPI=1).
 
+.PARAMETER SkipSshRestore
+    Do not restore the SSH key from acer-ubuntu (also
+    $env:SKOOP_NO_SSH_RESTORE=1).
+
 .PARAMETER ForceFirefoxRestore
     Repeat the one-time Firefox profile restore from the acer-ubuntu backup even
     when the marker exists (also $env:SKOOP_FORCE_FIREFOX_RESTORE=1). Firefox is
@@ -263,6 +270,7 @@ param(
     [switch]$EssentialsOnly,
     [string]$BackupUser = "$env:SKOOP_BACKUP_USER",
     [switch]$SkipShutdownHook,
+    [switch]$SkipSshRestore,
     # Skip the one-time wallpaper collection clone (also SKOOP_NO_WALLPAPERS=1).
     [switch]$NoWallpapers,
     # Optional wallpaper file; when empty a random image from the cloned collection is used.
@@ -277,6 +285,7 @@ if ($env:SKOOP_SKIP_HERDR -eq '1') { $SkipHerdrConnect = $true }
 if ($env:SKOOP_ESSENTIALS_ONLY -eq '1') { $EssentialsOnly = $true }
 if ($env:SKOOP_NO_AUTO_HERDR -eq '1') { $NoAutoHerdr = $true }
 if ($env:SKOOP_NO_MOUSE_DPI -eq '1') { $SkipMouseDpi = $true }
+if ($env:SKOOP_NO_SSH_RESTORE -eq '1') { $SkipSshRestore = $true }
 if ($env:SKOOP_MOUSE_DPI -and $env:SKOOP_MOUSE_DPI -match '^\d+$') { $MouseDpi = [int]$env:SKOOP_MOUSE_DPI }
 if ($env:SKOOP_FORCE_FIREFOX_RESTORE -eq '1') { $ForceFirefoxRestore = $true }
 if ($env:SKOOP_FORCE_ATUIN_RESTORE -eq '1') { $ForceAtuinRestore = $true }
@@ -305,8 +314,8 @@ Usage:
   .\install.ps1 -SkipHerdrConnect        # configure only
   irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
-Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -ForceFirefoxRestore -ForceAtuinRestore -SkipFirefoxRestore -SkipAtuinRestore -EssentialsOnly -BackupUser -SkipShutdownHook -Help
-Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_FORCE_FIREFOX_RESTORE, SKOOP_FORCE_ATUIN_RESTORE, SKOOP_NO_FIREFOX_RESTORE, SKOOP_NO_ATUIN_RESTORE, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL
+Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -ForceFirefoxRestore -ForceAtuinRestore -SkipFirefoxRestore -SkipAtuinRestore -SkipSshRestore -EssentialsOnly -BackupUser -SkipShutdownHook -Help
+Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_FORCE_FIREFOX_RESTORE, SKOOP_FORCE_ATUIN_RESTORE, SKOOP_NO_FIREFOX_RESTORE, SKOOP_NO_ATUIN_RESTORE, SKOOP_NO_SSH_RESTORE, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL
 '@
     return
 }
@@ -337,6 +346,7 @@ function Get-SkoopReLaunchArgs {
     if ($ForceAtuinRestore) { $list += '-ForceAtuinRestore' }
     if ($SkipFirefoxRestore) { $list += '-SkipFirefoxRestore' }
     if ($SkipAtuinRestore) { $list += '-SkipAtuinRestore' }
+    if ($SkipSshRestore) { $list += '-SkipSshRestore' }
     if ($SkipShutdownHook) { $list += '-SkipShutdownHook' }
     if ($NoWallpapers) { $list += '-NoWallpapers' }
     if ($NoWallpaper) { $list += '-NoWallpaper' }
@@ -486,6 +496,44 @@ function Enable-TaskManager {
             # Best-effort: a locked key should not abort the rest of the setup.
             Write-Host "    Could not update $path - $($_.Exception.Message)" -ForegroundColor Yellow
         }
+    }
+}
+
+function Get-WindowsActivationStatus {
+    # Read-only check of whether Windows is activated. Uses the SoftwareLicensingProduct
+    # WMI/CIM class (no external downloads, no activation performed). A non-activated
+    # machine is reported in yellow so it can be fixed with a real product key; this
+    # never attempts to bypass licensing.
+    Write-Step 'Checking Windows activation status'
+    try {
+        $lic = Get-CimInstance -ClassName SoftwareLicensingProduct -Filter "Name LIKE 'Windows%'" -ErrorAction Stop |
+            Where-Object { $_.PartialProductKey } |
+            Select-Object -First 1
+        if (-not $lic) {
+            Write-Ok 'could not determine Windows activation status - skipping'
+            return
+        }
+        $status = [int]$lic.LicenseStatus
+        $desc = switch ($status) {
+            0 { 'not activated (unlicensed)' }
+            1 { 'activated (licensed)' }
+            2 { 'in out-of-box grace period' }
+            3 { 'in out-of-tolerance grace period' }
+            4 { 'in non-genuine grace period' }
+            5 { 'in notification state (not activated)' }
+            6 { 'in extended grace period' }
+            default { "unknown status ($status)" }
+        }
+        if ($status -eq 1) {
+            Write-Ok "Windows is $desc"
+        } else {
+            Write-Host "    Windows is $desc - activate via Settings -> Activation with a valid product key." -ForegroundColor Yellow
+        }
+        if ($lic.PartialProductKey) {
+            Write-Ok "installed product key ending in: $($lic.PartialProductKey)"
+        }
+    } catch {
+        Write-Host "    Could not check Windows activation (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
@@ -1027,6 +1075,8 @@ if (-not (Test-SkoopProfileLoads)) {
 # --- 3. Clear the Task Manager policy ---------------------------------------
 Enable-TaskManager
 
+# --- 3b. Check Windows activation status (read-only) -------------------------
+Get-WindowsActivationStatus
 # --- 4. Install Scoop if its shims are missing -------------------------------
 $shimDir = Find-ScoopShims
 if (-not $shimDir) {
@@ -1331,6 +1381,29 @@ if (Test-Path $tailscaleConfig) {
     }
 } else {
     Write-Ok 'apps/tailscale/configure.ps1 not found - skipping OpenCode restore'
+}
+
+# --- 20b-ssh. Restore the SSH key backed up by the shutdown cleanup ----------
+# The private key is uploaded to acer-ubuntu only after the shutdown backup is
+# verified. Restore it once on a fresh machine; the marker makes re-runs a no-op.
+$sshRestoreScript = Join-Path $repoRoot 'core\restore-backup.ps1'
+$sshRestoreMarker = Join-Path $env:LOCALAPPDATA 'skoop\ssh-restore.done'
+if ($SkipSshRestore -or $env:SKOOP_NO_SSH_RESTORE -eq '1') {
+    Write-Ok 'SSH key restore skipped (-SkipSshRestore)'
+} elseif (-not (Test-Path $sshRestoreScript)) {
+    Write-Ok 'core/restore-backup.ps1 not found - skipping SSH key restore'
+} elseif (Test-Path $sshRestoreMarker) {
+    Write-Ok 'SSH key already restored (marker present)'
+} else {
+    Write-Step 'Restoring the SSH key from the backup'
+    try {
+        & $sshRestoreScript -Only ssh -User $BackupUser -NoRestart
+        $markerDir = Split-Path -Parent $sshRestoreMarker
+        New-Item -ItemType Directory -Force -Path $markerDir | Out-Null
+        Set-Content -LiteralPath $sshRestoreMarker -Value (Get-Date -Format o) -Encoding UTF8
+    } catch {
+        Write-Host "    SSH key restore failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
 }
 
 # --- 20c. Retry the Firefox and Atuin restores (idempotent fallback) --------

@@ -17,7 +17,9 @@
       - gh auth logout for github.com (plus the hosts.yml file as a fallback)
       - git's GitHub credential helper/username and ~/.git-credentials
       - GitHub entries in Windows Credential Manager
-      - SSH keys (private + public) under ~/.ssh, known_hosts and temporary Herdr keys
+      - SSH keys (private + public) under ~/.ssh and temporary Herdr keys, but only
+      after a verified remote snapshot of the key (unless -NoSsh); known_hosts is
+      always removed
       - saved Herdr machines (herdr machine remove for every profile)
       - OpenCode credentials (opencode auth logout + auth.json fallback)
       - Tailscale login (tailscale logout), so the PC is no longer on the tailnet
@@ -28,8 +30,9 @@
     lands in ~/<RemotePath>/<timestamp>/firefox, Vicinae in
     ~/<VicinaeRemotePath>/<timestamp>/vicinae, Atuin in
     ~/<AtuinRemotePath>/<timestamp>/atuin, Pear Desktop in
-    ~/<PearRemotePath>/<timestamp>/pear and OpenCode in
-    ~/<OpenCodeRemotePath>/<timestamp>/opencode on acer-ubuntu, so
+    ~/<PearRemotePath>/<timestamp>/pear, OpenCode in
+    ~/<OpenCodeRemotePath>/<timestamp>/opencode and the SSH key in
+    ~/<SshRemotePath>/<timestamp>/ssh on acer-ubuntu, so
     restore-backup.ps1 can pick the latest of each app independently. Nothing is
     deleted until each remote copy has been verified; if verification fails, the
     staging copy is kept and the script stops. Close active Atuin shells before
@@ -84,6 +87,14 @@
     Leave OpenCode alone: skip both the snapshot and the credential wipe, so the
     stored integration login stays on this machine.
 
+.PARAMETER SshRemotePath
+    SSH key destination folder relative to the remote home (default
+    'skoop-backups/ssh'). The private key is uploaded only after a successful,
+    verified copy; -NoSsh skips both the snapshot and the local key wipe.
+
+.PARAMETER NoSsh
+    Leave ~/.ssh alone: skip both the SSH key snapshot and the local wipe.
+
 .PARAMETER StagingDir
     Local folder used to assemble the backup before upload. Defaults to
     %LOCALAPPDATA%\skoop\backup and is removed after a verified upload.
@@ -125,12 +136,14 @@ param(
     [string] $AtuinHome = (Join-Path $env:USERPROFILE '.atuin'),
     [string] $PearRemotePath = 'skoop-backups/pear',
     [string] $OpenCodeRemotePath = 'skoop-backups/opencode',
+    [string] $SshRemotePath = 'skoop-backups/ssh',
     [string] $StagingDir,
     [string] $LogPath,
     [switch] $NoVicinae,
     [switch] $NoAtuin,
     [switch] $NoPear,
     [switch] $NoOpenCode,
+    [switch] $NoSsh,
     [switch] $SkipBackup,
     [switch] $KeepFirefoxLogins,
     [switch] $BackupOnly,
@@ -530,6 +543,30 @@ function Copy-OpenCodeData {
     }
 
     return $copied
+}
+
+function Copy-SshKeys {
+    param([string] $Destination)
+
+    $sshDir = Join-Path $env:USERPROFILE '.ssh'
+    if (-not (Test-Path -LiteralPath $sshDir)) {
+        Write-Log '~/.ssh not found - skipping SSH key snapshot'
+        return $false
+    }
+    # Private keys, their .pub counterparts and the client config. known_hosts
+    # is deliberately excluded: it is host metadata, not reusable key material.
+    $keys = @(Get-ChildItem -LiteralPath $sshDir -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '(?i)(^id_|\.pub$|^config$|^key)' })
+    if ($keys.Count -eq 0) {
+        Write-Log 'no SSH keys found in ~/.ssh - skipping snapshot'
+        return $false
+    }
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    foreach ($key in $keys) {
+        Write-Log ("staging ssh/" + $key.Name)
+        Copy-Item -LiteralPath $key.FullName -Destination (Join-Path $Destination $key.Name) -Force
+    }
+    return $true
 }
 
 function Invoke-RemoteBackup {
@@ -932,6 +969,14 @@ if (-not $SkipBackup) {
                     -RemotePath $OpenCodeRemotePath -RequiredPaths $required -MinFiles 2
             }
         }
+        if (-not $NoSsh) {
+            $sshRoot = Join-Path $stagingRoot 'ssh'
+            if (Copy-SshKeys -Destination $sshRoot) {
+                $remoteBackups += Invoke-RemoteBackup -Source $sshRoot -Stamp $stamp -SshUser $sshUser `
+                    -RemotePath $SshRemotePath -RequiredPaths @() -MinFiles 1
+            }
+        }
+
         Write-Log 'remote backups verified - auth cleanup may proceed'
         Remove-Path $stagingRoot -Recurse
     }
@@ -941,7 +986,7 @@ if ($BackupOnly) {
     Write-Log 'BackupOnly: skipping all auth removal'
 } else {
     Remove-GitHubAuth
-    Remove-SshKeys
+    if (-not $NoSsh) { Remove-SshKeys }
     Remove-HerdrMachines
     if (-not $NoOpenCode) { Remove-OpenCodeAuth }
     Remove-TailscaleAuth
