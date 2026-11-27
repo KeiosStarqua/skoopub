@@ -109,12 +109,13 @@
       of a Logitech HID++ mouse to 1200 via `mouse.ps1 dpi` (hidapi, no G H UB
       config editing); -MouseDpi changes the value, -SkipMouseDpi opts out. The
       correction hook remains opt-in: run `mouse.ps1 fix` / `restore` yourself.
-    - Installs and starts LibreScroll (inertial middle-button scrolling) from its
-      GitHub release via apps/librescoll/configure.ps1: the SHA-256 digest is
-      verified before extracting to %LOCALAPPDATA%\skoop\librescoll, a per-user
-      Startup shortcut is written, and the tray app is launched. LibreScroll
-      blocks physical wheel events while active, so pause it (tray -> Pause)
-      before running skoopub-mouse diagnostics; failures are non-fatal.
+    - Installs and starts drag-to-scroll via apps/drag-scroll/configure.ps1
+      (AutoHotkey v2 port of Mikhail22/drag-scroll--autohotkey): hold the RIGHT
+      mouse button and move the mouse to scroll. The script is deployed to
+      %LOCALAPPDATA%\skoop\drag-scroll, installed with Scoop when AutoHotkey is
+      missing, given a per-user Startup shortcut and started on every run.
+      Unlike LibreScroll it does not block physical wheel events, so mouse
+      diagnostics are unaffected; failures are non-fatal.
     - Creates ~/repos and clones skoopub into ~/repos\skoopub when it is missing.
       An existing directory is never overwritten, so this is safe to re-run.
     - Installs Rio before Herdr in phase 1, then opens Rio in ~/repos with Herdr
@@ -1271,7 +1272,7 @@ if (-not $repoRoot)
         'apps/rio/configure.ps1', 'apps/komorebi/configure.ps1',
         'apps/yasb/configure.ps1', 'apps/yasb/setup-wallpapers.ps1', 'apps/nushell/setup.ps1',
         'apps/mouse/configure.ps1', 'apps/mouse/mouse.ps1',
-        'apps/librescoll/configure.ps1',
+        'apps/drag-scroll/configure.ps1', 'apps/drag-scroll/mouse-scroll.ahk',
         'apps/starship/configure.ps1', 'apps/starship/starship.toml',
         'apps/marimo/configure.ps1', 'apps/marimo/config.toml',
         'apps/zed/settings.json', 'apps/zed/keymap.json', 'apps/zed/tasks.json',
@@ -1311,7 +1312,7 @@ $starshipConfig  = Join-Path $repoRoot 'apps\starship\configure.ps1'
 $marimoConfig    = Join-Path $repoRoot 'apps\marimo\configure.ps1'
 $darkMode        = Join-Path $repoRoot 'core\set-dark-mode.ps1'
 $mouseConfig     = Join-Path $repoRoot 'apps\mouse\configure.ps1'
-$librescollConfig = Join-Path $repoRoot 'apps\librescoll\configure.ps1'
+$dragScrollConfig = Join-Path $repoRoot 'apps\drag-scroll\configure.ps1'
 # Firefox and Atuin are restored as soon as Tailscale connects in phase 1, then
 # retried at the end of the run as an idempotent fallback (marker files make an
 # earlier success a no-op). Both apps are installed in later phases, but this only
@@ -1934,21 +1935,21 @@ if (Test-Path $mouseConfig)
     Write-Ok 'apps/mouse/configure.ps1 not found - skipping'
 }
 
-# --- 23. LibreScroll (inertial middle-button scrolling) ----------------------
-if (Test-Path $librescollConfig)
+# --- 23. Drag-to-scroll (AutoHotkey, replaces LibreScroll) --------------------
+if (Test-Path $dragScrollConfig)
 {
-    Write-Step 'Installing and starting LibreScroll inertial scrolling'
+    Write-Step 'Installing and starting AutoHotkey drag-to-scroll'
     try
     {
-        & $librescollConfig
+        & $dragScrollConfig
     } catch
     {
-        # Third-party tray app: a GitHub outage must not abort the setup.
-        Write-Host "    LibreScroll install failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        # Cosmetic input helper: never let it abort the bootstrap.
+        Write-Host "    Drag-scroll install failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
 } else
 {
-    Write-Ok 'apps/librescoll/configure.ps1 not found - skipping'
+    Write-Ok 'apps/drag-scroll/configure.ps1 not found - skipping'
 }
 
 Write-Host ''
