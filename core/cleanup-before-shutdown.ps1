@@ -1,15 +1,17 @@
 <#
 .SYNOPSIS
-    Back up Firefox profiles, Vicinae and Atuin data to acer-ubuntu over Tailscale
-    SSH, then remove local sign-ins (GitHub, Tailscale, Pear Desktop, Firefox).
+    Back up Firefox profiles, Vicinae, Atuin and Pear Desktop data to acer-ubuntu
+    over Tailscale SSH, then remove local sign-ins (GitHub, Tailscale, Pear
+    Desktop, Firefox).
 
 .DESCRIPTION
     Intended for public/shared PCs: run it before turning the machine off to leave
     no signed-in accounts behind. It copies every Firefox profile found in
-    profiles.ini, Vicinae's config/data/state folders and Atuin's config + data
-    (history/records/meta databases and the encryption key) into local staging
-    folders, uploads them to the tailnet machine acer-ubuntu with scp, verifies the
-    remote copies over ssh, and only then removes local credentials:
+    profiles.ini, Vicinae's config/data/state folders, Atuin's config + data
+    (history/records/meta databases and the encryption key) and Pear Desktop's
+    signed-in userData into local staging folders, uploads them to the tailnet
+    machine acer-ubuntu with scp, verifies the remote copies over ssh, and only
+    then removes local credentials:
 
       - gh auth logout for github.com (plus the hosts.yml file as a fallback)
       - git's GitHub credential helper/username and ~/.git-credentials
@@ -18,13 +20,14 @@
       - saved Herdr machines (herdr machine remove for every profile)
       - OpenCode credentials (opencode auth logout + auth.json fallback)
       - Tailscale login (tailscale logout), so the PC is no longer on the tailnet
-      - Pear Desktop / YouTube Music user data (saved Google login and cache)
+      - Pear Desktop / YouTube Music user data (backed up first, then removed)
       - Firefox logins.json / key4.db from the backed-up profiles
 
     The SSH user is asked for at runtime (pass -User to skip the prompt). Firefox
     lands in ~/<RemotePath>/<timestamp>/firefox, Vicinae in
     ~/<VicinaeRemotePath>/<timestamp>/vicinae and Atuin in
-    ~/<AtuinRemotePath>/<timestamp>/atuin on acer-ubuntu, so restore-backup.ps1 can
+    ~/<AtuinRemotePath>/<timestamp>/atuin, and Pear Desktop in
+    ~/<PearRemotePath>/<timestamp>/pear on acer-ubuntu, so restore-backup.ps1 can
     pick the latest of each app independently. Nothing is deleted until each remote
     copy has been verified; if verification fails, the staging copy is kept and the
     script stops. Close active Atuin shells before running where possible: SQLite
@@ -61,6 +64,14 @@
 
 .PARAMETER NoAtuin
     Skip the Atuin snapshot.
+
+.PARAMETER PearRemotePath
+    Pear Desktop destination folder relative to the remote home (default
+    'skoop-backups/pear').
+
+.PARAMETER NoPear
+    Leave Pear Desktop alone: skip both its snapshot and the sign-out wipe, so the
+    saved Google login stays on this machine.
 
 .PARAMETER StagingDir
     Local folder used to assemble the backup before upload. Defaults to
@@ -101,10 +112,12 @@ param(
     [string] $VicinaeDataDir = (Join-Path $env:LOCALAPPDATA 'vicinae'),
     [string] $AtuinRemotePath = 'skoop-backups/atuin',
     [string] $AtuinHome = (Join-Path $env:USERPROFILE '.atuin'),
+    [string] $PearRemotePath = 'skoop-backups/pear',
     [string] $StagingDir,
     [string] $LogPath,
     [switch] $NoVicinae,
     [switch] $NoAtuin,
+    [switch] $NoPear,
     [switch] $SkipBackup,
     [switch] $KeepFirefoxLogins,
     [switch] $BackupOnly,
@@ -282,6 +295,86 @@ function Copy-AtuinData {
         return $false
     }
     return $true
+}
+
+function Get-PearDesktopDataRoots {
+    # Pear Desktop is an Electron app. Its signed-in userData (Network\Cookies,
+    # Local State, storage) lives under %APPDATA%; the %LOCALAPPDATA% folders are
+    # logs/caches. Both scopes and both product names are handled so a rename
+    # (YouTube Music -> Pear Desktop) still gets captured.
+    $roots = @()
+    foreach ($scope in @(
+        @{ Name = 'roaming'; Path = $env:APPDATA },
+        @{ Name = 'local'; Path = $env:LOCALAPPDATA }
+    )) {
+        if (-not $scope.Path) { continue }
+        foreach ($app in @('YouTube Music', 'Pear Desktop')) {
+            $path = Join-Path $scope.Path $app
+            if (Test-Path -LiteralPath $path) {
+                $roots += [pscustomobject]@{ Scope = $scope.Name; App = $app; Path = $path }
+            }
+        }
+    }
+    return @($roots)
+}
+
+function Copy-PearDesktopData {
+    param([string] $Destination)
+
+    $roots = @(Get-PearDesktopDataRoots)
+    if ($roots.Count -eq 0) {
+        Write-Log 'Pear Desktop user data not found, skipping'
+        return $false
+    }
+
+    # Chromium keeps its cookie database locked while the app runs, and the caller
+    # wipes this data afterwards, so stop it before copying.
+    $running = @(Get-Process -Name 'YouTube Music', 'Pear Desktop' -ErrorAction SilentlyContinue)
+    if ($running.Count -gt 0) {
+        Write-Log 'stopping Pear Desktop so its cookie database can be backed up'
+        $running | Stop-Process -Force
+        Start-Sleep -Seconds 2
+    }
+
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+
+    # Chromium caches are disposable and dominate the folder size; the login lives
+    # in Network\Cookies, Local State and the storage folders, which are kept.
+    $excludeDirs = @('Cache', 'Code Cache', 'GPUCache', 'GPUPersistentCache',
+        'GrShaderCache', 'ShaderCache', 'DawnGraphiteCache', 'DawnWebGPUCache',
+        'VideoDecodeStats')
+
+    $copied = 0
+    foreach ($root in $roots) {
+        $target = Join-Path (Join-Path $Destination $root.Scope) $root.App
+        Write-Log ("staging pear/" + $root.Scope + "/" + $root.App)
+        if (Get-Command robocopy -ErrorAction SilentlyContinue) {
+            $copyOutput = (& robocopy $root.Path $target /E /COPY:DAT /R:1 /W:1 /XD $excludeDirs /XF lockfile /NFL /NDL /NJH /NP 2>&1 | Out-String)
+            $code = $LASTEXITCODE
+            foreach ($line in (@($copyOutput -split '\r?\n' | Where-Object { $_.Trim() }) | Select-Object -Last 10)) {
+                Write-Log ("robocopy: " + $line.Trim())
+            }
+            if ($code -ge 16) { throw "robocopy failed with code $code for " + $root.Path }
+            if ($code -ge 8) { Write-Log ("warning: robocopy skipped some files in " + $root.Path) }
+        } else {
+            Copy-Item -LiteralPath $root.Path -Destination $target -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        $files = @(Get-ChildItem -LiteralPath $target -Recurse -File -ErrorAction SilentlyContinue)
+        if ($files.Count -lt 1) {
+            Write-Log ("Pear Desktop data at " + $root.Path + " had no files to back up")
+            continue
+        }
+        # A cookie database present at the source must make it into the snapshot;
+        # otherwise the sign-out below would destroy a login we did not save.
+        foreach ($required in @('Network\Cookies', 'Local State')) {
+            if ((Test-Path -LiteralPath (Join-Path $root.Path $required)) -and
+                -not (Test-Path -LiteralPath (Join-Path $target $required))) {
+                throw ("Pear Desktop backup is missing " + $required + " from " + $root.Path + " (is the app still running?)")
+            }
+        }
+        $copied++
+    }
+    return ($copied -gt 0)
 }
 
 function Invoke-RemoteBackup {
@@ -574,15 +667,11 @@ function Remove-TailscaleAuth {
 }
 
 function Remove-PearDesktopData {
-    # Pear Desktop is an Electron app; its YouTube Music userData folder holds the
-    # saved Google login, cookies and cache. No repo-managed config lives there.
-    foreach ($dir in @(
-        (Join-Path $env:APPDATA 'YouTube Music'),
-        (Join-Path $env:LOCALAPPDATA 'YouTube Music'),
-        (Join-Path $env:APPDATA 'Pear Desktop'),
-        (Join-Path $env:LOCALAPPDATA 'Pear Desktop')
-    )) {
-        Remove-Path $dir -Recurse
+    # Pear Desktop is an Electron app; its userData folder holds the saved Google
+    # login (Cookies/Local State), storage and cache. The snapshot is uploaded and
+    # verified before this runs.
+    foreach ($root in @(Get-PearDesktopDataRoots)) {
+        Remove-Path $root.Path -Recurse
     }
 }
 
@@ -610,7 +699,7 @@ if (-not $SkipBackup) {
 
     $stagingRoot = Join-Path $logDir $stamp
     if ($DryRun) {
-        Write-Log 'DRYRUN would stage Firefox + Vicinae + Atuin locally, upload each, verify over ssh, then delete staging'
+        Write-Log 'DRYRUN would stage Firefox + Vicinae + Atuin + Pear Desktop locally, upload each, verify over ssh, then delete staging'
     } else {
         $firefoxRoot = Join-Path $stagingRoot 'firefox'
         New-Item -ItemType Directory -Force -Path $firefoxRoot | Out-Null
@@ -647,6 +736,14 @@ if (-not $SkipBackup) {
                     -RemotePath $AtuinRemotePath -RequiredPaths @('data/history.db') -MinFiles 2
             }
         }
+
+        if (-not $NoPear) {
+            $pearRoot = Join-Path $stagingRoot 'pear'
+            if (Copy-PearDesktopData -Destination $pearRoot) {
+                $remoteBackups += Invoke-RemoteBackup -Source $pearRoot -Stamp $stamp -SshUser $sshUser `
+                    -RemotePath $PearRemotePath -RequiredPaths @() -MinFiles 2
+            }
+        }
         Write-Log 'remote backups verified - auth cleanup may proceed'
         Remove-Path $stagingRoot -Recurse
     }
@@ -660,7 +757,7 @@ if ($BackupOnly) {
     Remove-HerdrMachines
     Remove-OpenCodeAuth
     Remove-TailscaleAuth
-    Remove-PearDesktopData
+    if (-not $NoPear) { Remove-PearDesktopData }
 
     if (-not $KeepFirefoxLogins) {
         foreach ($profile in $profiles) {

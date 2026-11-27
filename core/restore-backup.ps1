@@ -1,13 +1,14 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Restore the latest Firefox, Vicinae and/or Atuin snapshot from acer-ubuntu onto a fresh machine.
+    Restore the latest Firefox, Vicinae, Atuin and/or Pear Desktop snapshot from acer-ubuntu onto a fresh machine.
 
 .DESCRIPTION
     Companion to core/cleanup-before-shutdown.ps1. The backup keeps one folder per
     app on the tailnet host (~/skoop-backups/firefox/<timestamp>/firefox,
-    ~/skoop-backups/vicinae/<timestamp>/vicinae and
-    ~/skoop-backups/atuin/<timestamp>/atuin); this script picks the newest timestamp
+    ~/skoop-backups/vicinae/<timestamp>/vicinae,
+    ~/skoop-backups/atuin/<timestamp>/atuin and
+    ~/skoop-backups/pear/<timestamp>/pear); this script picks the newest timestamp
     for each app independently, downloads it with scp and merges it into place:
 
       - Firefox: profiles.ini, installs.ini and every profile folder in the
@@ -23,6 +24,12 @@
         are removed first so a restored database is not mixed with local journal
         data. Close other shells with active Atuin sessions before using the
         restored history; Atuin is per-shell so there is no service to stop.
+      - Pear Desktop: the snapshotted userData folders are merged back under
+        %APPDATA% (and %LOCALAPPDATA% when that scope was backed up), keeping the
+        saved Google login. A running Pear Desktop / YouTube Music process is
+        stopped first and a stale Chromium lockfile is removed. Cookies are
+        encrypted with Windows DPAPI, so a different Windows user or machine may
+        still ask you to sign in again; the app config and local storage survive.
 
     Nothing is uploaded or changed on the remote host. -List prints the newest
     snapshot for each app, -Stamp pins all apps to one timestamp, -Only narrows
@@ -47,12 +54,15 @@
 .PARAMETER AtuinRemotePath
     Atuin snapshot parent on the remote host (default 'skoop-backups/atuin').
 
+.PARAMETER PearRemotePath
+    Pear Desktop snapshot parent on the remote host (default 'skoop-backups/pear').
+
 .PARAMETER Stamp
     Use this timestamp for all apps instead of each app's latest. Fails if a
     requested app has no snapshot with that timestamp.
 
 .PARAMETER Only
-    Restrict the restore to firefox, vicinae and/or atuin (default: all three).
+    Restrict the restore to firefox, vicinae, atuin and/or pear (default: all).
 
 .PARAMETER List
     Print the newest snapshot timestamp per app and exit.
@@ -61,8 +71,8 @@
     Show what would be downloaded and restored; do not change any local files.
 
 .PARAMETER NoBackup
-    Overwrite profiles.ini / installs.ini, Vicinae folders and Atuin config/data
-    without a .bak copy.
+    Overwrite profiles.ini / installs.ini, Vicinae folders, Atuin config/data and
+    Pear Desktop userData without a .bak copy.
 
 .PARAMETER NoRestart
     Do not relaunch vicinae-server after restoring (it is stopped first if running).
@@ -84,6 +94,9 @@
 
 .EXAMPLE
     .\core\restore-backup.ps1 -User keios -Only atuin
+
+.EXAMPLE
+    .\core\restore-backup.ps1 -User keios -Only pear
 #>
 [CmdletBinding()]
 param(
@@ -92,9 +105,10 @@ param(
     [string] $FirefoxRemotePath = 'skoop-backups/firefox',
     [string] $VicinaeRemotePath = 'skoop-backups/vicinae',
     [string] $AtuinRemotePath = 'skoop-backups/atuin',
+    [string] $PearRemotePath = 'skoop-backups/pear',
     [string] $Stamp,
-    [ValidateSet('firefox', 'vicinae', 'atuin')]
-    [string[]] $Only = @('firefox', 'vicinae', 'atuin'),
+    [ValidateSet('firefox', 'vicinae', 'atuin', 'pear')]
+    [string[]] $Only = @('firefox', 'vicinae', 'atuin', 'pear'),
     [switch] $List,
     [switch] $DryRun,
     [switch] $NoBackup,
@@ -325,6 +339,64 @@ function Restore-Atuin {
     Write-Warn 'Close other shells with active Atuin sessions before using the restored history.'
 }
 
+function Get-PearDesktopTargets {
+    # Same scope/product matrix as cleanup-before-shutdown.ps1, so each staged
+    # folder goes back to the directory it came from.
+    $targets = @()
+    foreach ($scope in @(
+        @{ Name = 'roaming'; Path = $env:APPDATA },
+        @{ Name = 'local'; Path = $env:LOCALAPPDATA }
+    )) {
+        if (-not $scope.Path) { continue }
+        foreach ($app in @('YouTube Music', 'Pear Desktop')) {
+            $targets += [pscustomobject]@{
+                Scope = $scope.Name
+                App   = $app
+                Path  = (Join-Path $scope.Path $app)
+            }
+        }
+    }
+    return @($targets)
+}
+
+function Restore-PearDesktop {
+    param([string] $StageRoot, [string] $TheStamp)
+
+    $srcRoot = Join-Path $StageRoot 'pear'
+    if (-not (Test-Path -LiteralPath $srcRoot)) {
+        if ($DryRun) {
+            Write-Log 'DRYRUN would restore Pear Desktop userData from the downloaded snapshot'
+            return
+        }
+        throw 'Downloaded snapshot has no pear folder; cannot restore Pear Desktop.'
+    }
+
+    $restored = 0
+    foreach ($target in @(Get-PearDesktopTargets)) {
+        $src = Join-Path (Join-Path $srcRoot $target.Scope) $target.App
+        if (-not (Test-Path -LiteralPath $src)) { continue }
+        $restored++
+        Write-Log ("restore pear/" + $target.Scope + "/" + $target.App + " -> " + $target.Path)
+        if ($DryRun) { continue }
+        if ((Test-Path -LiteralPath $target.Path) -and -not $NoBackup) {
+            $bak = '{0}.bak.{1}' -f $target.Path, $TheStamp
+            Copy-Item -LiteralPath $target.Path -Destination $bak -Recurse -Force
+            Write-Log ("backed up " + $target.Path + " -> " + $bak)
+        }
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target.Path) | Out-Null
+        Copy-Tree -Source $src -Destination $target.Path
+        # A copied Chromium lockfile points at a dead process and can block startup.
+        $lock = Join-Path $target.Path 'lockfile'
+        if (Test-Path -LiteralPath $lock) {
+            Remove-Item -LiteralPath $lock -Force
+            Write-Log ("removed stale " + $lock)
+        }
+    }
+    if ($restored -eq 0) {
+        Write-Warn 'Pear Desktop folders are missing from the snapshot; nothing restored.'
+    }
+}
+
 function Start-VicinaeServer {
     $roots = @($env:SCOOP, (Join-Path $env:USERPROFILE 'scoop'), (Join-Path $env:ProgramData 'scoop'))
     $server = $roots | Where-Object { $_ } | ForEach-Object {
@@ -377,26 +449,31 @@ if ($Stamp) {
     $ffStamps = @($Stamp)
     $vcStamps = @($Stamp)
     $atStamps = @($Stamp)
+    $peStamps = @($Stamp)
 } else {
     $ffStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $FirefoxRemotePath)
     $vcStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $VicinaeRemotePath)
     $atStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $AtuinRemotePath)
+    $peStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $PearRemotePath)
 }
 $ffStamp = if ($ffStamps.Count) { $ffStamps[0] } else { $null }
 $vcStamp = if ($vcStamps.Count) { $vcStamps[0] } else { $null }
 $atStamp = if ($atStamps.Count) { $atStamps[0] } else { $null }
+$peStamp = if ($peStamps.Count) { $peStamps[0] } else { $null }
 
 if ($List) {
-    Write-Log ("Firefox  latest: " + $(if ($ffStamp) { $ffStamp } else { '(none)' }) + "  (" + $FirefoxRemotePath + ")")
-    Write-Log ("Vicinae  latest: " + $(if ($vcStamp) { $vcStamp } else { '(none)' }) + "  (" + $VicinaeRemotePath + ")")
-    Write-Log ("Atuin    latest: " + $(if ($atStamp) { $atStamp } else { '(none)' }) + "  (" + $AtuinRemotePath + ")")
-    if (-not $ffStamp -and -not $vcStamp -and -not $atStamp) { Write-Warn 'No snapshots found; check -TargetHost / -User / remote paths.' }
+    Write-Log ("Firefox        latest: " + $(if ($ffStamp) { $ffStamp } else { '(none)' }) + "  (" + $FirefoxRemotePath + ")")
+    Write-Log ("Vicinae        latest: " + $(if ($vcStamp) { $vcStamp } else { '(none)' }) + "  (" + $VicinaeRemotePath + ")")
+    Write-Log ("Atuin          latest: " + $(if ($atStamp) { $atStamp } else { '(none)' }) + "  (" + $AtuinRemotePath + ")")
+    Write-Log ("Pear Desktop   latest: " + $(if ($peStamp) { $peStamp } else { '(none)' }) + "  (" + $PearRemotePath + ")")
+    if (-not $ffStamp -and -not $vcStamp -and -not $atStamp -and -not $peStamp) { Write-Warn 'No snapshots found; check -TargetHost / -User / remote paths.' }
     return
 }
 
 $doFirefox = $Only -contains 'firefox'
 $doVicinae = $Only -contains 'vicinae'
 $doAtuin = $Only -contains 'atuin'
+$doPear = $Only -contains 'pear'
 if ($doFirefox -and -not $ffStamp) {
     Write-Warn 'No Firefox snapshot found; skipping Firefox.'
     $doFirefox = $false
@@ -409,7 +486,11 @@ if ($doAtuin -and -not $atStamp) {
     Write-Warn 'No Atuin snapshot found; skipping Atuin.'
     $doAtuin = $false
 }
-if (-not $doFirefox -and -not $doVicinae -and -not $doAtuin) {
+if ($doPear -and -not $peStamp) {
+    Write-Warn 'No Pear Desktop snapshot found; skipping Pear Desktop.'
+    $doPear = $false
+}
+if (-not $doFirefox -and -not $doVicinae -and -not $doAtuin -and -not $doPear) {
     throw 'Nothing to restore. Run -List to see the available snapshots.'
 }
 
@@ -423,8 +504,14 @@ if ($doVicinae -and $vicRunning.Count -gt 0 -and -not $DryRun) {
     $vicRunning | Stop-Process -Force
     Start-Sleep -Seconds 2
 }
+$pearRunning = @(Get-Process -Name 'YouTube Music', 'Pear Desktop' -ErrorAction SilentlyContinue)
+if ($doPear -and $pearRunning.Count -gt 0 -and -not $DryRun) {
+    Write-Log 'Stopping Pear Desktop for a clean restore'
+    $pearRunning | Stop-Process -Force
+    Start-Sleep -Seconds 2
+}
 
-$restoreStamp = @($ffStamp, $vcStamp, $atStamp) | Where-Object { $_ } | Select-Object -First 1
+$restoreStamp = @($ffStamp, $vcStamp, $atStamp, $peStamp) | Where-Object { $_ } | Select-Object -First 1
 $stage = Join-Path $restoreRoot $restoreStamp
 if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $stage | Out-Null }
 
@@ -458,6 +545,17 @@ try {
             throw 'Downloaded Atuin snapshot has no data/history.db.'
         }
         Restore-Atuin -StageRoot $stage -TheStamp $atStamp
+    }
+
+    if ($doPear) {
+        $remoteFolder = Get-SnapshotRemotePath -BasePath $PearRemotePath -FolderName 'pear' -TheStamp $peStamp
+        Write-Log ("restoring Pear Desktop from " + $peer + ':' + $remoteFolder)
+        if (-not $DryRun) { Save-Snapshot -RemoteFolder $remoteFolder -StageRoot $stage -FolderName 'pear' }
+        $peFiles = if ($DryRun) { @() } else { @(Get-ChildItem -LiteralPath (Join-Path $stage 'pear') -Recurse -File -ErrorAction SilentlyContinue) }
+        if (-not $DryRun -and $peFiles.Count -lt 1) {
+            throw 'Downloaded Pear Desktop snapshot is empty.'
+        }
+        Restore-PearDesktop -StageRoot $stage -TheStamp $peStamp
     }
 
     if ($DryRun) {

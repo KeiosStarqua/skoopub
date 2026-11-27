@@ -11,10 +11,12 @@
     with `tailscale up` first. Native stderr is merged through cmd.exe because
     Windows PowerShell 5.1 turns it into a terminating NativeCommandError.
 
-    With -RestoreVicinae, a connected node also restores Vicinae from the latest
-    acer-ubuntu snapshot through core/restore-backup.ps1 -Only vicinae. A marker
-    under %LOCALAPPDATA%\skoop keeps re-runs from downloading it again; failures
-    are non-fatal. -ForceVicinaeRestore repeats it even when the marker exists.
+    With -RestoreVicinae and/or -RestorePearDesktop, a connected node also restores
+    that app from the latest acer-ubuntu snapshot through
+    core/restore-backup.ps1 (-Only vicinae / -Only pear). A marker under
+    %LOCALAPPDATA%\skoop keeps re-runs from downloading it again; failures are
+    non-fatal. -ForceVicinaeRestore / -ForcePearDesktopRestore repeat one app even
+    when its marker exists.
 
 .PARAMETER Tag
     ACL tag to advertise. The `tag:` prefix is added when omitted.
@@ -32,8 +34,17 @@
     shutdown backup once per machine. Needs -BackupUser or SKOOP_BACKUP_USER for
     unattended runs; otherwise restore-backup.ps1 prompts when interactive.
 
+.PARAMETER RestorePearDesktop
+    After sign-in (or for an already-connected node), restore Pear Desktop's
+    signed-in userData from the shutdown backup once per machine. Cookies are
+    DPAPI-encrypted, so a different Windows user/machine may still ask for a
+    Google sign-in.
+
 .PARAMETER ForceVicinaeRestore
     Ignore the "already restored" marker and restore Vicinae again.
+
+.PARAMETER ForcePearDesktopRestore
+    Ignore the "already restored" marker and restore Pear Desktop again.
 
 .PARAMETER BackupUser
     SSH user on acer-ubuntu for the optional Vicinae restore. Defaults to
@@ -43,7 +54,7 @@
     .\apps\tailscale\configure.ps1
 
 .EXAMPLE
-    .\apps\tailscale\configure.ps1 -SignIn -RestoreVicinae
+    .\apps\tailscale\configure.ps1 -SignIn -RestoreVicinae -RestorePearDesktop
 
 .EXAMPLE
     .\apps\tailscale\configure.ps1 -Tag tag:public-client
@@ -54,7 +65,9 @@ param(
     [switch]$SkipTag,
     [switch]$SignIn,
     [switch]$RestoreVicinae,
+    [switch]$RestorePearDesktop,
     [switch]$ForceVicinaeRestore,
+    [switch]$ForcePearDesktopRestore,
     [string]$BackupUser = "$env:SKOOP_BACKUP_USER"
 )
 
@@ -87,35 +100,44 @@ function Test-TailscaleConnected {
     return [bool]($status -and $status.BackendState -eq 'Running' -and $status.Self.Online)
 }
 
-function Invoke-VicinaeRestoreOnConnect {
-    # The shutdown backup logs Tailscale out and uploads Vicinae's config/data,
-    # so a reconnected (or freshly installed) machine can put it straight back.
+function Invoke-RestoreOnConnect {
+    # The shutdown backup uploads Vicinae's config/data and Pear Desktop's
+    # signed-in userData, so a reconnected (or freshly installed) machine can put
+    # them straight back. One marker per app keeps re-runs idempotent.
+    param(
+        [ValidateSet('vicinae', 'pear')]
+        [string] $App,
+        [string] $Label,
+        [switch] $ForceRestore,
+        [string] $ForceSwitch
+    )
+
     $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     $restoreScript = Join-Path $repoRoot 'core\restore-backup.ps1'
     if (-not (Test-Path -LiteralPath $restoreScript)) {
-        Write-Warn 'core/restore-backup.ps1 not found - skipping Vicinae auto-restore.'
+        Write-Warn "core/restore-backup.ps1 not found - skipping $Label auto-restore."
         return
     }
-    $marker = Join-Path $env:LOCALAPPDATA 'skoop\vicinae-restore-on-connect.done'
-    if ((Test-Path -LiteralPath $marker) -and -not $ForceVicinaeRestore) {
-        Write-Ok "Vicinae already restored on Tailscale connect - skipping (pass -ForceVicinaeRestore to repeat)"
+    $marker = Join-Path $env:LOCALAPPDATA "skoop\$App-restore-on-connect.done"
+    if ((Test-Path -LiteralPath $marker) -and -not $ForceRestore) {
+        Write-Ok "$Label already restored on Tailscale connect - skipping (pass -$ForceSwitch to repeat)"
         return
     }
     if (-not $BackupUser -and -not [Environment]::UserInteractive) {
-        Write-Warn 'no SSH user for acer-ubuntu - set -BackupUser / SKOOP_BACKUP_USER to auto-restore Vicinae.'
+        Write-Warn "no SSH user for acer-ubuntu - set -BackupUser / SKOOP_BACKUP_USER to auto-restore $Label."
         return
     }
-    $restoreArgs = @('-Only', 'vicinae')
+    $restoreArgs = @('-Only', $App)
     if ($BackupUser) { $restoreArgs += @('-User', $BackupUser) }
-    Write-Step 'Restoring Vicinae from the latest backup after Tailscale connect'
+    Write-Step "Restoring $Label from the latest backup after Tailscale connect"
     try {
         & $restoreScript @restoreArgs
         $markerDir = Split-Path -Parent $marker
         if (-not (Test-Path -LiteralPath $markerDir)) { New-Item -ItemType Directory -Force -Path $markerDir | Out-Null }
         [System.IO.File]::WriteAllText($marker, (Get-Date -Format 'o'))
-        Write-Ok "Vicinae restored; marker written to $marker"
+        Write-Ok "$Label restored; marker written to $marker"
     } catch {
-        Write-Warn "Vicinae auto-restore failed (non-fatal): $($_.Exception.Message)"
+        Write-Warn "$Label auto-restore failed (non-fatal): $($_.Exception.Message)"
     }
 }
 
@@ -145,8 +167,12 @@ if ($SignIn) {
 
 # Probe again rather than trusting the sign-in exit code: the QR flow can exit
 # 0 without a working connection, and already-connected nodes skip it entirely.
-if ($RestoreVicinae -and (Test-TailscaleConnected $cli)) {
-    Invoke-VicinaeRestoreOnConnect
+$connected = Test-TailscaleConnected $cli
+if ($RestoreVicinae -and $connected) {
+    Invoke-RestoreOnConnect -App vicinae -Label 'Vicinae' -ForceRestore:$ForceVicinaeRestore -ForceSwitch 'ForceVicinaeRestore'
+}
+if ($RestorePearDesktop -and $connected) {
+    Invoke-RestoreOnConnect -App pear -Label 'Pear Desktop' -ForceRestore:$ForcePearDesktopRestore -ForceSwitch 'ForcePearDesktopRestore'
 }
 
 if ($SkipTag) { Write-Ok 'Tailnet tagging skipped (-SkipTag).'; return }

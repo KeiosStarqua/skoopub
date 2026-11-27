@@ -22,9 +22,9 @@
 # Creates ~/repos and clones skoopub there when missing (idempotent).
 # Installs Rio before Herdr in phase 1, then opens Rio in ~/repos with Herdr
 # running (SKOOP_NO_AUTO_HERDR=1 opts out).
-# After Tailscale connects, restores Vicinae from the backup once per machine
-# via apps\tailscale\configure.ps1 -RestoreVicinae (SKOOP_BACKUP_USER supplies
-# the SSH user).
+# After Tailscale connects, restores Vicinae and Pear Desktop from the backup once
+# per machine via apps\tailscale\configure.ps1 -RestoreVicinae -RestorePearDesktop
+# (SKOOP_BACKUP_USER supplies the SSH user).
 [CmdletBinding()]
 param(
     [switch]$ForceUniKey,
@@ -399,12 +399,12 @@ $phaseResult = Invoke-SkoopPhases -Scoop 'scoop' `
             catch { Write-Host "  $script failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
         }
         # Tailscale is in this phase so the QR/URL sign-in happens before Firefox.
-        # Once connected, restore Vicinae from the shutdown backup (once per
-        # machine) and open Rio with Herdr in ~/repos.
+        # Once connected, restore Vicinae and Pear Desktop from the shutdown backup
+        # (once per machine) and open Rio with Herdr in ~/repos.
         Start-TailscaleDaemon
         $tailscaleConfig = Join-Path $repo 'apps\tailscale\configure.ps1'
         if (Test-Path $tailscaleConfig) {
-            try { & $tailscaleConfig -SignIn -RestoreVicinae }
+            try { & $tailscaleConfig -SignIn -RestoreVicinae -RestorePearDesktop }
             catch { Write-Host "  Tailscale sign-in failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
         }
         Start-HerdrInRio
