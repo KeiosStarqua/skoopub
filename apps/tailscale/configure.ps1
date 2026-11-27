@@ -56,7 +56,7 @@
     Ignore the "already restored" marker and restore OpenCode again.
 
 .PARAMETER BackupUser
-    SSH user on acer-ubuntu for the optional Vicinae restore. Defaults to
+    SSH user on acer-ubuntu for the optional restore steps. Defaults to
     $env:SKOOP_BACKUP_USER.
 
 .EXAMPLE
