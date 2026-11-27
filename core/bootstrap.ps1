@@ -31,7 +31,10 @@ param(
     [switch]$ForceUniKey,
     [Alias('Force')]
     [switch]$ForceInstall,
-    [switch]$SkipGhLogin
+    [switch]$SkipGhLogin,
+    # Optional wallpaper file; empty means a random image from the cloned collection.
+    [string]$Wallpaper = "$env:SKOOP_WALLPAPER",
+    [switch]$NoWallpaper
 )
 
 if ($env:SKOOP_FORCE_INSTALL -eq '1') { $ForceInstall = $true }
@@ -292,6 +295,80 @@ function Enable-TaskManager {
     }
 }
 
+function Enable-WallpaperChanges {
+    # Clear policy values that block wallpaper changes (HKCU always, HKLM when
+    # elevated) so SystemParametersInfo can set the desktop wallpaper.
+    $elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+    $roots = @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies')
+    if ($elevated) {
+        $roots += 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies'
+    } else {
+        Write-Host 'Not elevated - HKCU wallpaper policy only; run elevated to clear the machine-wide policy.'
+    }
+    foreach ($root in $roots) {
+        $activeDesktop = Join-Path $root 'ActiveDesktop'
+        $system = Join-Path $root 'System'
+        foreach ($path in @($activeDesktop, $system)) {
+            try { if (-not (Test-Path -LiteralPath $path)) { New-Item -Path $path -Force | Out-Null } }
+            catch { Write-Host "Could not create $path (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+        }
+        foreach ($item in @(
+            @{ Path = $activeDesktop; Name = 'NoChangingWallPaper' },
+            @{ Path = $system;        Name = 'NoDispBackgroundPage' }
+        )) {
+            try {
+                New-ItemProperty -LiteralPath $item.Path -Name $item.Name -PropertyType DWord -Value 0 -Force | Out-Null
+                Write-Host "  $($item.Name)=0 at $($item.Path)"
+            } catch {
+                Write-Host "Could not clear $($item.Name) at $($item.Path) (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+        foreach ($name in @('Wallpaper', 'WallpaperStyle', 'TileWallpaper')) {
+            try { Remove-ItemProperty -LiteralPath $system -Name $name -ErrorAction Stop; Write-Host "  removed forced $name policy" }
+            catch { }
+        }
+    }
+}
+
+function Set-SkoopWallpaper {
+    param([string]$Path)
+    if (-not $Path) {
+        $imagesDir = Join-Path $env:LOCALAPPDATA 'skoop\wallpapers\aesthetic-wallpapers\images'
+        if (Test-Path -LiteralPath $imagesDir) {
+            $images = @(Get-ChildItem -LiteralPath $imagesDir -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Extension -match '^\.(jpg|jpeg|png|webp|bmp)$' })
+            if ($images.Count -gt 0) { $Path = ($images | Get-Random).FullName }
+        }
+    }
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) {
+        Write-Host 'No wallpaper image available - skipping desktop wallpaper.'
+        return
+    }
+    if (-not ('SkoopWallpaper' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public class SkoopWallpaper {
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern int SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
+}
+'@
+    }
+    if ([SkoopWallpaper]::SystemParametersInfo(0x0014, 0, $Path, 0x03) -eq 0) {
+        Write-Host "Could not set wallpaper '$Path' (Win32 error $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))." -ForegroundColor Yellow
+        return
+    }
+    $desktop = 'HKCU:\Control Panel\Desktop'
+    try {
+        New-ItemProperty -LiteralPath $desktop -Name 'Wallpaper' -PropertyType String -Value $Path -Force | Out-Null
+        New-ItemProperty -LiteralPath $desktop -Name 'WallpaperStyle' -PropertyType String -Value '10' -Force | Out-Null
+        New-ItemProperty -LiteralPath $desktop -Name 'TileWallpaper' -PropertyType String -Value '0' -Force | Out-Null
+    } catch {
+        Write-Host "Wallpaper set, but the style could not be persisted (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    Write-Host "Desktop wallpaper set: $Path"
+}
+
 function Show-TailscaleSignInHint {
     # The daemon and tray app work without the CLI; only peer listing needs it.
     # Probe it so the sign-in advice is right, and never fail the bootstrap on it.
@@ -504,6 +581,18 @@ $yasbConfig = Join-Path $repo 'apps\yasb\configure.ps1'
 if (Test-Path $yasbConfig) {
     try { & $yasbConfig }
     catch { Write-Host "YASB config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+
+# 14b. Clear wallpaper restrictions and set a desktop wallpaper.
+if ($NoWallpaper -or $env:SKOOP_NO_WALLPAPER -eq '1') {
+    Write-Host 'Skipping wallpaper change (-NoWallpaper).'
+} else {
+    try {
+        Enable-WallpaperChanges
+        Set-SkoopWallpaper -Path $Wallpaper
+    } catch {
+        Write-Host "Wallpaper setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
 }
 
 # 15. Add the `n` Nushell shortcut for PowerShell (profile.ps1) and cmd (AutoRun).

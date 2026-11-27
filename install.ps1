@@ -86,6 +86,11 @@
       apps/yasb/setup-wallpapers.ps1 shallow-clones D3Ext/aesthetic-wallpapers once
       and points YASB_WALLPAPER_DIR at its images folder (Alt+E gallery); opt out
       with -NoWallpapers / SKOOP_NO_WALLPAPERS=1.
+    - Clears wallpaper-change policies (NoChangingWallPaper, NoDispBackgroundPage
+      and a forced Wallpaper/WallpaperStyle value) for the current user and, when
+      elevated, machine-wide, then sets a desktop wallpaper from the cloned
+      collection via SystemParametersInfo (Fill). -Wallpaper <path> picks a
+      specific image; -NoWallpaper / SKOOP_NO_WALLPAPER=1 skips both steps.
     - Adds an `n` alias for Nushell in PowerShell (profile.ps1) and a cmd.exe
       AutoRun doskey macro via apps/nushell/setup.ps1, preserving existing AutoRun entries.
     - Registers a per-user scheduled task (SkoopCleanupOnShutdown) via
@@ -110,12 +115,19 @@
     - Installs Rio before Herdr in phase 1, then opens Rio in ~/repos with Herdr
       already running. Skipped for non-interactive shells and Herdr panes;
       -NoAutoHerdr / SKOOP_NO_AUTO_HERDR=1 opts out.
-    - Restores Vicinae and Pear Desktop from the latest acer-ubuntu snapshot right
-      after Tailscale connects (via core/restore-backup.ps1 -Only vicinae / -Only
-      pear), with a marker file per app so repeated installs do not re-download
-      them. OpenCode config/state and credentials are restored at the end of the
-      install, once its CLI exists. Non-fatal; supply -BackupUser or
-      SKOOP_BACKUP_USER when running unattended.
+    - Restores Vicinae, Pear Desktop, Firefox and Atuin from the latest acer-ubuntu
+      snapshot as soon as Tailscale connects in phase 1 (via
+      core/restore-backup.ps1 -Only vicinae / -Only pear / -Only firefox /
+      -Only atuin), with a marker file per app so repeated installs do not
+      re-download them. Firefox and Atuin are retried at the end of the install as
+      an idempotent fallback; Firefox is closed and relaunched around the copy and
+      Atuin warns you to close other Atuin shells. OpenCode config/state and
+      credentials are restored at the end of the install, once its CLI exists.
+      Non-fatal; supply -BackupUser or SKOOP_BACKUP_USER when running unattended.
+      -SkipFirefoxRestore / -SkipAtuinRestore opt out (also
+      SKOOP_NO_FIREFOX_RESTORE=1 / SKOOP_NO_ATUIN_RESTORE=1);
+      -ForceFirefoxRestore / -ForceAtuinRestore repeat one (also
+      SKOOP_FORCE_FIREFOX_RESTORE=1 / SKOOP_FORCE_ATUIN_RESTORE=1).
 
     By default the script runs the Full setup immediately with no options to
     choose. Pass -Menu (or $env:SKOOP_MENU=1) to open the optional interactive
@@ -195,6 +207,23 @@
 .PARAMETER SkipMouseDpi
     Do not touch the mouse DPI (also $env:SKOOP_NO_MOUSE_DPI=1).
 
+.PARAMETER ForceFirefoxRestore
+    Repeat the one-time Firefox profile restore from the acer-ubuntu backup even
+    when the marker exists (also $env:SKOOP_FORCE_FIREFOX_RESTORE=1). Firefox is
+    closed and relaunched around the copy.
+
+.PARAMETER ForceAtuinRestore
+    Repeat the one-time Atuin config/history restore (also
+    $env:SKOOP_FORCE_ATUIN_RESTORE=1). Close other Atuin shells first.
+
+.PARAMETER SkipFirefoxRestore
+    Do not restore the Firefox profile from the backup (also
+    $env:SKOOP_NO_FIREFOX_RESTORE=1).
+
+.PARAMETER SkipAtuinRestore
+    Do not restore Atuin config/history from the backup (also
+    $env:SKOOP_NO_ATUIN_RESTORE=1).
+
 .EXAMPLE
     # One command: configure this machine, then pick a tailnet machine and add it to Herdr.
     powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
@@ -227,11 +256,19 @@ param(
     [switch]$NoAutoHerdr,
     [int]$MouseDpi = 1000,
     [switch]$SkipMouseDpi,
+    [switch]$ForceFirefoxRestore,
+    [switch]$ForceAtuinRestore,
+    [switch]$SkipFirefoxRestore,
+    [switch]$SkipAtuinRestore,
     [switch]$EssentialsOnly,
     [string]$BackupUser = "$env:SKOOP_BACKUP_USER",
     [switch]$SkipShutdownHook,
     # Skip the one-time wallpaper collection clone (also SKOOP_NO_WALLPAPERS=1).
     [switch]$NoWallpapers,
+    # Optional wallpaper file; when empty a random image from the cloned collection is used.
+    [string]$Wallpaper = "$env:SKOOP_WALLPAPER",
+    # Skip clearing the wallpaper policy and setting a desktop wallpaper.
+    [switch]$NoWallpaper,
     [switch]$Help
 )
 
@@ -241,8 +278,13 @@ if ($env:SKOOP_ESSENTIALS_ONLY -eq '1') { $EssentialsOnly = $true }
 if ($env:SKOOP_NO_AUTO_HERDR -eq '1') { $NoAutoHerdr = $true }
 if ($env:SKOOP_NO_MOUSE_DPI -eq '1') { $SkipMouseDpi = $true }
 if ($env:SKOOP_MOUSE_DPI -and $env:SKOOP_MOUSE_DPI -match '^\d+$') { $MouseDpi = [int]$env:SKOOP_MOUSE_DPI }
+if ($env:SKOOP_FORCE_FIREFOX_RESTORE -eq '1') { $ForceFirefoxRestore = $true }
+if ($env:SKOOP_FORCE_ATUIN_RESTORE -eq '1') { $ForceAtuinRestore = $true }
+if ($env:SKOOP_NO_FIREFOX_RESTORE -eq '1') { $SkipFirefoxRestore = $true }
+if ($env:SKOOP_NO_ATUIN_RESTORE -eq '1') { $SkipAtuinRestore = $true }
 if ($env:SKOOP_MENU -eq '1') { $Menu = $true }
 if ($env:SKOOP_NO_WALLPAPERS -eq '1') { $NoWallpapers = $true }
+if ($env:SKOOP_NO_WALLPAPER -eq '1') { $NoWallpaper = $true }
 if ($env:SKOOP_FORCE_INSTALL -eq '1') { $ForceInstall = $true }
 if ($NoGum) { $env:SKOOP_NO_GUM = '1' }
 
@@ -263,8 +305,8 @@ Usage:
   .\install.ps1 -SkipHerdrConnect        # configure only
   irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
-Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -EssentialsOnly -BackupUser -SkipShutdownHook -Help
-Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL
+Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -ForceFirefoxRestore -ForceAtuinRestore -SkipFirefoxRestore -SkipAtuinRestore -EssentialsOnly -BackupUser -SkipShutdownHook -Help
+Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_FORCE_FIREFOX_RESTORE, SKOOP_FORCE_ATUIN_RESTORE, SKOOP_NO_FIREFOX_RESTORE, SKOOP_NO_ATUIN_RESTORE, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL
 '@
     return
 }
@@ -291,8 +333,14 @@ function Get-SkoopReLaunchArgs {
     if ($NoAutoHerdr) { $list += '-NoAutoHerdr' }
     if ($MouseDpi -ne 1000) { $list += @('-MouseDpi', "$MouseDpi") }
     if ($SkipMouseDpi) { $list += '-SkipMouseDpi' }
+    if ($ForceFirefoxRestore) { $list += '-ForceFirefoxRestore' }
+    if ($ForceAtuinRestore) { $list += '-ForceAtuinRestore' }
+    if ($SkipFirefoxRestore) { $list += '-SkipFirefoxRestore' }
+    if ($SkipAtuinRestore) { $list += '-SkipAtuinRestore' }
     if ($SkipShutdownHook) { $list += '-SkipShutdownHook' }
     if ($NoWallpapers) { $list += '-NoWallpapers' }
+    if ($NoWallpaper) { $list += '-NoWallpaper' }
+    if ($Wallpaper) { $list += @('-Wallpaper', $Wallpaper) }
     if ($Peer) { $list += @('-Peer', $Peer) }
     if ($HerdrUser) { $list += @('-HerdrUser', $HerdrUser) }
     if ($BackupUser) { $list += @('-BackupUser', $BackupUser) }
@@ -439,6 +487,94 @@ function Enable-TaskManager {
             Write-Host "    Could not update $path - $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
+}
+
+function Enable-WallpaperChanges {
+    # Public/locked-down PCs often block wallpaper changes with policy values.
+    # Clear the per-user values (and the machine-wide ones when elevated) so
+    # SystemParametersInfo can set a desktop wallpaper.
+    $elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+    $roots = @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies')
+    if ($elevated) {
+        $roots += 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies'
+    } else {
+        Write-Ok 'not elevated - HKCU only (re-run elevated to clear machine-wide policy)'
+    }
+
+    foreach ($root in $roots) {
+        $activeDesktop = Join-Path $root 'ActiveDesktop'
+        $system = Join-Path $root 'System'
+        foreach ($path in @($activeDesktop, $system)) {
+            try { if (-not (Test-Path -LiteralPath $path)) { New-Item -Path $path -Force | Out-Null } }
+            catch { Write-Host "    Could not create $path - $($_.Exception.Message)" -ForegroundColor Yellow }
+        }
+        foreach ($item in @(
+            @{ Path = $activeDesktop; Name = 'NoChangingWallPaper' },
+            @{ Path = $system;        Name = 'NoDispBackgroundPage' }
+        )) {
+            try {
+                New-ItemProperty -LiteralPath $item.Path -Name $item.Name -PropertyType DWord -Value 0 -Force | Out-Null
+                Write-Ok "$($item.Name)=0 at $($item.Path)"
+            } catch {
+                Write-Host "    Could not clear $($item.Name) at $($item.Path) - $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+        # A forced Wallpaper/WallpaperStyle policy overrides anything we set.
+        foreach ($name in @('Wallpaper', 'WallpaperStyle', 'TileWallpaper')) {
+            try {
+                Remove-ItemProperty -LiteralPath $system -Name $name -ErrorAction Stop
+                Write-Ok "removed forced $name policy at $system"
+            } catch {
+                # Missing value is the normal case.
+            }
+        }
+    }
+}
+
+function Set-SkoopWallpaper {
+    param([string]$Path)
+
+    if (-not $Path) {
+        $imagesDir = Join-Path $env:LOCALAPPDATA 'skoop\wallpapers\aesthetic-wallpapers\images'
+        if (Test-Path -LiteralPath $imagesDir) {
+            $images = @(Get-ChildItem -LiteralPath $imagesDir -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Extension -match '^\.(jpg|jpeg|png|webp|bmp)$' })
+            if ($images.Count -gt 0) { $Path = ($images | Get-Random).FullName }
+        }
+    }
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) {
+        Write-Ok 'no wallpaper image available - skipping desktop wallpaper'
+        return
+    }
+
+    if (-not ('SkoopWallpaper' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public class SkoopWallpaper {
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern int SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
+}
+'@
+    }
+
+    # SPI_SETDESKWALLPAPER = 0x0014; SPIF_UPDATEINIFILE | SPIF_SENDCHANGE = 0x03
+    $ok = [SkoopWallpaper]::SystemParametersInfo(0x0014, 0, $Path, 0x03)
+    if ($ok -eq 0) {
+        Write-Host "    Could not set wallpaper '$Path' (Win32 error $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))." -ForegroundColor Yellow
+        return
+    }
+
+    # Persist the path and Fill style so Explorer keeps it after sign-out.
+    $desktop = 'HKCU:\Control Panel\Desktop'
+    try {
+        New-ItemProperty -LiteralPath $desktop -Name 'Wallpaper' -PropertyType String -Value $Path -Force | Out-Null
+        New-ItemProperty -LiteralPath $desktop -Name 'WallpaperStyle' -PropertyType String -Value '10' -Force | Out-Null
+        New-ItemProperty -LiteralPath $desktop -Name 'TileWallpaper' -PropertyType String -Value '0' -Force | Out-Null
+    } catch {
+        Write-Host "    Wallpaper set, but could not persist the style - $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    Write-Ok "Desktop wallpaper set: $Path"
 }
 
 function Show-TailscaleSignInHint {
@@ -855,6 +991,19 @@ $starshipConfig  = Join-Path $repoRoot 'apps\starship\configure.ps1'
 $darkMode        = Join-Path $repoRoot 'core\set-dark-mode.ps1'
 $mouseConfig     = Join-Path $repoRoot 'apps\mouse\configure.ps1'
 $librescollConfig = Join-Path $repoRoot 'apps\librescoll\configure.ps1'
+# Firefox and Atuin are restored as soon as Tailscale connects in phase 1, then
+# retried at the end of the run as an idempotent fallback (marker files make an
+# earlier success a no-op). Both apps are installed in later phases, but this only
+# lays down their files, so there is no CLI dependency (unlike OpenCode).
+$restoreAppsArgs = @()
+if (-not $SkipFirefoxRestore) {
+    $restoreAppsArgs += '-RestoreFirefox'
+    if ($ForceFirefoxRestore) { $restoreAppsArgs += '-ForceFirefoxRestore' }
+}
+if (-not $SkipAtuinRestore) {
+    $restoreAppsArgs += '-RestoreAtuin'
+    if ($ForceAtuinRestore) { $restoreAppsArgs += '-ForceAtuinRestore' }
+}
 Write-Ok "repo root: $repoRoot"
 
 if ($runMode -eq 'herdr') {
@@ -945,14 +1094,16 @@ function Invoke-EssentialTerminalSetup {
 
     # Tailscale is part of phase 1 so the `tailscale up --qr` sign-in (URL/QR)
     # happens before the slower phases, and well before Firefox is installed.
-    # Once it is connected, restore Vicinae from the shutdown backup (once per
-    # machine) so a fresh PC has its launcher config/data back.
+    # Once it is connected, restore Vicinae, Pear Desktop, Firefox and Atuin from
+    # the shutdown backup (once per machine) so a fresh PC has their config/data
+    # back. Firefox/Atuin are only files here (no CLI dependency); the end-of-run
+    # step retries them idempotently in case this early call was skipped.
     Start-TailscaleDaemon
     if (Test-Path $tailscaleConfig) {
         try {
-            & $tailscaleConfig -SignIn -RestoreVicinae -RestorePearDesktop -BackupUser $BackupUser
+            & $tailscaleConfig -SignIn -RestoreVicinae -RestorePearDesktop -BackupUser $BackupUser @restoreAppsArgs
         } catch {
-            Write-Host "    Tailscale sign-in failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Host "    Tailscale sign-in / restore failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
 
@@ -1115,6 +1266,21 @@ if (Test-Path $yasbConfig) {
     Write-Ok 'apps/yasb/configure.ps1 not found - skipping'
 }
 
+# --- 17b. Clear wallpaper restrictions and set a desktop wallpaper -----------
+# Runs after the YASB step so the aesthetic-wallpapers clone already exists.
+if ($NoWallpaper) {
+    Write-Ok 'Skipping wallpaper change (-NoWallpaper)'
+} else {
+    Write-Step 'Clearing wallpaper restrictions and setting a desktop wallpaper'
+    try {
+        Enable-WallpaperChanges
+        Set-SkoopWallpaper -Path $Wallpaper
+    } catch {
+        # Cosmetic: never let a locked-down policy abort the bootstrap.
+        Write-Host "    Wallpaper setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
 # --- 18. Set up the Nushell shortcut for PowerShell and cmd -------------------
 if (Test-Path $nuSetup) {
     Write-Step 'Adding the Nushell `n` shortcut for PowerShell and cmd'
@@ -1165,6 +1331,23 @@ if (Test-Path $tailscaleConfig) {
     }
 } else {
     Write-Ok 'apps/tailscale/configure.ps1 not found - skipping OpenCode restore'
+}
+
+# --- 20c. Retry the Firefox and Atuin restores (idempotent fallback) --------
+# Both apps were offered right after Tailscale connected in phase 1; the marker
+# files make this a no-op when that call already succeeded. Unlike OpenCode these
+# restores only lay down files, so they do not depend on an app CLI existing.
+if ($restoreAppsArgs.Count -eq 0) {
+    Write-Ok 'Firefox/Atuin restore skipped (-SkipFirefoxRestore / -SkipAtuinRestore)'
+} elseif (Test-Path $tailscaleConfig) {
+    Write-Step 'Restoring Firefox and Atuin settings from the backup'
+    try {
+        & $tailscaleConfig -BackupUser $BackupUser @restoreAppsArgs
+    } catch {
+        Write-Host "    Firefox/Atuin restore failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Ok 'apps/tailscale/configure.ps1 not found - skipping Firefox/Atuin restore'
 }
 
 # --- 21. Automatic cleanup on shutdown / logoff -----------------------------
