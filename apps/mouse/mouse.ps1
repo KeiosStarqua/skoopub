@@ -11,9 +11,10 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('diagnose', 'monitor', 'fix', 'restore', 'status', 'install', 'driver')]
+    [ValidateSet('diagnose', 'monitor', 'fix', 'restore', 'status', 'dpi', 'install', 'driver')]
     [string]$Command,
     [int]$Seconds = 30,
+    [int]$Dpi = 1000,
     [string]$Out,
     [string]$From,
     [string]$Expect,
@@ -76,6 +77,10 @@ switch ($Command) {
         if ($DryRun) { $exeArgs += '--dry-run' }
         if ($Force) { $exeArgs += '--force' }
         if ($From) { $exeArgs += @('--from', $From) }
+    }
+    'dpi' {
+        $exeArgs += @('--value', "$Dpi")
+        if ($DryRun) { $exeArgs += '--dry-run' }
     }
 }
 

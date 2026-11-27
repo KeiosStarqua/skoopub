@@ -8,6 +8,7 @@
 //! hardware/driver (raw data is wrong) or from a software hook between raw
 //! input and window messages (raw is fine, WM is flipped).
 
+mod dpi;
 mod model;
 
 use model::{analyze, Analysis, CorrectionConfig, Corrector, ExpectWindow, ScrollEvent};
@@ -714,11 +715,13 @@ Usage:\n\
   skoopub-mouse monitor  [--seconds 30]\n\
   skoopub-mouse fix [--adaptive] [--dry-run] [--from <report>] [--force]\n\
   skoopub-mouse restore\n\
-  skoopub-mouse status\n\n\
+  skoopub-mouse status\n\
+  skoopub-mouse dpi [--value 1000] [--dry-run]\n\n\
 --expect gives windows (seconds from start) where you scroll down/up, so the\n\
 report can count events that contradict the expected direction.\n\
 diagnose/monitor capture HID Raw Input and WM_MOUSEWHEEL together.\n\
-fix flips the wheel sign using the calibration from `diagnose`; restore stops it."
+fix flips the wheel sign using the calibration from `diagnose`; restore stops it.\n\
+dpi sets the hardware DPI of a Logitech HID++ mouse (default 1000) via hidapi."
     );
 }
 
@@ -730,6 +733,7 @@ fn main() {
         "monitor" => run_capture(&args[1..], true),
         "fix" => run_fix(&args[1..]),
         "restore" => run_restore(),
+        "dpi" => dpi::run(&args[1..]),
         "status" => {
             run_status();
             Ok(())

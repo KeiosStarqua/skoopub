@@ -26,7 +26,7 @@ PowerShell profile, restored from a single manifest.
 - `apps/starship/` + `apps/starship/configure.ps1` — Catppuccin Mocha Starship prompt for **PowerShell** and **cmd**: config copied to `~/.config/starship.toml`, and cmd loads it through Clink (`%LOCALAPPDATA%\clink\starship.lua` + `clink autorun install`)
 - `core/cleanup-before-shutdown.ps1` + `core/install-shutdown-hook.ps1` — shutdown/logoff backup of Firefox, Vicinae and Atuin to `acer-ubuntu`, then clears local sign-ins: GitHub, SSH keys, **Tailscale**, **Pear Desktop** and Firefox logins
 - `core/restore-backup.ps1` — restores the latest Firefox, Vicinae and/or Atuin snapshot from `acer-ubuntu` onto a fresh machine; Tailscale also calls it for Vicinae right after connecting
-- `apps/mouse/` + `.github/workflows/mouse-release.yml` — Rust `skoopub-mouse` wheel diagnostics (HID Raw Input vs `WM_MOUSEWHEEL`), built on `mouse-v*` tags; `configure.ps1` downloads the release exe and `mouse.ps1` is the CLI
+- `apps/mouse/` + `.github/workflows/mouse-release.yml` — Rust `skoopub-mouse` wheel diagnostics (HID Raw Input vs `WM_MOUSEWHEEL`) and Logitech HID++ hardware-DPI control via `hidapi-rs`, built on `mouse-v*` tags; `configure.ps1` downloads the release exe and `mouse.ps1` is the CLI
 
 ## Install with one command
 
@@ -145,6 +145,8 @@ device/driver or to a software hook (G HUB, cafe client, …):
 .\apps\mouse\mouse.ps1 fix                    # opt-in: flip the sign when diagnosis is conclusive
 .\apps\mouse\mouse.ps1 fix -DryRun            # observe without changing events
 .\apps\mouse\mouse.ps1 restore                # stop the correction hook
+.\apps\mouse\mouse.ps1 dpi                    # set Logitech mouse DPI to 1000
+.\apps\mouse\mouse.ps1 dpi -Dpi 800 -DryRun   # inspect range without changing it
 ```
 
 `fix` only enables correction when the report shows >= 5 inverted events and >=
@@ -248,7 +250,7 @@ scoop export | Out-File -Encoding utf8 manifests/scoop.json
 | gum picker falls back to the numbered list | gum draws its UI on **stderr** and only writes the answer to stdout. Capturing it with `2>&1` left it without a terminal, so it returned nothing; letting PowerShell inherit stderr instead turns the TUI into a `NativeCommandError` under `$ErrorActionPreference='Stop'`. The pickers now start gum through `System.Diagnostics.Process` with **only stdout redirected**, so the TUI stays on the console and the answer is captured — this works in Rio, WezTerm, Windows Terminal and Herdr. If a terminal still cannot draw it, pass `-NoGum` or set `$env:SKOOP_NO_GUM=1` |
 | `herdr` says "nested herdr"/inception | A long-lived launcher (often Vicinae) inherited `HERDR_ENV=1` from a Herdr pane and passes it to new terminals. Run `.\apps\vicinae\enable-autostart.ps1 -Restart`, then close and reopen Rio/WezTerm. `shell/profile.ps1` already clears the variables for new PowerShell sessions. `apps/herdr/setup-ssh.ps1` uses `herdr machine add`, so it does not start a nested client at all |
 | Rust toolchain | GNU is set as default only when no toolchain is active; switch with `rustup default stable-x86_64-pc-windows-msvc` (needs MSVC Build Tools) |
-| Mouse wheel diagnostics | `apps/mouse/configure.ps1` installs `skoopub-mouse.exe` from the latest `mouse-v*` GitHub Release to `%LOCALAPPDATA%\skoop\mouse`; re-runs skip the download unless `-Force`. `mouse.ps1 fix` installs a `WH_MOUSE_LL` hook and `restore` stops it; neither touches drivers, registry or cafe software |
+| Mouse wheel diagnostics / DPI | `apps/mouse/configure.ps1` installs `skoopub-mouse.exe` from the latest `mouse-v*` GitHub Release to `%LOCALAPPDATA%\skoop\mouse`; re-runs skip the download unless `-Force`. `mouse.ps1 fix` installs a `WH_MOUSE_LL` hook and `restore` stops it; neither touches drivers, registry or cafe software. `mouse.ps1 dpi` sets a Logitech HID++ mouse's hardware DPI (default **1000**) via `hidapi-rs` feature `0x2201`, verifies it by reading back, and is idempotent; `install.ps1` runs it after installing the exe (`-MouseDpi` / `SKOOP_MOUSE_DPI` to change, `-SkipMouseDpi` / `SKOOP_NO_MOUSE_DPI=1` to skip), and failures are non-fatal |
 | `z` / `atuin` not found | The profile hook is missing or points at a missing `shell/profile.ps1`, or the window predates the install. `install.ps1` hooks both editions (Windows PowerShell 5.1 and PowerShell 7+ profiles are separate files); check `Get-Content $PROFILE` **in the shell that is missing the command** (pwsh reads `Documents\PowerShell\...`, 5.1 reads `Documents\WindowsPowerShell\...`); re-run `install.ps1` to rewrite both, then open a new window |
 | kbots daemon | The Scoop package installs the `kbots`, `kb`, `kbots-tui` and `kbots-gui` shims but deliberately does not start the daemon; run `kbots daemon start`, then `kb status`. The daemon binds authenticated TCP on `127.0.0.1:7878` |
 

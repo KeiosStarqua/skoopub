@@ -92,8 +92,10 @@
       and -SkipShutdownHook opts out.
     - Installs skoopub-mouse from the GitHub Release into %LOCALAPPDATA%\skoop\mouse
       via apps/mouse/configure.ps1 (non-fatal), so `apps/mouse/mouse.ps1 diagnose`
-      can capture HID Raw Input vs WM_MOUSEWHEEL. The correction hook is opt-in:
-      run `mouse.ps1 fix` / `mouse.ps1 restore` yourself after a diagnosis.
+      can capture HID Raw Input vs WM_MOUSEWHEEL. It also sets the hardware DPI
+      of a Logitech HID++ mouse to 1000 via `mouse.ps1 dpi` (hidapi, no G H UB
+      config editing); -MouseDpi changes the value, -SkipMouseDpi opts out. The
+      correction hook remains opt-in: run `mouse.ps1 fix` / `restore` yourself.
     - Creates ~/repos and clones skoopub into ~/repos\skoopub when it is missing.
       An existing directory is never overwritten, so this is safe to re-run.
     - Installs Rio before Herdr in phase 1, then opens Rio in ~/repos with Herdr
@@ -175,6 +177,13 @@
     Do not open Rio with Herdr after the essentials phase (also
     $env:SKOOP_NO_AUTO_HERDR=1). Useful for unattended installs.
 
+.PARAMETER MouseDpi
+    Hardware DPI to set on a Logitech HID++ mouse after installing skoopub-mouse
+    (default 1000; also $env:SKOOP_MOUSE_DPI). Ignored with -SkipMouseDpi.
+
+.PARAMETER SkipMouseDpi
+    Do not touch the mouse DPI (also $env:SKOOP_NO_MOUSE_DPI=1).
+
 .EXAMPLE
     # One command: configure this machine, then pick a tailnet machine and add it to Herdr.
     powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
@@ -205,6 +214,8 @@ param(
     [switch]$NoGum,
     [switch]$NoPwsh,
     [switch]$NoAutoHerdr,
+    [int]$MouseDpi = 1000,
+    [switch]$SkipMouseDpi,
     [switch]$EssentialsOnly,
     [string]$BackupUser = "$env:SKOOP_BACKUP_USER",
     [switch]$SkipShutdownHook,
@@ -217,6 +228,8 @@ param(
 if ($env:SKOOP_SKIP_HERDR -eq '1') { $SkipHerdrConnect = $true }
 if ($env:SKOOP_ESSENTIALS_ONLY -eq '1') { $EssentialsOnly = $true }
 if ($env:SKOOP_NO_AUTO_HERDR -eq '1') { $NoAutoHerdr = $true }
+if ($env:SKOOP_NO_MOUSE_DPI -eq '1') { $SkipMouseDpi = $true }
+if ($env:SKOOP_MOUSE_DPI -and $env:SKOOP_MOUSE_DPI -match '^\d+$') { $MouseDpi = [int]$env:SKOOP_MOUSE_DPI }
 if ($env:SKOOP_MENU -eq '1') { $Menu = $true }
 if ($env:SKOOP_NO_WALLPAPERS -eq '1') { $NoWallpapers = $true }
 if ($env:SKOOP_FORCE_INSTALL -eq '1') { $ForceInstall = $true }
@@ -239,8 +252,8 @@ Usage:
   .\install.ps1 -SkipHerdrConnect        # configure only
   irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
-Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoAutoHerdr -EssentialsOnly -BackupUser -SkipShutdownHook -Help
-Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL
+Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -EssentialsOnly -BackupUser -SkipShutdownHook -Help
+Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL
 '@
     return
 }
@@ -265,6 +278,8 @@ function Get-SkoopReLaunchArgs {
     if ($EssentialsOnly) { $list += '-EssentialsOnly' }
     if ($NoGum) { $list += '-NoGum' }
     if ($NoAutoHerdr) { $list += '-NoAutoHerdr' }
+    if ($MouseDpi -ne 1000) { $list += @('-MouseDpi', "$MouseDpi") }
+    if ($SkipMouseDpi) { $list += '-SkipMouseDpi' }
     if ($SkipShutdownHook) { $list += '-SkipShutdownHook' }
     if ($NoWallpapers) { $list += '-NoWallpapers' }
     if ($Peer) { $list += @('-Peer', $Peer) }
@@ -1150,6 +1165,15 @@ if (Test-Path $mouseConfig) {
         Write-Host "    skoopub-mouse install failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
 } else {
+    $mouseCli = Join-Path $repoRoot 'apps\mouse\mouse.ps1'
+    if (-not $SkipMouseDpi -and $env:SKOOP_NO_MOUSE_DPI -ne '1' -and (Test-Path $mouseCli)) {
+        Write-Step "Setting Logitech mouse DPI to $MouseDpi"
+        try {
+            & $mouseCli dpi -Dpi $MouseDpi
+        } catch {
+            Write-Host "    Mouse DPI setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
     Write-Ok 'apps/mouse/configure.ps1 not found - skipping'
 }
 

@@ -71,6 +71,28 @@ Scroll **only down** from 0–25 s, rest 25–30 s, scroll **only up** from
 produce `physical_sample=true`. Try to reproduce the random reversal during
 those windows; `outside_expect_events > 0` means input arrived while resting.
 
+## Hardware DPI (Logitech HID++)
+
+`dpi` sets the mouse's own DPI, not the Windows pointer-speed registry value.
+It talks HID++ 2.0 feature `0x2201` (Adjustable DPI) straight to the mouse with
+[`hidapi-rs`](https://github.com/ruabmbua/hidapi-rs) — no G H UB config file,
+driver or registry edit. `install.ps1` calls it with DPI **1000** after
+installing the tool; `-MouseDpi <n>` changes that, `-SkipMouseDpi` /
+`SKOOP_NO_MOUSE_DPI=1` opts out. It is idempotent: when the mouse is already at
+the requested DPI it does nothing.
+
+```powershell
+.\apps\mouse\mouse.ps1 dpi                         # set DPI to 1000 (default)
+.\apps\mouse\mouse.ps1 dpi -Dpi 800                # set a different value
+.\apps\mouse\mouse.ps1 dpi -DryRun                 # report current/list, change nothing
+```
+
+It finds the first Logitech mouse exposing the HID++ vendor collection
+(usage page `0xff00`), reads the supported range, writes the DPI over the
+interrupt-OUT interface, then reads it back to verify. G H UB can be running;
+if it holds the HID++ channel the command fails with a clear, non-fatal error.
+Other brands (and mice without feature `0x2201`) are left untouched.
+
 ## Commands
 
 ```powershell
@@ -82,6 +104,7 @@ those windows; `outside_expect_events > 0` means input arrived while resting.
 .\apps\mouse\mouse.ps1 fix -DryRun                 # observe without changing events
 .\apps\mouse\mouse.ps1 fix -Adaptive               # experimental per-trend filter
 .\apps\mouse\mouse.ps1 restore                     # stop correction, keep config
+.\apps\mouse\mouse.ps1 dpi                         # set hardware DPI to 1000
 ```
 
 Direct binary (same commands without the `.ps1` wrapper):
@@ -93,6 +116,7 @@ skoopub-mouse monitor  [--seconds 30]
 skoopub-mouse fix [--adaptive] [--dry-run] [--from <report>] [--force]
 skoopub-mouse restore
 skoopub-mouse status
+skoopub-mouse dpi [--value 1000] [--dry-run]
 ```
 
 Data is written to `%LOCALAPPDATA%\skoop\mouse\`: `scroll-report.json`,
