@@ -1,0 +1,34 @@
+Windows Registry Editor Version 5.00
+
+; skoopub baseline for UniKey 4.6 RC2 (Scoop / zeldrisho bucket).
+; Verified against the UniKey engine enums (unikey/keycons.h, unikey/vnconv.h):
+;   CodeTable=0   -> CONV_CHARSET_UNICODE
+;   InputMethod=1 -> UkVni (0 = Telex)
+;   Vietnamese=1  -> Vietnamese typing on
+;   ShowDlg=0     -> no dialog at startup
+;   AutoUpdate=0  -> Scoop owns the version, no update prompt
+; Machine-specific REG_SZ values (MacroPath) are intentionally omitted;
+; apps/unikey/configure.ps1 scrubs stale paths and enforces these values.
+[HKEY_CURRENT_USER\SOFTWARE\PkLong\UniKey]
+"ShowDlg"=dword:00000000
+"Vietnamese"=dword:00000001
+"CodeTable"=dword:00000000
+"InputMethod"=dword:00000001
+"SwitchKey"=dword:00000000
+"FreeMarking"=dword:00000001
+"ModernStyle"=dword:00000000
+"VietGUI"=dword:00000001
+"InConvCharset"=dword:00000000
+"OutConvCharset"=dword:00000001
+"ClipboardConvert"=dword:00000001
+"MacroEnabled"=dword:00000000
+"AutoNonVnRestore"=dword:00000001
+"UseUnicodeClipboard"=dword:00000000
+"AlwaysMacro"=dword:00000000
+"UseIME"=dword:00000000
+"SpellCheckEnabled"=dword:00000001
+"AutoUpdate"=dword:00000000
+"Notification"=dword:00000000
+"AutoUpcaseMacro"=dword:00000001
+"SoundOnSwitch"=dword:00000001
+"PerAppMode"=dword:00000000

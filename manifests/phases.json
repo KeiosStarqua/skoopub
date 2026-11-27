@@ -7,10 +7,10 @@
             "Apps": [
                 "git",
                 "pwsh",
+                "rio",
                 "herdr",
                 "herdr-core",
                 "vicinae",
-                "rio",
                 "JetBrainsMono-NF",
                 "tailscale"
             ]

@@ -7,12 +7,13 @@
     - Installs Scoop if it is missing (per-user, or system-wide when run elevated).
     - Makes sure git is available, then installs manifests/scoop.json in the
       ordered phases declared by manifests/phases.json: phase 1 is the fast
-      essentials (PowerShell 7, Rio, Vicinae, the Herdr TUI and Tailscale), and
-      the heavy downloads come last. Phase 1 finishes its own setup (Rio config,
-      Vicinae shortcut + autostart, Herdr check, Tailscale sign-in with
-      `tailscale up --qr`) before phase 2 starts, and the script re-launches
-      itself under pwsh as soon as phase 1 installs it. -EssentialsOnly stops
-      right after that phase.
+      essentials (git, PowerShell 7, Rio first, then the Herdr TUI, Vicinae and
+      Tailscale), and the heavy downloads come last. Phase 1 finishes its own
+      setup (Rio config, Vicinae shortcut + autostart, Herdr check, Tailscale
+      sign-in with `tailscale up --qr`), restores Vicinae once Tailscale is
+      connected, and opens Rio in ~/repos with Herdr running before phase 2
+      starts. The script re-launches itself under pwsh as soon as phase 1
+      installs it. -EssentialsOnly stops right after that phase.
     - Installs the Firefox policy once the apps phase has installed Firefox:
       auto-installs Bitwarden, mymind and "I still don't care about cookies",
       shows the bookmarks toolbar, adds a skoopub bookmarks folder (Hacker News,
@@ -37,6 +38,11 @@
       addresses are stored in the repo.
     - Keeps a UniKey that is already installed (e.g. on a public PC) instead of
       adding a second copy; -ForceUniKey installs the Scoop build anyway.
+    - Configures UniKey with no GUI via apps/unikey/configure.ps1: Unicode output,
+      VNI input method, Vietnamese typing on, no startup dialog and a per-user
+      Startup shortcut. Settings come from the sanitized apps/unikey/unikey.reg
+      baseline (HKCU\SOFTWARE\PkLong\UniKey for 4.6 RC2); -Export / -Restore
+      back up and restore the DWORD settings without machine-specific paths.
     - Sets the CurrentUser execution policy to RemoteSigned so the repo-managed
       profile and other local scripts load instead of failing with "running
       scripts is disabled on this system"; an already-permissive policy is kept.
@@ -81,6 +87,15 @@
       via apps/mouse/configure.ps1 (non-fatal), so `apps/mouse/mouse.ps1 diagnose`
       can capture HID Raw Input vs WM_MOUSEWHEEL. The correction hook is opt-in:
       run `mouse.ps1 fix` / `mouse.ps1 restore` yourself after a diagnosis.
+    - Creates ~/repos and clones skoopub into ~/repos\skoopub when it is missing.
+      An existing directory is never overwritten, so this is safe to re-run.
+    - Installs Rio before Herdr in phase 1, then opens Rio in ~/repos with Herdr
+      already running. Skipped for non-interactive shells and Herdr panes;
+      -NoAutoHerdr / SKOOP_NO_AUTO_HERDR=1 opts out.
+    - Restores Vicinae from the latest acer-ubuntu snapshot right after Tailscale
+      connects (via core/restore-backup.ps1 -Only vicinae), with a marker file so
+      repeated installs do not re-download it. Non-fatal; supply -BackupUser or
+      SKOOP_BACKUP_USER when running unattended.
 
     Interactive CLI: when gum (charm-gum) is available, the script opens a menu
     to choose Full setup / Configure only / Connect Herdr only / Quit. It falls
@@ -139,6 +154,10 @@
     Do not re-launch under PowerShell 7. Stays on Windows PowerShell 5.1 (also
     $env:SKOOP_NO_PWSH=1).
 
+.PARAMETER NoAutoHerdr
+    Do not open Rio with Herdr after the essentials phase (also
+    $env:SKOOP_NO_AUTO_HERDR=1). Useful for unattended installs.
+
 .EXAMPLE
     # One command: configure this machine, then pick a tailnet machine and add it to Herdr.
     powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
@@ -165,6 +184,7 @@ param(
     [switch]$NoMenu,
     [switch]$NoGum,
     [switch]$NoPwsh,
+    [switch]$NoAutoHerdr,
     [switch]$EssentialsOnly,
     [string]$BackupUser = "$env:SKOOP_BACKUP_USER",
     [switch]$SkipShutdownHook,
@@ -174,6 +194,7 @@ param(
 # Env vars let the piped (`irm ... | iex`) form pass the same options.
 if ($env:SKOOP_SKIP_HERDR -eq '1') { $SkipHerdrConnect = $true }
 if ($env:SKOOP_ESSENTIALS_ONLY -eq '1') { $EssentialsOnly = $true }
+if ($env:SKOOP_NO_AUTO_HERDR -eq '1') { $NoAutoHerdr = $true }
 if ($NoGum) { $env:SKOOP_NO_GUM = '1' }
 
 # `--help` arrives in $args with CmdletBinding; handle it before any side effect.
@@ -193,8 +214,8 @@ Usage:
   .\install.ps1 -SkipHerdrConnect        # configure only
   irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
-Options: -ForceUniKey -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -NoMenu -NoGum -NoPwsh -EssentialsOnly -BackupUser -SkipShutdownHook -Help
-Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER
+Options: -ForceUniKey -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -NoMenu -NoGum -NoPwsh -NoAutoHerdr -EssentialsOnly -BackupUser -SkipShutdownHook -Help
+Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER
 '@
     return
 }
@@ -216,6 +237,7 @@ function Get-SkoopReLaunchArgs {
     if ($HerdrPeer) { $list += '-HerdrPeer' }
     if ($EssentialsOnly) { $list += '-EssentialsOnly' }
     if ($NoGum) { $list += '-NoGum' }
+    if ($NoAutoHerdr) { $list += '-NoAutoHerdr' }
     if ($SkipShutdownHook) { $list += '-SkipShutdownHook' }
     if ($Peer) { $list += @('-Peer', $Peer) }
     if ($HerdrUser) { $list += @('-HerdrUser', $HerdrUser) }
@@ -613,6 +635,92 @@ function Find-ScoopShims {
     ) | Where-Object { Test-Path (Join-Path $_ 'scoop.cmd') } | Select-Object -First 1
 }
 
+function Ensure-SkoopClone {
+    # Every project lives in ~/repos, including this repo itself. A piped
+    # (irm | iex) run has no checkout at all, so leave a local copy for later
+    # re-runs and for Herdr to open. Never overwrite an existing directory.
+    $reposDir = Join-Path $env:USERPROFILE 'repos'
+    $cloneDir = Join-Path $reposDir 'skoopub'
+    try {
+        if (-not (Test-Path -LiteralPath $reposDir)) {
+            Write-Step "Creating $reposDir"
+            New-Item -ItemType Directory -Force -Path $reposDir | Out-Null
+        } else {
+            Write-Ok "$reposDir already exists"
+        }
+        if (Test-Path -LiteralPath (Join-Path $cloneDir '.git')) {
+            Write-Ok "skoopub checkout already exists at $cloneDir"
+            return
+        }
+        if (Test-Path -LiteralPath $cloneDir) {
+            Write-Host "    $cloneDir exists but is not a git checkout - skipping clone" -ForegroundColor Yellow
+            return
+        }
+        $cloneUrl = 'https://github.com/KeiosStarqua/skoopub.git'
+        if ($RepoRawBase -match '^(https?://)raw\.githubusercontent\.com/([^/]+)/([^/]+)') {
+            $cloneUrl = '{0}github.com/{1}/{2}.git' -f $Matches[1], $Matches[2], $Matches[3]
+        }
+        $gitExe = (Get-Command git -ErrorAction Stop).Source
+        Write-Step "Cloning skoopub into $cloneDir"
+        # git writes progress to stderr; merge through cmd so PowerShell 5.1
+        # does not raise a terminating NativeCommandError under ErrorAction=Stop.
+        $out = (& cmd /c "`"$gitExe`" clone `"$cloneUrl`" `"$cloneDir`" 2>&1" | Out-String)
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $cloneDir '.git'))) {
+            throw "git clone failed (exit $LASTEXITCODE): $(($out -split "`r?`n" | Select-Object -Last 3) -join ' ')"
+        }
+        Write-Ok "skoopub cloned into $cloneDir"
+    } catch {
+        Write-Host "    Could not prepare $cloneDir (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+function Start-HerdrInRio {
+    # Open the terminal first with Herdr already running, so a fresh machine is
+    # usable straight after the essentials phase. Kept non-fatal and idempotent.
+    if ($NoAutoHerdr -or $env:SKOOP_NO_AUTO_HERDR -eq '1') {
+        Write-Ok 'Herdr auto-launch disabled (-NoAutoHerdr)'
+        return
+    }
+    if (-not [Environment]::UserInteractive) {
+        Write-Ok 'non-interactive shell - skipping the Rio/Herdr launch'
+        return
+    }
+    if ($env:HERDR_ENV -eq '1') {
+        # install.ps1 is sometimes run from inside a Herdr pane; launching a
+        # nested client there makes herdr abort with the inception message.
+        Write-Ok 'running inside Herdr - skipping the nested Rio/Herdr launch'
+        return
+    }
+    $rio = Get-Command rio -ErrorAction SilentlyContinue
+    $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+    if (-not $rio -or -not $pwshCmd) {
+        Write-Host '    Rio or pwsh not on PATH - skipping the auto-launch' -ForegroundColor Yellow
+        return
+    }
+    $reposDir = Join-Path $env:USERPROFILE 'repos'
+    if (-not (Test-Path -LiteralPath $reposDir)) {
+        New-Item -ItemType Directory -Force -Path $reposDir | Out-Null
+    }
+    # Clear markers inherited from a Herdr pane: shell/profile.ps1 does this
+    # for new pwsh sessions too, but the child may be launched from a launcher.
+    foreach ($name in @(
+        'HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID',
+        'HERDR_WORKSPACE_ID', 'HERDR_SOCKET_PATH', 'HERDR_BIN_PATH'
+    )) {
+        Remove-Item "Env:$name" -ErrorAction SilentlyContinue
+    }
+    Write-Step "Opening Rio in $reposDir with Herdr"
+    try {
+        # Rio's -e command must be the last argument; run herdr through pwsh so
+        # the repo-managed profile loads (and scrubs any leftover Herdr vars).
+        $rioArgs = @('-w', "`"$reposDir`"", '-e', "`"$($pwshCmd.Source)`"", '-NoLogo', '-NoExit', '-Command', 'herdr')
+        Start-Process -FilePath $rio.Source -ArgumentList $rioArgs -WorkingDirectory $reposDir | Out-Null
+        Write-Ok 'Rio opened - Herdr is starting in it'
+    } catch {
+        Write-Host "    Could not open Rio/Herdr (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
 # --- 0. Interactive CLI menu (gum when available) ----------------------------
 $runMode = 'full'
 if (-not $NoMenu -and -not $HerdrPeer -and $env:SKOOP_NO_MENU -ne '1' -and
@@ -645,9 +753,10 @@ if (-not $repoRoot) {
     New-Item -ItemType Directory -Force -Path $repoRoot | Out-Null
     $repoFiles = @(
         'manifests/scoop.json', 'manifests/phases.json', 'core/scoop-phases.ps1',
-        'core/set-dark-mode.ps1', 'shell/profile.ps1',
+        'core/set-dark-mode.ps1', 'core/restore-backup.ps1', 'shell/profile.ps1',
         'apps/sharex/fix-printscreen.ps1', 'apps/sharex/hotkeys.template.json',
         'apps/firefox/policies.template.json',
+        'apps/unikey/configure.ps1', 'apps/unikey/unikey.reg',
         'apps/github/setup-auth.ps1', 'apps/zed/configure.ps1',
         'apps/herdr/setup-ssh.ps1', 'apps/tailscale/configure.ps1',
         'apps/git/setup-identity.ps1',
@@ -675,6 +784,7 @@ $manifest       = Join-Path $repoRoot 'manifests\scoop.json'
 $phasesManifest = Join-Path $repoRoot 'manifests\phases.json'
 $profileScript  = Join-Path $repoRoot 'shell\profile.ps1'
 $sharexFix      = Join-Path $repoRoot 'apps\sharex\fix-printscreen.ps1'
+$unikeyConfig   = Join-Path $repoRoot 'apps\unikey\configure.ps1'
 $firefoxPolicies = Join-Path $repoRoot 'apps\firefox\policies.template.json'
 $ghAuth          = Join-Path $repoRoot 'apps\github\setup-auth.ps1'
 $gitIdentity     = Join-Path $repoRoot 'apps\git\setup-identity.ps1'
@@ -694,7 +804,7 @@ Write-Ok "repo root: $repoRoot"
 
 if ($runMode -eq 'herdr') {
     Start-TailscaleDaemon
-    if (Test-Path $tailscaleConfig) { & $tailscaleConfig }
+    if (Test-Path $tailscaleConfig) { & $tailscaleConfig -RestoreVicinae -BackupUser $BackupUser }
     Connect-HerdrRemote
     Write-Host ''
     Write-Host 'Done. Herdr machine saved - open Herdr and pick it from the sidebar; run the full setup to configure this machine.' -ForegroundColor Green
@@ -746,11 +856,12 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Step 'Installing git (required for Scoop buckets)'
     & $scoop install git
 }
+Ensure-SkoopClone
 
 # --- 7. Install the phase manifests in order --------------------------------
 # manifests/phases.json assigns every app in manifests/scoop.json to an ordered
-# phase: phase 1 is the fast essentials (PowerShell 7, Rio, Vicinae, Herdr,
-# Tailscale) and the heavy downloads come last. The per-phase manifests are
+# phase: phase 1 is the fast essentials (git, pwsh, Rio first, then Herdr,
+# Vicinae and Tailscale) and the heavy downloads come last. The per-phase manifests are
 # generated at run time so scoop.json stays the single source of truth.
 function Invoke-EssentialTerminalSetup {
     # Finish the phase-1 apps before phase 2 starts downloading anything else.
@@ -779,14 +890,20 @@ function Invoke-EssentialTerminalSetup {
 
     # Tailscale is part of phase 1 so the `tailscale up --qr` sign-in (URL/QR)
     # happens before the slower phases, and well before Firefox is installed.
+    # Once it is connected, restore Vicinae from the shutdown backup (once per
+    # machine) so a fresh PC has its launcher config/data back.
     Start-TailscaleDaemon
     if (Test-Path $tailscaleConfig) {
         try {
-            & $tailscaleConfig -SignIn
+            & $tailscaleConfig -SignIn -RestoreVicinae -BackupUser $BackupUser
         } catch {
             Write-Host "    Tailscale sign-in failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
+
+    # Rio was installed before Herdr in this phase, so open it in ~/repos with
+    # Herdr already running. The helper scrubs inherited HERDR_* markers.
+    Start-HerdrInRio
 }
 
 . (Join-Path $repoRoot 'core\scoop-phases.ps1')
@@ -816,6 +933,19 @@ if ($EssentialsOnly) {
 if ($phaseResult.Failed.Count -gt 0) {
     Write-Host ''
     Write-Host ("These phases failed: {0}. Re-run .\install.ps1 -NoMenu to retry them." -f ($phaseResult.Failed -join ', ')) -ForegroundColor Yellow
+}
+
+# --- UniKey auto-config (Unicode + VNI, Vietnamese on, startup shortcut) -----
+if (Test-Path $unikeyConfig) {
+    Write-Step 'Configuring UniKey (Unicode, VNI, Vietnamese on)'
+    try {
+        & $unikeyConfig -Force:$ForceUniKey
+    } catch {
+        # Convenience step: never let an IME config failure abort the bootstrap.
+        Write-Host "    UniKey config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Ok 'apps/unikey/configure.ps1 not found - skipping'
 }
 
 # --- 8. Firefox policy + default browser (installed by the apps phase) ------
@@ -999,6 +1129,7 @@ Write-Host 'git push will use your gh login (no username prompt).' -ForegroundCo
 Write-Host 'Commits will be authored as Keios <git@taquangkhoi.com>.' -ForegroundColor Green
 Write-Host 'Vicinae starts at login; press Ctrl+Space to open the launcher.' -ForegroundColor Green
 Write-Host 'Rio font size / zoom is 16.' -ForegroundColor Green
+Write-Host 'UniKey: Unicode + VNI, Vietnamese on, no startup dialog, starts at login.' -ForegroundColor Green
 Write-Host 'Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL).' -ForegroundColor Green
 Write-Host 'Komorebi hotkeys are ready (see apps/komorebi/whkdrc).' -ForegroundColor Green
 Write-Host 'YASB status bar is configured; fill ~/.config/yasb/.env for weather/wallpapers.' -ForegroundColor Green

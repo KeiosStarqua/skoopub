@@ -11,6 +11,11 @@
     with `tailscale up` first. Native stderr is merged through cmd.exe because
     Windows PowerShell 5.1 turns it into a terminating NativeCommandError.
 
+    With -RestoreVicinae, a connected node also restores Vicinae from the latest
+    acer-ubuntu snapshot through core/restore-backup.ps1 -Only vicinae. A marker
+    under %LOCALAPPDATA%\skoop keeps re-runs from downloading it again; failures
+    are non-fatal. -ForceVicinaeRestore repeats it even when the marker exists.
+
 .PARAMETER Tag
     ACL tag to advertise. The `tag:` prefix is added when omitted.
 
@@ -22,11 +27,23 @@
     and QR code are printed in the terminal. Used by the core-terminal phase so
     Tailscale is connected before the slower phases (and Firefox) start.
 
+.PARAMETER RestoreVicinae
+    After sign-in (or for an already-connected node), restore Vicinae from the
+    shutdown backup once per machine. Needs -BackupUser or SKOOP_BACKUP_USER for
+    unattended runs; otherwise restore-backup.ps1 prompts when interactive.
+
+.PARAMETER ForceVicinaeRestore
+    Ignore the "already restored" marker and restore Vicinae again.
+
+.PARAMETER BackupUser
+    SSH user on acer-ubuntu for the optional Vicinae restore. Defaults to
+    $env:SKOOP_BACKUP_USER.
+
 .EXAMPLE
     .\apps\tailscale\configure.ps1
 
 .EXAMPLE
-    .\apps\tailscale\configure.ps1 -SignIn
+    .\apps\tailscale\configure.ps1 -SignIn -RestoreVicinae
 
 .EXAMPLE
     .\apps\tailscale\configure.ps1 -Tag tag:public-client
@@ -35,7 +52,10 @@
 param(
     [string]$Tag = 'tag:public-client',
     [switch]$SkipTag,
-    [switch]$SignIn
+    [switch]$SignIn,
+    [switch]$RestoreVicinae,
+    [switch]$ForceVicinaeRestore,
+    [string]$BackupUser = "$env:SKOOP_BACKUP_USER"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -59,43 +79,82 @@ function Resolve-TailscaleCli {
     return $null
 }
 
+function Test-TailscaleConnected {
+    param([string]$Cli)
+    if (-not $Cli) { return $false }
+    $raw = (& cmd /c "`"$Cli`" status --json 2>&1" | Out-String)
+    $status = try { $raw | ConvertFrom-Json -ErrorAction Stop } catch { $null }
+    return [bool]($status -and $status.BackendState -eq 'Running' -and $status.Self.Online)
+}
+
+function Invoke-VicinaeRestoreOnConnect {
+    # The shutdown backup logs Tailscale out and uploads Vicinae's config/data,
+    # so a reconnected (or freshly installed) machine can put it straight back.
+    $restoreScript = Join-Path (Split-Path $PSScriptRoot -Parent) 'core\restore-backup.ps1'
+    if (-not (Test-Path -LiteralPath $restoreScript)) {
+        Write-Warn 'core/restore-backup.ps1 not found - skipping Vicinae auto-restore.'
+        return
+    }
+    $marker = Join-Path $env:LOCALAPPDATA 'skoop\vicinae-restore-on-connect.done'
+    if ((Test-Path -LiteralPath $marker) -and -not $ForceVicinaeRestore) {
+        Write-Ok "Vicinae already restored on Tailscale connect - skipping (pass -ForceVicinaeRestore to repeat)"
+        return
+    }
+    if (-not $BackupUser -and -not [Environment]::UserInteractive) {
+        Write-Warn 'no SSH user for acer-ubuntu - set -BackupUser / SKOOP_BACKUP_USER to auto-restore Vicinae.'
+        return
+    }
+    $restoreArgs = @('-Only', 'vicinae')
+    if ($BackupUser) { $restoreArgs += @('-User', $BackupUser) }
+    Write-Step 'Restoring Vicinae from the latest backup after Tailscale connect'
+    try {
+        & $restoreScript @restoreArgs
+        $markerDir = Split-Path -Parent $marker
+        if (-not (Test-Path -LiteralPath $markerDir)) { New-Item -ItemType Directory -Force -Path $markerDir | Out-Null }
+        [System.IO.File]::WriteAllText($marker, (Get-Date -Format 'o'))
+        Write-Ok "Vicinae restored; marker written to $marker"
+    } catch {
+        Write-Warn "Vicinae auto-restore failed (non-fatal): $($_.Exception.Message)"
+    }
+}
+
+$cli = Resolve-TailscaleCli
+
 if ($SignIn) {
     # Connect before the slow phases so `tailscale up --qr` can show its login
     # URL/QR in the terminal. Already-connected nodes are left alone.
-    $cli = Resolve-TailscaleCli
     if (-not $cli) {
         Write-Warn 'tailscale.exe not found - skipping Tailscale sign-in.'
+    } elseif (Test-TailscaleConnected $cli) {
+        Write-Ok 'Tailscale is already signed in'
+    } elseif (-not [Environment]::UserInteractive) {
+        Write-Warn 'Tailscale sign-in needs a terminal - run `tailscale up --qr` yourself.'
     } else {
-        $statusRaw = (& cmd /c "`"$cli`" status --json 2>&1" | Out-String)
-        $status = try { $statusRaw | ConvertFrom-Json -ErrorAction Stop } catch { $null }
-        if ($status -and $status.BackendState -eq 'Running' -and $status.Self.Online) {
-            Write-Ok 'Tailscale is already signed in'
-        } elseif (-not [Environment]::UserInteractive) {
-            Write-Warn 'Tailscale sign-in needs a terminal - run `tailscale up --qr` yourself.'
+        Write-Step 'Signing in to Tailscale (scan the QR code or open the URL below)'
+        # Stream the output: --qr draws the login QR code and the URL stays
+        # clickable. cmd merges stderr so 5.1 does not raise NativeCommandError.
+        & cmd /c "`"$cli`" up --qr 2>&1"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "Tailscale sign-in did not finish (exit $LASTEXITCODE) - run ``tailscale up --qr`` later."
         } else {
-            Write-Step 'Signing in to Tailscale (scan the QR code or open the URL below)'
-            # Stream the output: --qr draws the login QR code and the URL stays
-            # clickable. cmd merges stderr so 5.1 does not raise NativeCommandError.
-            & cmd /c "`"$cli`" up --qr 2>&1"
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warn "Tailscale sign-in did not finish (exit $LASTEXITCODE) - run ``tailscale up --qr`` later."
-            } else {
-                Write-Ok 'Tailscale sign-in complete'
-            }
+            Write-Ok 'Tailscale sign-in complete'
         }
     }
+}
+
+# Probe again rather than trusting the sign-in exit code: the QR flow can exit
+# 0 without a working connection, and already-connected nodes skip it entirely.
+if ($RestoreVicinae -and (Test-TailscaleConnected $cli)) {
+    Invoke-VicinaeRestoreOnConnect
 }
 
 if ($SkipTag) { Write-Ok 'Tailnet tagging skipped (-SkipTag).'; return }
 if ($Tag -notlike 'tag:*') { $Tag = "tag:$Tag" }
 
-$cli = Resolve-TailscaleCli
 if (-not $cli) { Write-Warn 'tailscale.exe not found - skipping tailnet tagging.'; return }
 
 Write-Step "Tagging this device with $Tag in the tailnet"
-$raw = (& cmd /c "`"$cli`" status --json 2>&1" | Out-String)
-$status = try { $raw | ConvertFrom-Json -ErrorAction Stop } catch { $null }
-if (-not $status -or $status.BackendState -ne 'Running' -or -not $status.Self.Online) {
+if (-not (Test-TailscaleConnected $cli)) {
     Write-Warn 'Tailscale is not connected - sign in from the tray icon or run `tailscale up`, then re-run.'
     return
 }
