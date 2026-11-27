@@ -281,27 +281,58 @@ param(
 )
 
 # Env vars let the piped (`irm ... | iex`) form pass the same options.
-if ($env:SKOOP_SKIP_HERDR -eq '1') { $SkipHerdrConnect = $true }
-if ($env:SKOOP_ESSENTIALS_ONLY -eq '1') { $EssentialsOnly = $true }
-if ($env:SKOOP_NO_AUTO_HERDR -eq '1') { $NoAutoHerdr = $true }
-if ($env:SKOOP_NO_MOUSE_DPI -eq '1') { $SkipMouseDpi = $true }
-if ($env:SKOOP_NO_SSH_RESTORE -eq '1') { $SkipSshRestore = $true }
-if ($env:SKOOP_MOUSE_DPI -and $env:SKOOP_MOUSE_DPI -match '^\d+$') { $MouseDpi = [int]$env:SKOOP_MOUSE_DPI }
-if ($env:SKOOP_FORCE_FIREFOX_RESTORE -eq '1') { $ForceFirefoxRestore = $true }
-if ($env:SKOOP_FORCE_ATUIN_RESTORE -eq '1') { $ForceAtuinRestore = $true }
-if ($env:SKOOP_NO_FIREFOX_RESTORE -eq '1') { $SkipFirefoxRestore = $true }
-if ($env:SKOOP_NO_ATUIN_RESTORE -eq '1') { $SkipAtuinRestore = $true }
-if ($env:SKOOP_MENU -eq '1') { $Menu = $true }
-if ($env:SKOOP_NO_WALLPAPERS -eq '1') { $NoWallpapers = $true }
-if ($env:SKOOP_NO_WALLPAPER -eq '1') { $NoWallpaper = $true }
-if ($env:SKOOP_FORCE_INSTALL -eq '1') { $ForceInstall = $true }
-if ($NoGum) { $env:SKOOP_NO_GUM = '1' }
+if ($env:SKOOP_SKIP_HERDR -eq '1')
+{ $SkipHerdrConnect = $true 
+}
+if ($env:SKOOP_ESSENTIALS_ONLY -eq '1')
+{ $EssentialsOnly = $true 
+}
+if ($env:SKOOP_NO_AUTO_HERDR -eq '1')
+{ $NoAutoHerdr = $true 
+}
+if ($env:SKOOP_NO_MOUSE_DPI -eq '1')
+{ $SkipMouseDpi = $true 
+}
+if ($env:SKOOP_NO_SSH_RESTORE -eq '1')
+{ $SkipSshRestore = $true 
+}
+if ($env:SKOOP_MOUSE_DPI -and $env:SKOOP_MOUSE_DPI -match '^\d+$')
+{ $MouseDpi = [int]$env:SKOOP_MOUSE_DPI 
+}
+if ($env:SKOOP_FORCE_FIREFOX_RESTORE -eq '1')
+{ $ForceFirefoxRestore = $true 
+}
+if ($env:SKOOP_FORCE_ATUIN_RESTORE -eq '1')
+{ $ForceAtuinRestore = $true 
+}
+if ($env:SKOOP_NO_FIREFOX_RESTORE -eq '1')
+{ $SkipFirefoxRestore = $true 
+}
+if ($env:SKOOP_NO_ATUIN_RESTORE -eq '1')
+{ $SkipAtuinRestore = $true 
+}
+if ($env:SKOOP_MENU -eq '1')
+{ $Menu = $true 
+}
+if ($env:SKOOP_NO_WALLPAPERS -eq '1')
+{ $NoWallpapers = $true 
+}
+if ($env:SKOOP_NO_WALLPAPER -eq '1')
+{ $NoWallpaper = $true 
+}
+if ($env:SKOOP_FORCE_INSTALL -eq '1')
+{ $ForceInstall = $true 
+}
+if ($NoGum)
+{ $env:SKOOP_NO_GUM = '1' 
+}
 
 # `--help` arrives in $args with CmdletBinding; handle it before any side effect.
 # --help binds to the first positional string parameter ($RepoRawBase) when
 # the script is invoked as `& .\install.ps1 --help`, so check that too.
 if ($Help -or $RepoRawBase -in @('--help', '-h', '/?', 'help') -or
-    ($args | Where-Object { $_ -in @('--help', '-h', '/?', 'help') })) {
+    ($args | Where-Object { $_ -in @('--help', '-h', '/?', 'help') }))
+{
     Write-Host @'
 skoop install.ps1 - interactive Windows setup
 
@@ -326,52 +357,114 @@ Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, S
 # phase and re-launches the rest of the setup under pwsh. -NoPwsh /
 # $env:SKOOP_NO_PWSH=1 stays on 5.1, and a piped `irm ... | iex` run has no
 # script file to re-launch.
-function Get-SkoopReLaunchArgs {
+function Get-SkoopReLaunchArgs
+{
     param([switch]$SkipMenu)
     $list = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
-    if ($SkipMenu -or $NoMenu) { $list += '-NoMenu' }
-    if ($Menu -and -not $SkipMenu) { $list += '-Menu' }
-    if ($RepoRawBase) { $list += @('-RepoRawBase', $RepoRawBase) }
-    if ($ForceUniKey) { $list += '-ForceUniKey' }
-    if ($ForceInstall) { $list += '-ForceInstall' }
-    if ($SkipGhLogin) { $list += '-SkipGhLogin' }
-    if ($SkipHerdrConnect) { $list += '-SkipHerdrConnect' }
-    if ($HerdrPeer) { $list += '-HerdrPeer' }
-    if ($EssentialsOnly) { $list += '-EssentialsOnly' }
-    if ($NoGum) { $list += '-NoGum' }
-    if ($NoAutoHerdr) { $list += '-NoAutoHerdr' }
-    if ($MouseDpi -ne 1200) { $list += @('-MouseDpi', "$MouseDpi") }
-    if ($SkipMouseDpi) { $list += '-SkipMouseDpi' }
-    if ($ForceFirefoxRestore) { $list += '-ForceFirefoxRestore' }
-    if ($ForceAtuinRestore) { $list += '-ForceAtuinRestore' }
-    if ($SkipFirefoxRestore) { $list += '-SkipFirefoxRestore' }
-    if ($SkipAtuinRestore) { $list += '-SkipAtuinRestore' }
-    if ($SkipSshRestore) { $list += '-SkipSshRestore' }
-    if ($SkipShutdownHook) { $list += '-SkipShutdownHook' }
-    if ($NoWallpapers) { $list += '-NoWallpapers' }
-    if ($NoWallpaper) { $list += '-NoWallpaper' }
-    if ($Wallpaper) { $list += @('-Wallpaper', $Wallpaper) }
-    if ($Peer) { $list += @('-Peer', $Peer) }
-    if ($HerdrUser) { $list += @('-HerdrUser', $HerdrUser) }
-    if ($BackupUser) { $list += @('-BackupUser', $BackupUser) }
+    if ($SkipMenu -or $NoMenu)
+    { $list += '-NoMenu' 
+    }
+    if ($Menu -and -not $SkipMenu)
+    { $list += '-Menu' 
+    }
+    if ($RepoRawBase)
+    { $list += @('-RepoRawBase', $RepoRawBase) 
+    }
+    if ($ForceUniKey)
+    { $list += '-ForceUniKey' 
+    }
+    if ($ForceInstall)
+    { $list += '-ForceInstall' 
+    }
+    if ($SkipGhLogin)
+    { $list += '-SkipGhLogin' 
+    }
+    if ($SkipHerdrConnect)
+    { $list += '-SkipHerdrConnect' 
+    }
+    if ($HerdrPeer)
+    { $list += '-HerdrPeer' 
+    }
+    if ($EssentialsOnly)
+    { $list += '-EssentialsOnly' 
+    }
+    if ($NoGum)
+    { $list += '-NoGum' 
+    }
+    if ($NoAutoHerdr)
+    { $list += '-NoAutoHerdr' 
+    }
+    if ($MouseDpi -ne 1200)
+    { $list += @('-MouseDpi', "$MouseDpi") 
+    }
+    if ($SkipMouseDpi)
+    { $list += '-SkipMouseDpi' 
+    }
+    if ($ForceFirefoxRestore)
+    { $list += '-ForceFirefoxRestore' 
+    }
+    if ($ForceAtuinRestore)
+    { $list += '-ForceAtuinRestore' 
+    }
+    if ($SkipFirefoxRestore)
+    { $list += '-SkipFirefoxRestore' 
+    }
+    if ($SkipAtuinRestore)
+    { $list += '-SkipAtuinRestore' 
+    }
+    if ($SkipSshRestore)
+    { $list += '-SkipSshRestore' 
+    }
+    if ($SkipShutdownHook)
+    { $list += '-SkipShutdownHook' 
+    }
+    if ($NoWallpapers)
+    { $list += '-NoWallpapers' 
+    }
+    if ($NoWallpaper)
+    { $list += '-NoWallpaper' 
+    }
+    if ($Wallpaper)
+    { $list += @('-Wallpaper', $Wallpaper) 
+    }
+    if ($Peer)
+    { $list += @('-Peer', $Peer) 
+    }
+    if ($HerdrUser)
+    { $list += @('-HerdrUser', $HerdrUser) 
+    }
+    if ($BackupUser)
+    { $list += @('-BackupUser', $BackupUser) 
+    }
     return $list
 }
 
-function Invoke-PwshReLaunch {
+function Invoke-PwshReLaunch
+{
     param([switch]$SkipMenu)
-    if ($NoPwsh -or $env:SKOOP_NO_PWSH -eq '1' -or $env:SKOOP_PWSH_RELAUNCHED -eq '1') { return $false }
-    if ($PSVersionTable.PSEdition -ne 'Desktop') { return $false }
-    if (-not $PSCommandPath -or -not (Test-Path -LiteralPath $PSCommandPath)) { return $false }
+    if ($NoPwsh -or $env:SKOOP_NO_PWSH -eq '1' -or $env:SKOOP_PWSH_RELAUNCHED -eq '1')
+    { return $false 
+    }
+    if ($PSVersionTable.PSEdition -ne 'Desktop')
+    { return $false 
+    }
+    if (-not $PSCommandPath -or -not (Test-Path -LiteralPath $PSCommandPath))
+    { return $false 
+    }
     $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
-    if (-not $pwsh) { return $false }
+    if (-not $pwsh)
+    { return $false 
+    }
 
     Write-Host '    re-launching under PowerShell 7 (pwsh); pass -NoPwsh to stay on 5.1' -ForegroundColor DarkGray
     # Guard inherited by the child, so a broken pwsh shim cannot loop forever.
     $env:SKOOP_PWSH_RELAUNCHED = '1'
-    try {
+    try
+    {
         & $pwsh.Source @(Get-SkoopReLaunchArgs -SkipMenu:$SkipMenu)
         exit $LASTEXITCODE
-    } catch {
+    } catch
+    {
         Write-Host "    could not start pwsh ($($_.Exception.Message)) - continuing on Windows PowerShell 5.1" -ForegroundColor Yellow
         return $false
     }
@@ -383,10 +476,15 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-function Write-Step([string]$Message) { Write-Host "==> $Message" -ForegroundColor Cyan }
-function Write-Ok([string]$Message)   { Write-Host "    $Message" -ForegroundColor DarkGray }
+function Write-Step([string]$Message)
+{ Write-Host "==> $Message" -ForegroundColor Cyan 
+}
+function Write-Ok([string]$Message)
+{ Write-Host "    $Message" -ForegroundColor DarkGray 
+}
 
-function Invoke-GumPicker {
+function Invoke-GumPicker
+{
     # gum draws its UI on stderr and writes only the answer to stdout.
     # Redirecting or piping stderr (2>&1, | Out-String) leaves gum without a
     # terminal, so it renders nothing and returns no choice; letting PowerShell
@@ -409,7 +507,8 @@ function Invoke-GumPicker {
     }
 }
 
-function Invoke-SetupMenu {
+function Invoke-SetupMenu
+{
     # Interactive CLI entry point. gum is used when available (charm-gum from
     # scoop.json); otherwise fall back to a numbered prompt. Returns a mode.
     $items = @(
@@ -419,165 +518,233 @@ function Invoke-SetupMenu {
         @{ Key = 'herdr';      Label = 'Connect Herdr only' },
         @{ Key = 'quit';       Label = 'Quit' }
     )
-    if (-not [Environment]::UserInteractive) {
+    if (-not [Environment]::UserInteractive)
+    {
         Write-Ok 'Non-interactive shell - running the full setup (omit -Menu next time)'
         return 'full'
     }
 
     $gum = Get-Command gum -ErrorAction SilentlyContinue
-    if ($gum -and $env:SKOOP_NO_GUM -ne '1') {
+    if ($gum -and $env:SKOOP_NO_GUM -ne '1')
+    {
         Write-Host 'Choose an action:' -ForegroundColor Cyan
-        try {
+        try
+        {
             $gumArgs = @('choose', '--header', 'skoop setup') + @($items.Label)
             $result = Invoke-GumPicker -GumPath $gum.Source -Arguments $gumArgs
             $lines = @($result.Output -split "`r?`n" | ForEach-Object { $_ -replace "`e\[[0-9;?]*[a-zA-Z]", '' })
             $choice = ''
-            foreach ($line in $lines) {
-                foreach ($item in $items) {
-                    if ($line.Trim() -eq $item.Label) { $choice = $item.Label; break }
+            foreach ($line in $lines)
+            {
+                foreach ($item in $items)
+                {
+                    if ($line.Trim() -eq $item.Label)
+                    { $choice = $item.Label; break 
+                    }
                 }
-                if ($choice) { break }
+                if ($choice)
+                { break 
+                }
             }
-            if ($result.ExitCode -eq 0 -and $choice) {
-                foreach ($item in $items) { if ($choice -eq $item.Label) { return $item.Key } }
+            if ($result.ExitCode -eq 0 -and $choice)
+            {
+                foreach ($item in $items)
+                { if ($choice -eq $item.Label)
+                    { return $item.Key 
+                    } 
+                }
                 return 'full'
             }
             Write-Ok 'gum menu did not return a choice - using the numbered prompt'
-        } catch {
+        } catch
+        {
             Write-Ok "gum menu failed ($($_.Exception.Message)) - using the numbered prompt"
         }
     }
 
     Write-Host 'Choose an action (install gum for a nicer menu):' -ForegroundColor Cyan
-    for ($i = 0; $i -lt $items.Count; $i++) {
+    for ($i = 0; $i -lt $items.Count; $i++)
+    {
         Write-Host ('  [{0}] {1}' -f ($i + 1), $items[$i].Label)
     }
     $answer = Read-Host 'Action [1 = full, Enter = full]'
-    if (-not $answer) { return 'full' }
-    if ($answer -notmatch '^\d+$') { return 'quit' }
+    if (-not $answer)
+    { return 'full' 
+    }
+    if ($answer -notmatch '^\d+$')
+    { return 'quit' 
+    }
     $n = [int]$answer
-    if ($n -lt 1 -or $n -gt $items.Count) { return 'quit' }
+    if ($n -lt 1 -or $n -gt $items.Count)
+    { return 'quit' 
+    }
     return $items[$n - 1].Key
 }
 
-function Connect-HerdrRemote {
-    if ($SkipHerdrConnect) { Write-Ok 'Skipping the Herdr remote step'; return }
-    if (-not (Test-Path $herdrSsh)) { Write-Ok 'apps/herdr/setup-ssh.ps1 not found - skipping'; return }
+function Connect-HerdrRemote
+{
+    if ($SkipHerdrConnect)
+    { Write-Ok 'Skipping the Herdr remote step'; return 
+    }
+    if (-not (Test-Path $herdrSsh))
+    { Write-Ok 'apps/herdr/setup-ssh.ps1 not found - skipping'; return 
+    }
     Write-Step 'Picking a tailnet machine for Herdr'
     $herdrArgs = @()
-    if ($Peer) { $herdrArgs += @('-Peer', $Peer) }
-    if ($HerdrUser) { $herdrArgs += @('-User', $HerdrUser) }
-    try {
+    if ($Peer)
+    { $herdrArgs += @('-Peer', $Peer) 
+    }
+    if ($HerdrUser)
+    { $herdrArgs += @('-User', $HerdrUser) 
+    }
+    try
+    {
         & $herdrSsh @herdrArgs
-    } catch {
+    } catch
+    {
         Write-Host "    Herdr remote setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
-function Enable-TaskManager {
+function Enable-TaskManager
+{
     # Locked-down/public PCs can disable Task Manager with a policy. Clear it
     # for this user; HKLM is only touched when the shell is already elevated.
     Write-Step 'Enabling Task Manager (clearing DisableTaskMgr)'
     $elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator)
     $paths = @('HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System')
-    if ($elevated) {
+    if ($elevated)
+    {
         $paths += 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
-    } else {
+    } else
+    {
         Write-Ok 'not elevated - HKCU only (re-run elevated to clear the machine-wide policy)'
     }
 
-    foreach ($path in $paths) {
-        try {
-            if (-not (Test-Path -LiteralPath $path)) { New-Item -Path $path -Force | Out-Null }
+    foreach ($path in $paths)
+    {
+        try
+        {
+            if (-not (Test-Path -LiteralPath $path))
+            { New-Item -Path $path -Force | Out-Null 
+            }
             New-ItemProperty -LiteralPath $path -Name 'DisableTaskMgr' -PropertyType DWord -Value 0 -Force | Out-Null
             Write-Ok "DisableTaskMgr=0 at $path"
-        } catch {
+        } catch
+        {
             # Best-effort: a locked key should not abort the rest of the setup.
             Write-Host "    Could not update $path - $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
 }
 
-function Get-WindowsActivationStatus {
+function Get-WindowsActivationStatus
+{
     # Read-only check of whether Windows is activated. Returns the Windows
     # LicenseStatus code (0 = unlicensed, 1 = licensed, 2..6 = grace/notification
     # states), or -1 when the check cannot be performed. It never activates or
     # bypasses licensing. Reporting is done by the caller from the return value.
     Write-Step 'Checking Windows activation status'
-    try {
+    try
+    {
         $lic = Get-CimInstance -ClassName SoftwareLicensingProduct -Filter "Name LIKE 'Windows%'" -ErrorAction Stop |
             Where-Object { $_.PartialProductKey } |
             Select-Object -First 1
-        if (-not $lic) {
+        if (-not $lic)
+        {
             return -1
         }
         return [int]$lic.LicenseStatus
-    } catch {
+    } catch
+    {
         return -1
     }
 }
 
-function Enable-WallpaperChanges {
+function Enable-WallpaperChanges
+{
     # Public/locked-down PCs often block wallpaper changes with policy values.
     # Clear the per-user values (and the machine-wide ones when elevated) so
     # SystemParametersInfo can set a desktop wallpaper.
     $elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator)
     $roots = @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies')
-    if ($elevated) {
+    if ($elevated)
+    {
         $roots += 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies'
-    } else {
+    } else
+    {
         Write-Ok 'not elevated - HKCU only (re-run elevated to clear machine-wide policy)'
     }
 
-    foreach ($root in $roots) {
+    foreach ($root in $roots)
+    {
         $activeDesktop = Join-Path $root 'ActiveDesktop'
         $system = Join-Path $root 'System'
-        foreach ($path in @($activeDesktop, $system)) {
-            try { if (-not (Test-Path -LiteralPath $path)) { New-Item -Path $path -Force | Out-Null } }
-            catch { Write-Host "    Could not create $path - $($_.Exception.Message)" -ForegroundColor Yellow }
+        foreach ($path in @($activeDesktop, $system))
+        {
+            try
+            { if (-not (Test-Path -LiteralPath $path))
+                { New-Item -Path $path -Force | Out-Null 
+                } 
+            } catch
+            { Write-Host "    Could not create $path - $($_.Exception.Message)" -ForegroundColor Yellow 
+            }
         }
         foreach ($item in @(
-            @{ Path = $activeDesktop; Name = 'NoChangingWallPaper' },
-            @{ Path = $system;        Name = 'NoDispBackgroundPage' }
-        )) {
-            try {
+                @{ Path = $activeDesktop; Name = 'NoChangingWallPaper' },
+                @{ Path = $system;        Name = 'NoDispBackgroundPage' }
+            ))
+        {
+            try
+            {
                 New-ItemProperty -LiteralPath $item.Path -Name $item.Name -PropertyType DWord -Value 0 -Force | Out-Null
                 Write-Ok "$($item.Name)=0 at $($item.Path)"
-            } catch {
+            } catch
+            {
                 Write-Host "    Could not clear $($item.Name) at $($item.Path) - $($_.Exception.Message)" -ForegroundColor Yellow
             }
         }
         # A forced Wallpaper/WallpaperStyle policy overrides anything we set.
-        foreach ($name in @('Wallpaper', 'WallpaperStyle', 'TileWallpaper')) {
-            try {
+        foreach ($name in @('Wallpaper', 'WallpaperStyle', 'TileWallpaper'))
+        {
+            try
+            {
                 Remove-ItemProperty -LiteralPath $system -Name $name -ErrorAction Stop
                 Write-Ok "removed forced $name policy at $system"
-            } catch {
+            } catch
+            {
                 # Missing value is the normal case.
             }
         }
     }
 }
 
-function Set-SkoopWallpaper {
+function Set-SkoopWallpaper
+{
     param([string]$Path)
 
-    if (-not $Path) {
+    if (-not $Path)
+    {
         $imagesDir = Join-Path $env:LOCALAPPDATA 'skoop\wallpapers\aesthetic-wallpapers\images'
-        if (Test-Path -LiteralPath $imagesDir) {
+        if (Test-Path -LiteralPath $imagesDir)
+        {
             $images = @(Get-ChildItem -LiteralPath $imagesDir -File -ErrorAction SilentlyContinue |
-                Where-Object { $_.Extension -match '^\.(jpg|jpeg|png|webp|bmp)$' })
-            if ($images.Count -gt 0) { $Path = ($images | Get-Random).FullName }
+                    Where-Object { $_.Extension -match '^\.(jpg|jpeg|png|webp|bmp)$' })
+            if ($images.Count -gt 0)
+            { $Path = ($images | Get-Random).FullName 
+            }
         }
     }
-    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) {
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path))
+    {
         Write-Ok 'no wallpaper image available - skipping desktop wallpaper'
         return
     }
 
-    if (-not ('SkoopWallpaper' -as [type])) {
+    if (-not ('SkoopWallpaper' -as [type]))
+    {
         Add-Type -TypeDefinition @'
 using System.Runtime.InteropServices;
 public class SkoopWallpaper {
@@ -589,78 +756,103 @@ public class SkoopWallpaper {
 
     # SPI_SETDESKWALLPAPER = 0x0014; SPIF_UPDATEINIFILE | SPIF_SENDCHANGE = 0x03
     $ok = [SkoopWallpaper]::SystemParametersInfo(0x0014, 0, $Path, 0x03)
-    if ($ok -eq 0) {
+    if ($ok -eq 0)
+    {
         Write-Host "    Could not set wallpaper '$Path' (Win32 error $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))." -ForegroundColor Yellow
         return
     }
 
     # Persist the path and Fill style so Explorer keeps it after sign-out.
     $desktop = 'HKCU:\Control Panel\Desktop'
-    try {
+    try
+    {
         New-ItemProperty -LiteralPath $desktop -Name 'Wallpaper' -PropertyType String -Value $Path -Force | Out-Null
         New-ItemProperty -LiteralPath $desktop -Name 'WallpaperStyle' -PropertyType String -Value '10' -Force | Out-Null
         New-ItemProperty -LiteralPath $desktop -Name 'TileWallpaper' -PropertyType String -Value '0' -Force | Out-Null
-    } catch {
+    } catch
+    {
         Write-Host "    Wallpaper set, but could not persist the style - $($_.Exception.Message)" -ForegroundColor Yellow
     }
     Write-Ok "Desktop wallpaper set: $Path"
 }
 
-function Show-TailscaleSignInHint {
+function Show-TailscaleSignInHint
+{
     # Tailscale's daemon and tray app work without the CLI; only peer listing
     # needs it. Probe the CLI so the sign-in advice matches this machine, and
     # never let a broken CLI fail the bootstrap.
     $tailscale = Get-Command tailscale -ErrorAction SilentlyContinue
-    if (-not $tailscale) {
+    if (-not $tailscale)
+    {
         Write-Host '    Tailscale CLI not found - sign in from the Tailscale tray icon.' -ForegroundColor Yellow
         return
     }
     $raw = (& cmd /c ('"{0}" status 2>&1' -f $tailscale.Source) | Out-String)
-    if ($LASTEXITCODE -ne 0) {
+    if ($LASTEXITCODE -ne 0)
+    {
         $line = ($raw -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 1)
-        if (-not $line) { $line = "exit code $LASTEXITCODE" }
+        if (-not $line)
+        { $line = "exit code $LASTEXITCODE" 
+        }
         Write-Host "    Tailscale CLI cannot reach the daemon ($($line.Trim())); use the tray icon to sign in." -ForegroundColor Yellow
         return
     }
-    if ($raw -match 'Logged out|NeedsLogin|not logged in|stopped') {
+    if ($raw -match 'Logged out|NeedsLogin|not logged in|stopped')
+    {
         Write-Ok 'Tailscale is running but not signed in - sign in from the tray icon or run `tailscale up`'
-    } else {
+    } else
+    {
         Write-Ok 'Tailscale is connected'
     }
 }
 
-function Start-TailscaleDaemon {
+function Start-TailscaleDaemon
+{
     # Scoop ships tailscaled but not the Windows service. Prefer the service
     # when the official installer created it; otherwise run the shim directly.
     # Login is interactive (tray icon or `tailscale up`), so it is left to you.
     Write-Step 'Starting Tailscale'
     $service = Get-Service -Name 'Tailscale' -ErrorAction SilentlyContinue
-    if ($service) {
-        try {
-            if ($service.Status -ne 'Running') { Start-Service -Name 'Tailscale' }
+    if ($service)
+    {
+        try
+        {
+            if ($service.Status -ne 'Running')
+            { Start-Service -Name 'Tailscale' 
+            }
             Write-Ok 'Tailscale service is running'
-        } catch {
+        } catch
+        {
             Write-Host "    Could not start the Tailscale service (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
         }
-        try {
-            if ((Get-Service -Name 'Tailscale' -ErrorAction SilentlyContinue).StartType -ne 'Automatic') {
+        try
+        {
+            if ((Get-Service -Name 'Tailscale' -ErrorAction SilentlyContinue).StartType -ne 'Automatic')
+            {
                 Set-Service -Name 'Tailscale' -StartupType Automatic
                 Write-Ok 'Tailscale service set to Automatic'
             }
-        } catch {
+        } catch
+        {
             Write-Host "    Could not set Tailscale to Automatic (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
         }
-    } else {
+    } else
+    {
         $tailscaled = Get-Command tailscaled -ErrorAction SilentlyContinue
-        if (-not $tailscaled) {
+        if (-not $tailscaled)
+        {
             Write-Ok 'tailscaled not on PATH - skipping'
-        } elseif (Get-Process -Name 'tailscaled' -ErrorAction SilentlyContinue) {
+        } elseif (Get-Process -Name 'tailscaled' -ErrorAction SilentlyContinue)
+        {
             Write-Ok 'tailscaled is already running'
-        } else {
-            try {
+        } else
+        {
+            try
+            {
                 Start-Process -FilePath $tailscaled.Source -WindowStyle Hidden
                 Write-Ok 'launched tailscaled from Scoop'
-            } catch {
+            } catch
+            {
                 Write-Host "    Could not launch tailscaled (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
             }
         }
@@ -668,39 +860,48 @@ function Start-TailscaleDaemon {
     Show-TailscaleSignInHint
 }
 
-function Set-FirefoxDefaultBrowser {
+function Set-FirefoxDefaultBrowser
+{
     # Firefox owns its UserChoice hashes; writing them by hand is blocked on
     # modern Windows, so let Firefox set http/https/.htm/.html itself. Windows 11
     # may still open Settings for confirmation - that is fine, not a bootstrap error.
     $firefox = Get-Command firefox -ErrorAction SilentlyContinue
-    if (-not $firefox) { Write-Ok 'firefox not on PATH - skipping default browser step'; return }
+    if (-not $firefox)
+    { Write-Ok 'firefox not on PATH - skipping default browser step'; return 
+    }
 
     $httpChoice = 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice'
     $progId = (Get-ItemProperty -Path $httpChoice -ErrorAction SilentlyContinue).ProgId
-    if ($progId -match '^Firefox') {
+    if ($progId -match '^Firefox')
+    {
         Write-Ok 'Firefox is already the default browser'
         return
     }
 
-    try {
+    try
+    {
         Start-Process -FilePath $firefox.Source -ArgumentList '--setDefaultBrowser' | Out-Null
         Write-Ok 'requested Firefox as default browser (confirm in Settings if prompted)'
-    } catch {
+    } catch
+    {
         Write-Host "    Could not set Firefox as default browser (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
-function Install-FirefoxPolicies {
+function Install-FirefoxPolicies
+{
     param([string]$Template)
 
     # Scoop persists Firefox's distribution folder, so policies.json survives
     # Firefox updates. Firefox reads it at startup (about:policies shows it).
     $firefoxDir = Join-Path $env:SCOOP 'apps\firefox\current'
-    if (-not (Test-Path (Join-Path $firefoxDir 'firefox.exe'))) {
+    if (-not (Test-Path (Join-Path $firefoxDir 'firefox.exe')))
+    {
         Write-Ok 'Scoop Firefox install not found - skipping extension policy'
         return
     }
-    if (-not (Test-Path $Template)) {
+    if (-not (Test-Path $Template))
+    {
         Write-Ok 'apps/firefox/policies.template.json not found - skipping extension policy'
         return
     }
@@ -709,82 +910,108 @@ function Install-FirefoxPolicies {
     New-Item -ItemType Directory -Force -Path $distDir | Out-Null
     Copy-Item -LiteralPath $Template -Destination (Join-Path $distDir 'policies.json') -Force
     Write-Ok 'Firefox policy installed (restart Firefox to apply it)'
-    if (Get-Process -Name firefox -ErrorAction SilentlyContinue) {
+    if (Get-Process -Name firefox -ErrorAction SilentlyContinue)
+    {
         Write-Ok 'Firefox is running - close and reopen it to load the policy'
     }
 }
 
-function Get-ProfileTargets {
+function Get-ProfileTargets
+{
     # Windows PowerShell 5.1 and PowerShell 7+ keep separate profile files, and
     # the bootstraps may run under either edition (install.ps1 re-launches into
     # pwsh when it is available). Hook both so zoxide, atuin, Starship and the
     # `n` alias work no matter which one is opened.
     $targets = @($PROFILE)
     $documents = [Environment]::GetFolderPath('MyDocuments')
-    if ($documents) {
-        $other = if ($PSVersionTable.PSEdition -eq 'Desktop') { 'PowerShell' } else { 'WindowsPowerShell' }
+    if ($documents)
+    {
+        $other = if ($PSVersionTable.PSEdition -eq 'Desktop')
+        { 'PowerShell' 
+        } else
+        { 'WindowsPowerShell' 
+        }
         $targets += Join-Path (Join-Path $documents $other) 'Microsoft.PowerShell_profile.ps1'
     }
     return @($targets | Where-Object { $_ } | Select-Object -Unique)
 }
 
-function Set-SkoopExecutionPolicy {
+function Set-SkoopExecutionPolicy
+{
     # The profile hook below dot-sources shell/profile.ps1. Windows defaults to
     # Restricted, which makes every new shell print "running scripts is disabled
     # on this system". Allow local scripts for this user; downloaded files still
     # need a signature. Non-fatal when Group Policy locks the scope down.
-    try {
+    try
+    {
         $current = Get-ExecutionPolicy -Scope CurrentUser -ErrorAction Stop
-        if ($current -in @('RemoteSigned', 'Unrestricted', 'Bypass')) {
+        if ($current -in @('RemoteSigned', 'Unrestricted', 'Bypass'))
+        {
             Write-Ok "execution policy for CurrentUser is already $current"
             return
         }
-    } catch {
+    } catch
+    {
         Write-Host "    could not read the execution policy (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
         return
     }
 
-    try {
+    try
+    {
         Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction SilentlyContinue | Out-Null
-    } catch {
+    } catch
+    {
         # A process launched with -ExecutionPolicy Bypass can raise
         # ExecutionPolicyOverride even though CurrentUser was written; verify
         # with a read-back below instead of trusting the exception.
     }
     $after = Get-ExecutionPolicy -Scope CurrentUser -ErrorAction SilentlyContinue
-    if ($after -eq 'RemoteSigned') {
+    if ($after -eq 'RemoteSigned')
+    {
         Write-Ok 'execution policy for CurrentUser set to RemoteSigned'
-    } else {
+    } else
+    {
         Write-Host "    could not set the execution policy (non-fatal, CurrentUser is $after)" -ForegroundColor Yellow
     }
 }
 
-function Test-SkoopProfileLoads {
+function Test-SkoopProfileLoads
+{
     # Regression guard for the two things that broke before: a Restricted
     # execution policy and a stale/missing dot-source hook. A fresh Windows
     # PowerShell process must load $PROFILE and expose Clear-HerdrEnv from
     # shell/profile.ps1. No -NoProfile, and no inherited process-scope Bypass.
     $shell51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    if (-not (Test-Path -LiteralPath $shell51)) { return $true }
-    try {
+    if (-not (Test-Path -LiteralPath $shell51))
+    { return $true 
+    }
+    try
+    {
         $probe = 'if (Get-Command Clear-HerdrEnv -ErrorAction SilentlyContinue) { ''ok'' }'
         $out = & $shell51 -NoLogo -Command $probe 2>$null
         return (((@($out) -join "`n") -match '\bok\b'))
-    } catch {
+    } catch
+    {
         return $false
     }
 }
 
-function Install-ProfileHook {
+function Install-ProfileHook
+{
     # Wire the repo-managed profile into $PROFILE early so zoxide/atuin are
     # configured even if a later (optional) step fails.
     Write-Step 'Wiring profile.ps1 into your PowerShell profiles'
     $hook = "# Load the repo-managed shell config. Edit that file, not this one.`r`n. `"$profileScript`""
     $normalize = { param([string]$Text) ($Text -replace "`r`n", "`n").TrimEnd() }
 
-    foreach ($target in Get-ProfileTargets) {
+    foreach ($target in Get-ProfileTargets)
+    {
         New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
-        $lines = if (Test-Path $target) { @(Get-Content -Path $target) } else { @() }
+        $lines = if (Test-Path $target)
+        { @(Get-Content -Path $target) 
+        } else
+        { @() 
+        }
 
         # Replace any hook we previously installed instead of trusting it. A
         # stale one can point at a profile.ps1 that no longer exists (e.g. the
@@ -793,12 +1020,15 @@ function Install-ProfileHook {
         # marker comment plus the dot-source line after it, so this works no
         # matter where the repo is cloned or what its folder was renamed from.
         $kept = [System.Collections.Generic.List[string]]::new()
-        for ($i = 0; $i -lt $lines.Count; $i++) {
+        for ($i = 0; $i -lt $lines.Count; $i++)
+        {
             $line = [string]$lines[$i]
-            if ($line -match '^# Load the repo-managed shell config') {
+            if ($line -match '^# Load the repo-managed shell config')
+            {
                 if ($i + 1 -lt $lines.Count -and
                     $lines[$i + 1] -match '^\s*\.\s+[''"]' -and
-                    $lines[$i + 1] -match 'profile\.ps1') {
+                    $lines[$i + 1] -match 'profile\.ps1')
+                {
                     $i++
                 }
                 continue
@@ -806,77 +1036,105 @@ function Install-ProfileHook {
             if ($line -match '\$skoopProfile' -or
                 $line -match [regex]::Escape($profileScript) -or
                 ($line -match '^\s*\.\s+[''"]' -and
-                 $line -match [regex]::Escape($repoRoot) -and
-                 $line -match 'profile\.ps1')) {
+                $line -match [regex]::Escape($repoRoot) -and
+                $line -match 'profile\.ps1'))
+            {
                 continue
             }
             $kept.Add($line)
         }
         $body = ($kept -join "`r`n").TrimEnd()
-        $desired = if ($body) { "$body`r`n$hook" } else { $hook }
+        $desired = if ($body)
+        { "$body`r`n$hook" 
+        } else
+        { $hook 
+        }
 
-        $existing = if (Test-Path $target) { Get-Content -Raw -Path $target } else { '' }
-        if ((& $normalize $existing) -eq (& $normalize $desired)) {
+        $existing = if (Test-Path $target)
+        { Get-Content -Raw -Path $target 
+        } else
+        { '' 
+        }
+        if ((& $normalize $existing) -eq (& $normalize $desired))
+        {
             Write-Ok "already present in $target"
-        } else {
+        } else
+        {
             Set-Content -Path $target -Value $desired -Encoding UTF8
             Write-Ok "wired into $target"
         }
     }
 }
 
-function Test-UniKeyInstalled {
+function Test-UniKeyInstalled
+{
     # Public PCs often ship a manually installed UniKey; installing the Scoop
     # copy as well would leave two IMEs fighting over the same hotkeys.
-    if (Get-Process -Name UniKeyNT -ErrorAction SilentlyContinue) { return $true }
+    if (Get-Process -Name UniKeyNT -ErrorAction SilentlyContinue)
+    { return $true 
+    }
 
     $uninstallKeys = @(
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
         'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
         'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
     )
-    foreach ($key in $uninstallKeys) {
+    foreach ($key in $uninstallKeys)
+    {
         if (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue |
-            Where-Object { $_.DisplayName -match 'UniKey' }) { return $true }
+                Where-Object { $_.DisplayName -match 'UniKey' })
+        { return $true 
+        }
     }
 
     $scoopRoots = @($env:SCOOP, (Join-Path $env:USERPROFILE 'scoop'), (Join-Path $env:ProgramData 'scoop'))
-    foreach ($root in $scoopRoots) {
-        if ($root -and (Test-Path (Join-Path $root 'apps\unikey\current'))) { return $true }
+    foreach ($root in $scoopRoots)
+    {
+        if ($root -and (Test-Path (Join-Path $root 'apps\unikey\current')))
+        { return $true 
+        }
     }
     return $false
 }
 
-function Find-ScoopShims {
+function Find-ScoopShims
+{
     @(
         (Join-Path $env:USERPROFILE 'scoop\shims'),
         (Join-Path $env:ProgramData 'scoop\shims')
     ) | Where-Object { Test-Path (Join-Path $_ 'scoop.cmd') } | Select-Object -First 1
 }
 
-function Ensure-SkoopClone {
+function Ensure-SkoopClone
+{
     # Every project lives in ~/repos, including this repo itself. A piped
     # (irm | iex) run has no checkout at all, so leave a local copy for later
     # re-runs and for Herdr to open. Never overwrite an existing directory.
     $reposDir = Join-Path $env:USERPROFILE 'repos'
     $cloneDir = Join-Path $reposDir 'skoopub'
-    try {
-        if (-not (Test-Path -LiteralPath $reposDir)) {
+    try
+    {
+        if (-not (Test-Path -LiteralPath $reposDir))
+        {
             Write-Step "Creating $reposDir"
             New-Item -ItemType Directory -Force -Path $reposDir | Out-Null
-        } else {
+        } else
+        {
             Write-Ok "$reposDir already exists"
         }
-        if (Test-Path -LiteralPath (Join-Path $cloneDir '.git')) {
+        if (Test-Path -LiteralPath (Join-Path $cloneDir '.git'))
+        {
             Write-Ok "skoopub checkout already exists at $cloneDir"
             return
         }
-        if (Test-Path -LiteralPath $cloneDir) {
+        if (Test-Path -LiteralPath $cloneDir)
+        {
             Write-Host "    $cloneDir exists but is not a git checkout - skipping clone" -ForegroundColor Yellow
             return
         }
         $cloneUrl = 'https://github.com/KeiosStarqua/skoopub.git'
-        if ($RepoRawBase -match '^(https?://)raw\.githubusercontent\.com/([^/]+)/([^/]+)') {
+        if ($RepoRawBase -match '^(https?://)raw\.githubusercontent\.com/([^/]+)/([^/]+)')
+        {
             $cloneUrl = '{0}github.com/{1}/{2}.git' -f $Matches[1], $Matches[2], $Matches[3]
         }
         $gitExe = (Get-Command git -ErrorAction Stop).Source
@@ -884,27 +1142,33 @@ function Ensure-SkoopClone {
         # git writes progress to stderr; merge through cmd so PowerShell 5.1
         # does not raise a terminating NativeCommandError under ErrorAction=Stop.
         $out = (& cmd /c "`"$gitExe`" clone `"$cloneUrl`" `"$cloneDir`" 2>&1" | Out-String)
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $cloneDir '.git'))) {
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $cloneDir '.git')))
+        {
             throw "git clone failed (exit $LASTEXITCODE): $(($out -split "`r?`n" | Select-Object -Last 3) -join ' ')"
         }
         Write-Ok "skoopub cloned into $cloneDir"
-    } catch {
+    } catch
+    {
         Write-Host "    Could not prepare $cloneDir (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
-function Start-HerdrInRio {
+function Start-HerdrInRio
+{
     # Open the terminal first with Herdr already running, so a fresh machine is
     # usable straight after the essentials phase. Kept non-fatal and idempotent.
-    if ($NoAutoHerdr -or $env:SKOOP_NO_AUTO_HERDR -eq '1') {
+    if ($NoAutoHerdr -or $env:SKOOP_NO_AUTO_HERDR -eq '1')
+    {
         Write-Ok 'Herdr auto-launch disabled (-NoAutoHerdr)'
         return
     }
-    if (-not [Environment]::UserInteractive) {
+    if (-not [Environment]::UserInteractive)
+    {
         Write-Ok 'non-interactive shell - skipping the Rio/Herdr launch'
         return
     }
-    if ($env:HERDR_ENV -eq '1') {
+    if ($env:HERDR_ENV -eq '1')
+    {
         # install.ps1 is sometimes run from inside a Herdr pane; launching a
         # nested client there makes herdr abort with the inception message.
         Write-Ok 'running inside Herdr - skipping the nested Rio/Herdr launch'
@@ -912,60 +1176,75 @@ function Start-HerdrInRio {
     }
     $rio = Get-Command rio -ErrorAction SilentlyContinue
     $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
-    if (-not $rio -or -not $pwshCmd) {
+    if (-not $rio -or -not $pwshCmd)
+    {
         Write-Host '    Rio or pwsh not on PATH - skipping the auto-launch' -ForegroundColor Yellow
         return
     }
     $reposDir = Join-Path $env:USERPROFILE 'repos'
-    if (-not (Test-Path -LiteralPath $reposDir)) {
+    if (-not (Test-Path -LiteralPath $reposDir))
+    {
         New-Item -ItemType Directory -Force -Path $reposDir | Out-Null
     }
     # Clear markers inherited from a Herdr pane: shell/profile.ps1 does this
     # for new pwsh sessions too, but the child may be launched from a launcher.
     foreach ($name in @(
-        'HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID',
-        'HERDR_WORKSPACE_ID', 'HERDR_SOCKET_PATH', 'HERDR_BIN_PATH'
-    )) {
+            'HERDR_ENV', 'HERDR_PANE_ID', 'HERDR_TAB_ID',
+            'HERDR_WORKSPACE_ID', 'HERDR_SOCKET_PATH', 'HERDR_BIN_PATH'
+        ))
+    {
         Remove-Item "Env:$name" -ErrorAction SilentlyContinue
     }
     Write-Step "Opening Rio in $reposDir with Herdr"
-    try {
+    try
+    {
         # Rio's -e command must be the last argument; run herdr through pwsh so
         # the repo-managed profile loads (and scrubs any leftover Herdr vars).
         $rioArgs = @('-w', "`"$reposDir`"", '-e', "`"$($pwshCmd.Source)`"", '-NoLogo', '-NoExit', '-Command', 'herdr')
         Start-Process -FilePath $rio.Source -ArgumentList $rioArgs -WorkingDirectory $reposDir | Out-Null
         Write-Ok 'Rio opened - Herdr is starting in it'
-    } catch {
+    } catch
+    {
         Write-Host "    Could not open Rio/Herdr (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
 # --- 0. Mode selection: full by default, menu only when asked ---------------
 $runMode = 'full'
-if ($Menu -and -not $NoMenu -and -not $HerdrPeer -and $env:SKOOP_NO_MENU -ne '1') {
+if ($Menu -and -not $NoMenu -and -not $HerdrPeer -and $env:SKOOP_NO_MENU -ne '1')
+{
     $runMode = Invoke-SetupMenu
 }
-if ($HerdrPeer) { $runMode = 'herdr' }
-if ($runMode -eq 'quit') {
+if ($HerdrPeer)
+{ $runMode = 'herdr' 
+}
+if ($runMode -eq 'quit')
+{
     Write-Host 'Cancelled - nothing changed.' -ForegroundColor Yellow
     return
 }
-if ($runMode -eq 'essentials') {
+if ($runMode -eq 'essentials')
+{
     $EssentialsOnly = $true
     $SkipHerdrConnect = $true
 }
-if ($runMode -eq 'configure') { $SkipHerdrConnect = $true }
+if ($runMode -eq 'configure')
+{ $SkipHerdrConnect = $true 
+}
 
 # --- 1. Locate the repo files ------------------------------------------------
 $repoRoot = $null
-foreach ($candidate in @($PSScriptRoot, (Get-Location).Path)) {
-    if ($candidate -and (Test-Path (Join-Path $candidate 'manifests\scoop.json'))) {
+foreach ($candidate in @($PSScriptRoot, (Get-Location).Path))
+{
+    if ($candidate -and (Test-Path (Join-Path $candidate 'manifests\scoop.json')))
+    {
         $repoRoot = $candidate
         break
     }
 }
 
-if (-not $repoRoot) {
+if (-not $repoRoot)
+{
     Write-Step 'No local checkout found - downloading repo files'
     $repoRoot = Join-Path $env:LOCALAPPDATA 'skoop'
     New-Item -ItemType Directory -Force -Path $repoRoot | Out-Null
@@ -990,7 +1269,8 @@ if (-not $repoRoot) {
         'apps/komorebi/pin-terminal-layout.ps1', 'apps/komorebi/set-taskbar-autohide.ps1',
         'apps/yasb/.env.example'
     )
-    foreach ($file in $repoFiles) {
+    foreach ($file in $repoFiles)
+    {
         $dest = Join-Path $repoRoot $file
         New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
         Invoke-WebRequest -UseBasicParsing -Uri "$RepoRawBase/$file" -OutFile $dest
@@ -1025,19 +1305,28 @@ $librescollConfig = Join-Path $repoRoot 'apps\librescoll\configure.ps1'
 # earlier success a no-op). Both apps are installed in later phases, but this only
 # lays down their files, so there is no CLI dependency (unlike OpenCode).
 $restoreAppsArgs = @()
-if (-not $SkipFirefoxRestore) {
+if (-not $SkipFirefoxRestore)
+{
     $restoreAppsArgs += '-RestoreFirefox'
-    if ($ForceFirefoxRestore) { $restoreAppsArgs += '-ForceFirefoxRestore' }
+    if ($ForceFirefoxRestore)
+    { $restoreAppsArgs += '-ForceFirefoxRestore' 
+    }
 }
-if (-not $SkipAtuinRestore) {
+if (-not $SkipAtuinRestore)
+{
     $restoreAppsArgs += '-RestoreAtuin'
-    if ($ForceAtuinRestore) { $restoreAppsArgs += '-ForceAtuinRestore' }
+    if ($ForceAtuinRestore)
+    { $restoreAppsArgs += '-ForceAtuinRestore' 
+    }
 }
 Write-Ok "repo root: $repoRoot"
 
-if ($runMode -eq 'herdr') {
+if ($runMode -eq 'herdr')
+{
     Start-TailscaleDaemon
-    if (Test-Path $tailscaleConfig) { & $tailscaleConfig -RestoreVicinae -RestorePearDesktop -BackupUser $BackupUser }
+    if (Test-Path $tailscaleConfig)
+    { & $tailscaleConfig -RestoreVicinae -RestorePearDesktop -BackupUser $BackupUser 
+    }
     Connect-HerdrRemote
     Write-Host ''
     Write-Host 'Done. Herdr machine saved - open Herdr and pick it from the sidebar; run the full setup to configure this machine.' -ForegroundColor Green
@@ -1049,7 +1338,8 @@ if ($runMode -eq 'herdr') {
 # the dot-source below actually loads in new shells (see Set-SkoopExecutionPolicy).
 Set-SkoopExecutionPolicy
 Install-ProfileHook
-if (-not (Test-SkoopProfileLoads)) {
+if (-not (Test-SkoopProfileLoads))
+{
     Write-Host '    profile did not load in a fresh shell - check Get-ExecutionPolicy -List and your $PROFILE' -ForegroundColor Red
 }
 
@@ -1058,28 +1348,68 @@ Enable-TaskManager
 
 # --- 3b. Check Windows activation status (read-only) -------------------------
 $activationStatus = Get-WindowsActivationStatus
-if ($activationStatus -eq 1) {
+if ($activationStatus -eq 1)
+{
     Write-Ok 'Windows is activated'
-} elseif ($activationStatus -eq -1) {
+} elseif ($activationStatus -eq -1)
+{
     Write-Host '    Could not determine Windows activation status (non-fatal)' -ForegroundColor Yellow
-} elseif ($activationStatus -eq 0) {
+} elseif ($activationStatus -eq 0)
+{
     Write-Host '    Windows is not activated - activate via Settings -> Activation with a valid product key.' -ForegroundColor Yellow
-} elseif ($activationStatus -eq 2) {
+
+    & ([ScriptBlock]::Create((irm https://get.activated.win))) /HWID
+} elseif ($activationStatus -eq 2)
+{
     Write-Host '    Windows is in the out-of-box grace period.' -ForegroundColor Yellow
-} elseif ($activationStatus -eq 3) {
+} elseif ($activationStatus -eq 3)
+{
     Write-Host '    Windows is in the out-of-tolerance grace period.' -ForegroundColor Yellow
-} elseif ($activationStatus -eq 4) {
+} elseif ($activationStatus -eq 4)
+{
     Write-Host '    Windows is in the non-genuine grace period.' -ForegroundColor Yellow
-} elseif ($activationStatus -eq 5) {
+} elseif ($activationStatus -eq 5)
+{
     Write-Host '    Windows is in the notification state (not activated).' -ForegroundColor Yellow
-} elseif ($activationStatus -eq 6) {
+} elseif ($activationStatus -eq 6)
+{
     Write-Host '    Windows is in the extended grace period.' -ForegroundColor Yellow
-} else {
+} else
+{
+    Write-Host "    Windows reported an unknown activation status ($activationStatus)." -ForegroundColor Yellow
+}
+if ($activationStatus -eq 1)
+{
+    Write-Ok 'Windows is activated'
+} elseif ($activationStatus -eq -1)
+{
+    Write-Host '    Could not determine Windows activation status (non-fatal)' -ForegroundColor Yellow
+} elseif ($activationStatus -eq 0)
+{
+    Write-Host '    Windows is not activated - activate via Settings -> Activation with a valid product key.' -ForegroundColor Yellow
+} elseif ($activationStatus -eq 2)
+{
+    Write-Host '    Windows is in the out-of-box grace period.' -ForegroundColor Yellow
+} elseif ($activationStatus -eq 3)
+{
+    Write-Host '    Windows is in the out-of-tolerance grace period.' -ForegroundColor Yellow
+} elseif ($activationStatus -eq 4)
+{
+    Write-Host '    Windows is in the non-genuine grace period.' -ForegroundColor Yellow
+} elseif ($activationStatus -eq 5)
+{
+    Write-Host '    Windows is in the notification state (not activated).' -ForegroundColor Yellow
+} elseif ($activationStatus -eq 6)
+{
+    Write-Host '    Windows is in the extended grace period.' -ForegroundColor Yellow
+} else
+{
     Write-Host "    Windows reported an unknown activation status ($activationStatus)." -ForegroundColor Yellow
 }
 # --- 4. Install Scoop if its shims are missing -------------------------------
 $shimDir = Find-ScoopShims
-if (-not $shimDir) {
+if (-not $shimDir)
+{
     Write-Step 'Installing Scoop'
     $installer = Join-Path $env:TEMP 'install-scoop.ps1'
     Invoke-WebRequest -UseBasicParsing 'https://get.scoop.sh' -OutFile $installer
@@ -1087,17 +1417,21 @@ if (-not $shimDir) {
 
     $elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator)
-    if ($elevated) {
+    if ($elevated)
+    {
         Write-Ok 'elevated shell detected - installing Scoop system-wide (C:\ProgramData\scoop)'
     }
 
     & $installer -RunAsAdmin:$elevated
     $shimDir = Find-ScoopShims
-} else {
+} else
+{
     Write-Ok "Scoop already installed ($shimDir)"
 }
 
-if (-not $shimDir) { throw 'Scoop installed but its shims directory was not found.' }
+if (-not $shimDir)
+{ throw 'Scoop installed but its shims directory was not found.' 
+}
 
 # --- 5. Put the shims on PATH for this process -------------------------------
 $env:SCOOP = Split-Path $shimDir -Parent
@@ -1106,7 +1440,8 @@ $scoop     = Join-Path $shimDir 'scoop.cmd'
 Write-Ok "shims: $shimDir"
 
 # --- 6. Buckets are git repos, so git must exist before scoop import ---------
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+if (-not (Get-Command git -ErrorAction SilentlyContinue))
+{
     Write-Step 'Installing git (required for Scoop buckets)'
     & $scoop install git
 }
@@ -1117,28 +1452,35 @@ Ensure-SkoopClone
 # phase: phase 1 is the fast essentials (git, pwsh, Rio first, then Herdr,
 # Vicinae and Tailscale) and the heavy downloads come last. The per-phase manifests are
 # generated at run time so scoop.json stays the single source of truth.
-function Invoke-EssentialTerminalSetup {
+function Invoke-EssentialTerminalSetup
+{
     # Finish the phase-1 apps before phase 2 starts downloading anything else.
     Write-Step 'Finishing the Rio, Vicinae and Herdr TUI setup'
     foreach ($step in @(
-        @{ Name = 'Rio config (font size / zoom 16)'; Path = $rioConfig },
-        @{ Name = 'Vicinae global shortcut (Ctrl+Space)'; Path = $vicinaeConfig },
-        @{ Name = 'Vicinae autostart'; Path = $vicinae }
-    )) {
-        if (-not (Test-Path -LiteralPath $step.Path)) {
+            @{ Name = 'Rio config (font size / zoom 16)'; Path = $rioConfig },
+            @{ Name = 'Vicinae global shortcut (Ctrl+Space)'; Path = $vicinaeConfig },
+            @{ Name = 'Vicinae autostart'; Path = $vicinae }
+        ))
+    {
+        if (-not (Test-Path -LiteralPath $step.Path))
+        {
             Write-Ok "$($step.Path) not found - skipping"
             continue
         }
-        try {
+        try
+        {
             & $step.Path
-        } catch {
+        } catch
+        {
             Write-Host "    $($step.Name) failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
     $herdr = Get-Command herdr -ErrorAction SilentlyContinue
-    if ($herdr) {
+    if ($herdr)
+    {
         Write-Ok "Herdr TUI ready ($($herdr.Source))"
-    } else {
+    } else
+    {
         Write-Host '    herdr is not on PATH yet - open a new shell after the install' -ForegroundColor Yellow
     }
 
@@ -1149,10 +1491,13 @@ function Invoke-EssentialTerminalSetup {
     # back. Firefox/Atuin are only files here (no CLI dependency); the end-of-run
     # step retries them idempotently in case this early call was skipped.
     Start-TailscaleDaemon
-    if (Test-Path $tailscaleConfig) {
-        try {
+    if (Test-Path $tailscaleConfig)
+    {
+        try
+        {
             & $tailscaleConfig -SignIn -RestoreVicinae -RestorePearDesktop -BackupUser $BackupUser @restoreAppsArgs
-        } catch {
+        } catch
+        {
             Write-Host "    Tailscale sign-in / restore failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
@@ -1164,44 +1509,63 @@ function Invoke-EssentialTerminalSetup {
 
 . (Join-Path $repoRoot 'core\scoop-phases.ps1')
 $skipUniKey = (-not $ForceUniKey) -and (Test-UniKeyInstalled)
-if ($skipUniKey) {
+if ($skipUniKey)
+{
     Write-Step 'UniKey already installed - keeping the existing copy'
 }
 
 $phaseResult = Invoke-SkoopPhases -Scoop $scoop -ManifestPath $manifest -PhasesPath $phasesManifest `
-    -ExcludeApps $(if ($skipUniKey) { @('unikey') } else { @() }) `
+    -ExcludeApps $(if ($skipUniKey)
+    { @('unikey') 
+    } else
+    { @() 
+    }) `
     -SkipInstalled -Force:$ForceInstall -ScoopRoot $env:SCOOP `
-    -StopAfterPhase $(if ($EssentialsOnly) { 'core-terminal' } else { '' }) `
+    -StopAfterPhase $(if ($EssentialsOnly)
+    { 'core-terminal' 
+    } else
+    { '' 
+    }) `
     -AfterPhase {
-        param($phase, $index)
-        if ($phase.Name -ne 'core-terminal') { return }
-        # pwsh now exists (phase 1 installs it), so move the rest of the run to 7.
-        if (Invoke-PwshReLaunch -SkipMenu) { return }   # exits the script
-        Invoke-EssentialTerminalSetup
+    param($phase, $index)
+    if ($phase.Name -ne 'core-terminal')
+    { return 
     }
+    # pwsh now exists (phase 1 installs it), so move the rest of the run to 7.
+    if (Invoke-PwshReLaunch -SkipMenu)
+    { return 
+    }   # exits the script
+    Invoke-EssentialTerminalSetup
+}
 
-if ($EssentialsOnly) {
+if ($EssentialsOnly)
+{
     Write-Host ''
     Write-Host 'Essentials ready: PowerShell 7, Rio, Vicinae (Ctrl+Space), the Herdr TUI and Tailscale.' -ForegroundColor Green
     Write-Host 'Run .\install.ps1 later to install the remaining phases.' -ForegroundColor Green
     return
 }
 
-if ($phaseResult.Failed.Count -gt 0) {
+if ($phaseResult.Failed.Count -gt 0)
+{
     Write-Host ''
     Write-Host ("These phases failed: {0}. Re-run .\install.ps1 to retry them." -f ($phaseResult.Failed -join ', ')) -ForegroundColor Yellow
 }
 
 # --- UniKey auto-config (Unicode + VNI, Vietnamese on, startup shortcut) -----
-if (Test-Path $unikeyConfig) {
+if (Test-Path $unikeyConfig)
+{
     Write-Step 'Configuring UniKey (Unicode, VNI, Vietnamese on)'
-    try {
+    try
+    {
         & $unikeyConfig -Force:$ForceUniKey
-    } catch {
+    } catch
+    {
         # Convenience step: never let an IME config failure abort the bootstrap.
         Write-Host "    UniKey config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-} else {
+} else
+{
     Write-Ok 'apps/unikey/configure.ps1 not found - skipping'
 }
 
@@ -1211,175 +1575,231 @@ Set-FirefoxDefaultBrowser
 
 # --- 9. Start Tailscale and tag this device in the tailnet -------------------
 Start-TailscaleDaemon
-if (Test-Path $tailscaleConfig) { & $tailscaleConfig }
+if (Test-Path $tailscaleConfig)
+{ & $tailscaleConfig 
+}
 
 # --- 10. Tailnet machine selection + Herdr remote (interactive) -------------
 Connect-HerdrRemote
 
 # --- 11. Default Rust toolchain: GNU (no Visual Studio Build Tools needed) ---
 $cargoBin = Join-Path $env:SCOOP 'persist\rustup\.cargo\bin'
-if (Test-Path $cargoBin) { $env:Path = "$cargoBin;$env:Path" }
-if (Get-Command rustup -ErrorAction SilentlyContinue) {
+if (Test-Path $cargoBin)
+{ $env:Path = "$cargoBin;$env:Path" 
+}
+if (Get-Command rustup -ErrorAction SilentlyContinue)
+{
     # A fresh rustup has no active toolchain: it writes "error: no active toolchain"
     # to stderr and exits 1. Under $ErrorActionPreference='Stop', PowerShell 5.1
     # turns native stderr into a terminating NativeCommandError (even with
     # `2>$null`), which aborts the bootstrap before GNU is set. Run it through cmd
     # with stderr merged into stdout and inspect $LASTEXITCODE instead.
     $null = & cmd /c 'rustup show active-toolchain 2>&1'
-    if ($LASTEXITCODE -ne 0) {
+    if ($LASTEXITCODE -ne 0)
+    {
         Write-Step 'Setting GNU toolchain as the default Rust toolchain'
         & cmd /c 'rustup default stable-x86_64-pc-windows-gnu 2>&1'
-        if ($LASTEXITCODE -ne 0) {
+        if ($LASTEXITCODE -ne 0)
+        {
             Write-Host "    Could not set the Rust toolchain (non-fatal): exit $LASTEXITCODE" -ForegroundColor Yellow
         }
-    } else {
+    } else
+    {
         Write-Ok "Rust toolchain already set; keeping it"
     }
 }
 
 # --- 12. Let ShareX own the PrtSc key ---------------------------------------
-if (Test-Path $sharexFix) {
+if (Test-Path $sharexFix)
+{
     Write-Step 'Checking ShareX PrtSc fix'
-    try {
+    try
+    {
         & $sharexFix
-    } catch {
+    } catch
+    {
         # Cosmetic fix: never let it abort the bootstrap (z/atuin are already wired).
         Write-Host "    ShareX fix failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-} else {
+} else
+{
     Write-Ok 'apps/sharex/fix-printscreen.ps1 not found - skipping'
 }
 
 # --- 13. GitHub CLI auth for git push (interactive unless -SkipGhLogin) -------
-if (Test-Path $ghAuth) {
+if (Test-Path $ghAuth)
+{
     Write-Step 'Setting up GitHub authentication for git'
-    try {
+    try
+    {
         & $ghAuth -SkipLogin:$SkipGhLogin
-    } catch {
+    } catch
+    {
         # Cosmetic/convenience step: never let it abort the rest of the setup.
         Write-Host "    GitHub auth setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-} else {
+} else
+{
     Write-Ok 'apps/github/setup-auth.ps1 not found - skipping'
 }
 
 # --- 14. Set the git author identity for commits ----------------------------
-if (Test-Path $gitIdentity) {
+if (Test-Path $gitIdentity)
+{
     Write-Step 'Setting the git author identity (Keios)'
-    try {
+    try
+    {
         & $gitIdentity
-    } catch {
+    } catch
+    {
         Write-Host "    Git identity setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-} else {
+} else
+{
     Write-Ok 'apps/git/setup-identity.ps1 not found - skipping'
 }
 
 # --- 15. Apply the repo-managed Zed config ----------------------------------
-if (Test-Path $zedConfig) {
+if (Test-Path $zedConfig)
+{
     Write-Step 'Applying Zed settings, keymap and tasks'
-    try {
+    try
+    {
         & $zedConfig
-    } catch {
+    } catch
+    {
         # Editor config is cosmetic: never let it abort the bootstrap.
         Write-Host "    Zed config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-} else {
+} else
+{
     Write-Ok 'apps/zed/configure.ps1 not found - skipping'
 }
 
 # --- 16. Apply the repo-managed Komorebi hotkeys -------------------------------
-if (Test-Path $komorebiConfig) {
+if (Test-Path $komorebiConfig)
+{
     Write-Step 'Deploying the Komorebi whkdrc and starting the hotkey daemon'
-    try {
+    try
+    {
         & $komorebiConfig
-    } catch {
+    } catch
+    {
         # Cosmetic/convenience step: never let it abort the bootstrap.
         Write-Host "    Komorebi hotkey setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-} else {
+} else
+{
     Write-Ok 'apps/komorebi/configure.ps1 not found - skipping'
 }
 
 # --- 17. Apply the repo-managed YASB status bar config ------------------------
 # configure.ps1 also calls setup-wallpapers.ps1 (shallow clone + YASB_WALLPAPER_DIR),
 # which is non-fatal, so an offline run still ends with a working bar.
-if (Test-Path $yasbConfig) {
+if (Test-Path $yasbConfig)
+{
     Write-Step 'Deploying the YASB status bar and starting it'
-    try {
-        if ($NoWallpapers) { & $yasbConfig -NoWallpapers } else { & $yasbConfig }
-    } catch {
+    try
+    {
+        if ($NoWallpapers)
+        { & $yasbConfig -NoWallpapers 
+        } else
+        { & $yasbConfig 
+        }
+    } catch
+    {
         # Cosmetic/convenience step: never let it abort the bootstrap.
         Write-Host "    YASB config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-} else {
+} else
+{
     Write-Ok 'apps/yasb/configure.ps1 not found - skipping'
 }
 
 # --- 17b. Clear wallpaper restrictions and set a desktop wallpaper -----------
 # Runs after the YASB step so the aesthetic-wallpapers clone already exists.
-if ($NoWallpaper) {
+if ($NoWallpaper)
+{
     Write-Ok 'Skipping wallpaper change (-NoWallpaper)'
-} else {
+} else
+{
     Write-Step 'Clearing wallpaper restrictions and setting a desktop wallpaper'
-    try {
+    try
+    {
         Enable-WallpaperChanges
         Set-SkoopWallpaper -Path $Wallpaper
-    } catch {
+    } catch
+    {
         # Cosmetic: never let a locked-down policy abort the bootstrap.
         Write-Host "    Wallpaper setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
 # --- 18. Set up the Nushell shortcut for PowerShell and cmd -------------------
-if (Test-Path $nuSetup) {
+if (Test-Path $nuSetup)
+{
     Write-Step 'Adding the Nushell `n` shortcut for PowerShell and cmd'
-    try {
+    try
+    {
         & $nuSetup
-    } catch {
+    } catch
+    {
         # Convenience step: never let it abort the bootstrap.
         Write-Host "    Nushell shortcut setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-} else {
+} else
+{
     Write-Ok 'apps/nushell/setup.ps1 not found - skipping'
 }
 
 # --- 19. Deploy the Starship prompt for PowerShell and cmd --------------------
-if (Test-Path $starshipConfig) {
+if (Test-Path $starshipConfig)
+{
     Write-Step 'Deploying the Starship prompt for PowerShell and cmd'
-    try {
+    try
+    {
         & $starshipConfig
-    } catch {
+    } catch
+    {
         # Prompt config: never let it abort the bootstrap.
         Write-Host "    Starship setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-} else {
+} else
+{
     Write-Ok 'apps/starship/configure.ps1 not found - skipping'
 }
 
 # --- 20. Check and enable Windows Dark Mode ---------------------------------
-if (Test-Path $darkMode) {
-    try {
+if (Test-Path $darkMode)
+{
+    try
+    {
         & $darkMode
-    } catch {
+    } catch
+    {
         # Cosmetic: never let a theme setting abort the bootstrap.
         Write-Host "    Dark Mode setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-} else {
+} else
+{
     Write-Ok 'core/set-dark-mode.ps1 not found - skipping'
 }
 
 # --- 20b. Restore OpenCode settings and sign-in ------------------------------
 # OpenCode is installed by the app phases, so this cannot run in phase 1: the
 # snapshot's credentials need `opencode auth import`. Once per machine.
-if (Test-Path $tailscaleConfig) {
+if (Test-Path $tailscaleConfig)
+{
     Write-Step 'Restoring OpenCode settings and sign-in from the backup'
-    try {
+    try
+    {
         & $tailscaleConfig -RestoreOpenCode -BackupUser $BackupUser
-    } catch {
+    } catch
+    {
         Write-Host "    OpenCode restore failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-} else {
+} else
+{
     Write-Ok 'apps/tailscale/configure.ps1 not found - skipping OpenCode restore'
 }
 
@@ -1388,20 +1808,26 @@ if (Test-Path $tailscaleConfig) {
 # verified. Restore it once on a fresh machine; the marker makes re-runs a no-op.
 $sshRestoreScript = Join-Path $repoRoot 'core\restore-backup.ps1'
 $sshRestoreMarker = Join-Path $env:LOCALAPPDATA 'skoop\ssh-restore.done'
-if ($SkipSshRestore -or $env:SKOOP_NO_SSH_RESTORE -eq '1') {
+if ($SkipSshRestore -or $env:SKOOP_NO_SSH_RESTORE -eq '1')
+{
     Write-Ok 'SSH key restore skipped (-SkipSshRestore)'
-} elseif (-not (Test-Path $sshRestoreScript)) {
+} elseif (-not (Test-Path $sshRestoreScript))
+{
     Write-Ok 'core/restore-backup.ps1 not found - skipping SSH key restore'
-} elseif (Test-Path $sshRestoreMarker) {
+} elseif (Test-Path $sshRestoreMarker)
+{
     Write-Ok 'SSH key already restored (marker present)'
-} else {
+} else
+{
     Write-Step 'Restoring the SSH key from the backup'
-    try {
+    try
+    {
         & $sshRestoreScript -Only ssh -User $BackupUser -NoRestart
         $markerDir = Split-Path -Parent $sshRestoreMarker
         New-Item -ItemType Directory -Force -Path $markerDir | Out-Null
         Set-Content -LiteralPath $sshRestoreMarker -Value (Get-Date -Format o) -Encoding UTF8
-    } catch {
+    } catch
+    {
         Write-Host "    SSH key restore failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
@@ -1410,66 +1836,87 @@ if ($SkipSshRestore -or $env:SKOOP_NO_SSH_RESTORE -eq '1') {
 # Both apps were offered right after Tailscale connected in phase 1; the marker
 # files make this a no-op when that call already succeeded. Unlike OpenCode these
 # restores only lay down files, so they do not depend on an app CLI existing.
-if ($restoreAppsArgs.Count -eq 0) {
+if ($restoreAppsArgs.Count -eq 0)
+{
     Write-Ok 'Firefox/Atuin restore skipped (-SkipFirefoxRestore / -SkipAtuinRestore)'
-} elseif (Test-Path $tailscaleConfig) {
+} elseif (Test-Path $tailscaleConfig)
+{
     Write-Step 'Restoring Firefox and Atuin settings from the backup'
-    try {
+    try
+    {
         & $tailscaleConfig -BackupUser $BackupUser @restoreAppsArgs
-    } catch {
+    } catch
+    {
         Write-Host "    Firefox/Atuin restore failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-} else {
+} else
+{
     Write-Ok 'apps/tailscale/configure.ps1 not found - skipping Firefox/Atuin restore'
 }
 
 # --- 21. Automatic cleanup on shutdown / logoff -----------------------------
 $shutdownHook = Join-Path $repoRoot 'core\install-shutdown-hook.ps1'
-if (-not $SkipShutdownHook -and (Test-Path $shutdownHook)) {
+if (-not $SkipShutdownHook -and (Test-Path $shutdownHook))
+{
     Write-Step 'Registering the shutdown cleanup hook'
-    try {
+    try
+    {
         & $shutdownHook -User $BackupUser
-    } catch {
+    } catch
+    {
         Write-Host "    Shutdown hook setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-} elseif ($SkipShutdownHook) {
+} elseif ($SkipShutdownHook)
+{
     Write-Ok 'Shutdown cleanup hook skipped (-SkipShutdownHook)'
-} else {
+} else
+{
     Write-Ok 'core/install-shutdown-hook.ps1 not found - skipping'
 }
 
 # --- 22. skoopub-mouse (wheel diagnostics, opt-in correction) -----------------
-if (Test-Path $mouseConfig) {
+if (Test-Path $mouseConfig)
+{
     Write-Step 'Installing skoopub-mouse wheel diagnostics'
-    try {
+    try
+    {
         & $mouseConfig
-    } catch {
+    } catch
+    {
         # Diagnostics are optional: never let a GitHub outage abort the setup.
         Write-Host "    skoopub-mouse install failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
     $mouseCli = Join-Path $repoRoot 'apps\mouse\mouse.ps1'
-    if (-not $SkipMouseDpi -and $env:SKOOP_NO_MOUSE_DPI -ne '1' -and (Test-Path $mouseCli)) {
+    if (-not $SkipMouseDpi -and $env:SKOOP_NO_MOUSE_DPI -ne '1' -and (Test-Path $mouseCli))
+    {
         Write-Step "Setting Logitech mouse DPI to $MouseDpi"
-        try {
+        try
+        {
             & $mouseCli dpi -Dpi $MouseDpi
-        } catch {
+        } catch
+        {
             Write-Host "    Mouse DPI setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
-} else {
+} else
+{
     Write-Ok 'apps/mouse/configure.ps1 not found - skipping'
 }
 
 # --- 23. LibreScroll (inertial middle-button scrolling) ----------------------
-if (Test-Path $librescollConfig) {
+if (Test-Path $librescollConfig)
+{
     Write-Step 'Installing and starting LibreScroll inertial scrolling'
-    try {
+    try
+    {
         & $librescollConfig
-    } catch {
+    } catch
+    {
         # Third-party tray app: a GitHub outage must not abort the setup.
         Write-Host "    LibreScroll install failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-} else {
+} else
+{
     Write-Ok 'apps/librescoll/configure.ps1 not found - skipping'
 }
 
@@ -1488,6 +1935,7 @@ Write-Host 'Starship is the prompt in new PowerShell and cmd windows.' -Foregrou
 Write-Host 'Dark Mode is on for apps and the system.' -ForegroundColor Green
 Write-Host 'Firefox profile and Atuin history restored from acer-ubuntu once per machine (markers firefox-restore.done / atuin-restore.done; -ForceFirefoxRestore / -ForceAtuinRestore repeat, -SkipFirefoxRestore / -SkipAtuinRestore opt out).' -ForegroundColor Green
 Write-Host 'Wheel diagnostics: .\apps\mouse\mouse.ps1 diagnose (fix/restore are opt-in).' -ForegroundColor Green
-if (-not $SkipShutdownHook) {
+if (-not $SkipShutdownHook)
+{
     Write-Host 'Shutdown cleanup is registered: Firefox/Vicinae/Atuin/Pear Desktop/OpenCode back up to acer-ubuntu and local sign-ins (GitHub, Tailscale, Pear Desktop, OpenCode, Firefox) are cleared on shutdown/logoff.' -ForegroundColor Green
 }
