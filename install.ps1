@@ -77,6 +77,9 @@
       tiling windows use the full screen (YASB is the visible bar).
     - Deploys the repo-managed YASB status bar (config.yaml, styles.css and a .env
       template) via apps/yasb/configure.ps1 and starts YASB for the Komorebi UI.
+      apps/yasb/setup-wallpapers.ps1 shallow-clones D3Ext/aesthetic-wallpapers once
+      and points YASB_WALLPAPER_DIR at its images folder (Alt+E gallery); opt out
+      with -NoWallpapers / SKOOP_NO_WALLPAPERS=1.
     - Adds an `n` alias for Nushell in PowerShell (profile.ps1) and a cmd.exe
       AutoRun doskey macro via apps/nushell/setup.ps1, preserving existing AutoRun entries.
     - Registers a per-user scheduled task (SkoopCleanupOnShutdown) via
@@ -196,6 +199,8 @@ param(
     [switch]$EssentialsOnly,
     [string]$BackupUser = "$env:SKOOP_BACKUP_USER",
     [switch]$SkipShutdownHook,
+    # Skip the one-time wallpaper collection clone (also SKOOP_NO_WALLPAPERS=1).
+    [switch]$NoWallpapers,
     [switch]$Help
 )
 
@@ -204,6 +209,7 @@ if ($env:SKOOP_SKIP_HERDR -eq '1') { $SkipHerdrConnect = $true }
 if ($env:SKOOP_ESSENTIALS_ONLY -eq '1') { $EssentialsOnly = $true }
 if ($env:SKOOP_NO_AUTO_HERDR -eq '1') { $NoAutoHerdr = $true }
 if ($env:SKOOP_MENU -eq '1') { $Menu = $true }
+if ($env:SKOOP_NO_WALLPAPERS -eq '1') { $NoWallpapers = $true }
 if ($NoGum) { $env:SKOOP_NO_GUM = '1' }
 
 # `--help` arrives in $args with CmdletBinding; handle it before any side effect.
@@ -249,6 +255,7 @@ function Get-SkoopReLaunchArgs {
     if ($NoGum) { $list += '-NoGum' }
     if ($NoAutoHerdr) { $list += '-NoAutoHerdr' }
     if ($SkipShutdownHook) { $list += '-SkipShutdownHook' }
+    if ($NoWallpapers) { $list += '-NoWallpapers' }
     if ($Peer) { $list += @('-Peer', $Peer) }
     if ($HerdrUser) { $list += @('-HerdrUser', $HerdrUser) }
     if ($BackupUser) { $list += @('-BackupUser', $BackupUser) }
@@ -771,7 +778,7 @@ if (-not $repoRoot) {
         'apps/git/setup-identity.ps1',
         'apps/vicinae/enable-autostart.ps1', 'apps/vicinae/configure.ps1',
         'apps/rio/configure.ps1', 'apps/komorebi/configure.ps1',
-        'apps/yasb/configure.ps1', 'apps/nushell/setup.ps1',
+        'apps/yasb/configure.ps1', 'apps/yasb/setup-wallpapers.ps1', 'apps/nushell/setup.ps1',
         'apps/mouse/configure.ps1', 'apps/mouse/mouse.ps1',
         'apps/starship/configure.ps1', 'apps/starship/starship.toml',
         'apps/zed/settings.json', 'apps/zed/keymap.json', 'apps/zed/tasks.json',
@@ -1054,10 +1061,12 @@ if (Test-Path $komorebiConfig) {
 }
 
 # --- 17. Apply the repo-managed YASB status bar config ------------------------
+# configure.ps1 also calls setup-wallpapers.ps1 (shallow clone + YASB_WALLPAPER_DIR),
+# which is non-fatal, so an offline run still ends with a working bar.
 if (Test-Path $yasbConfig) {
     Write-Step 'Deploying the YASB status bar and starting it'
     try {
-        & $yasbConfig
+        if ($NoWallpapers) { & $yasbConfig -NoWallpapers } else { & $yasbConfig }
     } catch {
         # Cosmetic/convenience step: never let it abort the bootstrap.
         Write-Host "    YASB config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow

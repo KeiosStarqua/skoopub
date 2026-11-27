@@ -2,7 +2,8 @@
 # Deploy a repo-managed YASB theme (config.yaml + styles.css) into ~/.config/yasb,
 # create a .env from the template when missing, and start YASB. Adaptive Islands
 # is the default; the previous Komorebi bar theme is preserved under
-# themes/komorebi/ and can be restored with -Theme komorebi.
+# themes/komorebi/ and can be restored with -Theme komorebi. It also clones the
+# community aesthetic-wallpapers collection once and sets YASB_WALLPAPER_DIR.
 # The config watches for changes, so a restart is only needed with -Restart.
 #
 #   powershell -ExecutionPolicy Bypass -File .\apps/yasb/configure.ps1
@@ -19,7 +20,9 @@ param(
     # Overwrite changed files directly instead of keeping a timestamped .bak.
     [switch]$NoBackup,
     # Stop and relaunch YASB so the config is reloaded immediately.
-    [switch]$Restart
+    [switch]$Restart,
+    # Skip the one-time aesthetic-wallpapers clone (also SKOOP_NO_WALLPAPERS=1).
+    [switch]$NoWallpapers
 )
 
 $ErrorActionPreference = 'Stop'
@@ -86,6 +89,22 @@ $envFile = Join-Path $ConfigDir '.env'
 if ((Test-Path -LiteralPath $example) -and -not (Test-Path -LiteralPath $envFile)) {
     Copy-Item -LiteralPath $example -Destination $envFile
     Write-Host "Created $envFile from the template - fill in any values you need."
+}
+
+# The Adaptive Islands wallpapers widget reads YASB_WALLPAPER_DIR. Clone the
+# community collection once and point the env var at its images folder. This is
+# deliberately non-fatal so an offline bootstrap still gets a working bar.
+$wallpapersScript = Join-Path $SourceDir 'setup-wallpapers.ps1'
+if ($NoWallpapers -or $env:SKOOP_NO_WALLPAPERS -eq '1') {
+    Write-Host 'Skipping wallpaper setup (-NoWallpapers).' -ForegroundColor DarkGray
+} elseif (Test-Path -LiteralPath $wallpapersScript) {
+    try {
+        & $wallpapersScript -EnvFile $envFile
+    } catch {
+        Write-Host "    Wallpaper setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host 'setup-wallpapers.ps1 not found - YASB_WALLPAPER_DIR left unchanged.' -ForegroundColor Yellow
 }
 
 function Resolve-Tool {
