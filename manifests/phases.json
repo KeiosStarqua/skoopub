@@ -58,7 +58,7 @@
         },
         {
             "Name": "apps",
-            "Description": "Browsers, desktop shell and the heavy applications",
+            "Description": "Browsers, desktop shell, Ollama and the heavy applications",
             "Buckets": [ "main", "extras", "lemon", "zeldrisho", "kbots" ],
             "Apps": [
                 "firefox",
@@ -71,6 +71,7 @@
                 "komorebi",
                 "whkd",
                 "cava",
+                "ollama-full",
                 "unikey",
                 "kbots"
             ]

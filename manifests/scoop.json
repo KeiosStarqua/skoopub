@@ -239,6 +239,11 @@
                  },
                  {
                      "Info":  "",
+                     "Source":  "extras",
+                     "Name":  "ollama-full"
+                 },
+                 {
+                     "Info":  "",
                      "Source":  "lemon",
                      "Name":  "cava"
                  },
