@@ -635,6 +635,13 @@ if (Test-Path $starshipConfig) {
     catch { Write-Host "Starship setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
+# 16b. Set marimo's permanent display theme to dark, preserving other settings.
+$marimoConfig = Join-Path $repo 'apps\marimo\configure.ps1'
+if (Test-Path $marimoConfig) {
+    try { & $marimoConfig }
+    catch { Write-Host "marimo config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+
 # 17. Check the Windows theme and enable Dark Mode (apps + system), idempotently.
 $darkMode = Join-Path $repo 'core\set-dark-mode.ps1'
 if (Test-Path $darkMode) {
@@ -652,6 +659,7 @@ Write-Host "Komorebi hotkeys are ready (see komorebi\whkdrc)." -ForegroundColor 
 Write-Host "YASB status bar is configured; fill ~\.config\yasb\.env for weather/wallpapers." -ForegroundColor Green
 Write-Host "Type 'n' in PowerShell or cmd to open Nushell." -ForegroundColor Green
 Write-Host "Starship is the prompt in new PowerShell and cmd windows." -ForegroundColor Green
+Write-Host "marimo uses dark mode (theme set in ~\.marimo.toml)." -ForegroundColor Green
 Write-Host "Dark Mode is on for apps and the system." -ForegroundColor Green
 Write-Host "Firefox profile and Atuin history restored from acer-ubuntu once per machine (markers firefox-restore.done / atuin-restore.done; -ForceFirefoxRestore / -ForceAtuinRestore repeat, -SkipFirefoxRestore / -SkipAtuinRestore opt out)." -ForegroundColor Green
 Write-Host "Start Zed once to install its extensions (PowerShell, HTML, Dockerfile, Compose, TOML, Nix, SQL)." -ForegroundColor Green

@@ -1,0 +1,4 @@
+# Marimo user configuration, merged into ~/.marimo.toml by configure.ps1.
+# Theme values: "dark", "light" or "system".
+[display]
+theme = "dark"

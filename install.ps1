@@ -54,6 +54,9 @@
       so zoxide/atuin are configured even if a later, optional step fails.
     - Enables Task Manager by clearing DisableTaskMgr for the current user (and
       machine-wide when elevated); a failure is reported but does not abort.
+    - Sets marimo's permanent display theme to dark by merging `[display]
+      theme = "dark"` into ~/.marimo.toml via apps/marimo/configure.ps1; existing
+      settings are preserved and changed originals are backed up.
     - Checks the Windows theme and turns on Dark Mode for apps and the system via
       core/set-dark-mode.ps1; re-runs leave an already-dark theme untouched.
     - Checks first, then only applies what is missing via apps/sharex/fix-printscreen.ps1
@@ -71,7 +74,7 @@
       now, so the Vicinae global shortcut works after every sign-in.
     - Sets the Vicinae global toggle shortcut to Ctrl+Space via a repo-managed
       config import (existing Vicinae settings are preserved).
-    - Deploys a conflict-free whkdrc and a Komorebi config (tight 4px workspace /
+    - Deploys a conflict-free whkdrc and a Komorebi config (tight 3px workspace /
       2px container padding plus initial-workspace rules: Rio/Firefox on 1,
       Zed/VS Code/Pear Desktop/YASB Themes on 2, Columns on workspace 1) to ~/.config via
       apps/komorebi/configure.ps1, then starts/reloads whkd (and Komorebi when needed)
@@ -1268,6 +1271,7 @@ if (-not $repoRoot)
         'apps/mouse/configure.ps1', 'apps/mouse/mouse.ps1',
         'apps/librescoll/configure.ps1',
         'apps/starship/configure.ps1', 'apps/starship/starship.toml',
+        'apps/marimo/configure.ps1', 'apps/marimo/config.toml',
         'apps/zed/settings.json', 'apps/zed/keymap.json', 'apps/zed/tasks.json',
         'apps/vicinae/keybinds.json', 'apps/rio/config.toml',
         'apps/komorebi/whkdrc', 'apps/komorebi/komorebi.json',
@@ -1302,6 +1306,7 @@ $komorebiConfig  = Join-Path $repoRoot 'apps\komorebi\configure.ps1'
 $yasbConfig      = Join-Path $repoRoot 'apps\yasb\configure.ps1'
 $nuSetup         = Join-Path $repoRoot 'apps\nushell\setup.ps1'
 $starshipConfig  = Join-Path $repoRoot 'apps\starship\configure.ps1'
+$marimoConfig    = Join-Path $repoRoot 'apps\marimo\configure.ps1'
 $darkMode        = Join-Path $repoRoot 'core\set-dark-mode.ps1'
 $mouseConfig     = Join-Path $repoRoot 'apps\mouse\configure.ps1'
 $librescollConfig = Join-Path $repoRoot 'apps\librescoll\configure.ps1'
@@ -1776,6 +1781,23 @@ if (Test-Path $starshipConfig)
     Write-Ok 'apps/starship/configure.ps1 not found - skipping'
 }
 
+# --- 19b. Enable marimo dark mode -------------------------------------------
+if (Test-Path $marimoConfig)
+{
+    Write-Step 'Enabling marimo dark mode'
+    try
+    {
+        & $marimoConfig
+    } catch
+    {
+        # Cosmetic: never let a user config file abort the bootstrap.
+        Write-Host "    marimo config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else
+{
+    Write-Ok 'apps/marimo/configure.ps1 not found - skipping'
+}
+
 # --- 20. Check and enable Windows Dark Mode ---------------------------------
 if (Test-Path $darkMode)
 {
@@ -1939,6 +1961,7 @@ Write-Host 'Komorebi hotkeys are ready (see apps/komorebi/whkdrc).' -ForegroundC
 Write-Host 'YASB status bar is configured; fill ~/.config/yasb/.env for weather/wallpapers.' -ForegroundColor Green
 Write-Host 'Type `n` in PowerShell or cmd to open Nushell.' -ForegroundColor Green
 Write-Host 'Starship is the prompt in new PowerShell and cmd windows.' -ForegroundColor Green
+Write-Host 'marimo uses dark mode (theme set in ~/.marimo.toml).' -ForegroundColor Green
 Write-Host 'Dark Mode is on for apps and the system.' -ForegroundColor Green
 Write-Host 'Firefox profile and Atuin history restored from acer-ubuntu once per machine (markers firefox-restore.done / atuin-restore.done; -ForceFirefoxRestore / -ForceAtuinRestore repeat, -SkipFirefoxRestore / -SkipAtuinRestore opt out).' -ForegroundColor Green
 Write-Host 'Wheel diagnostics: .\apps\mouse\mouse.ps1 diagnose (fix/restore are opt-in).' -ForegroundColor Green
