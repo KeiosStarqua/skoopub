@@ -13,6 +13,7 @@ manager of its own — the files are the product.
 | `bootstrap.ps1` | PowerShell wrapper | Backward-compatible entry point that forwards to `core/bootstrap.ps1`. |
 | `core/bootstrap.ps1` | PowerShell script | Older/simpler full bootstrap, kept for `-File` usage from a clone. |
 | `core/scoop-phases.ps1` | PowerShell helper | Validates `manifests/phases.json` against `scoop.json`, generates one temporary manifest per phase and imports them in order. Dot-sourced by both bootstraps. |
+| `core/set-dark-mode.ps1` | PowerShell script | Checks the current theme and enables Windows Dark Mode (apps + system) for the current user; idempotent. Called by both bootstraps and fetched by piped installs. |
 | `core/cleanup-before-shutdown.ps1` | PowerShell script | Shutdown backup of Firefox profiles / Vicinae / Atuin data to `acer-ubuntu`; after verification clears GitHub, SSH, Tailscale, Pear Desktop and Firefox sign-ins. |
 | `core/install-shutdown-hook.ps1` | PowerShell script | Registers per-user `SkoopCleanupOnShutdown` scheduled task that runs the cleanup on shutdown/logoff. |
 | `core/restore-backup.ps1` | PowerShell script | Restores the latest Firefox / Vicinae / Atuin snapshot from `acer-ubuntu` onto a fresh machine (standalone, opt-in). |
@@ -74,6 +75,7 @@ Apps — `kbots`: kbots (local workflow orchestrator; personal bucket, builds fr
 - **PowerShell 7 preference:** `install.ps1` re-launches itself with `pwsh -NoProfile -File <script> <same args>` when it is running under Windows PowerShell 5.1 and `pwsh` is already on PATH, because 5.1 mangles native stderr and BOM-less UTF-8. It checks again right after phase 1 installs `pwsh`, so the rest of the run (phases 2-4 and every configure step) already executes under 7; that second launch adds `-NoMenu` and inherits `SKOOP_PWSH_RELAUNCHED=1` so it cannot loop. `-NoPwsh` / `$env:SKOOP_NO_PWSH=1` opts out; piped `irm ... | iex` runs (no `$PSCommandPath`) and `bootstrap.ps1` keep running in the invoking shell. Keep scripts 5.1-compatible — the re-launch is an optimisation, not a requirement.
 - **Keep the three docs in sync** when behavior changes: `README.md` (users), `AGENTS.md` (inventory/conventions), and the comment-based help in `install.ps1`.
 - **Verify changes** with `scoop export` (manifest fidelity) and by re-running the affected script in a fresh `powershell` process; there is no automated test suite.
+- **Dark mode:** `core/set-dark-mode.ps1` is the single place for the OS theme: it reads `AppsUseLightTheme` / `SystemUsesLightTheme` under HKCU `...\Themes\Personalize`, sets both to `0` only when either is light, and best-effort broadcasts `ImmersiveColorSet`. Both bootstraps call it near the end (non-fatal), and piped installs fetch it alongside `core/scoop-phases.ps1`; keep those three references in sync when editing it.
 - **Editor config:** keep Zed user config in `apps/zed/` and re-run `.\apps\zed\configure.ps1` after edits. Never put credentials, API keys or tokens in these public JSON files.
 
 ## Git workflow

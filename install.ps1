@@ -41,6 +41,8 @@
       so zoxide/atuin are configured even if a later, optional step fails.
     - Enables Task Manager by clearing DisableTaskMgr for the current user (and
       machine-wide when elevated); a failure is reported but does not abort.
+    - Checks the Windows theme and turns on Dark Mode for apps and the system via
+      core/set-dark-mode.ps1; re-runs leave an already-dark theme untouched.
     - Applies apps/sharex/fix-printscreen.ps1 so ShareX owns the PrtSc key; a failure
       there is reported but does not abort the bootstrap.
     - Copies the repo-managed Zed settings/keymap/tasks into %APPDATA%\Zed (old
@@ -586,7 +588,7 @@ if (-not $repoRoot) {
     New-Item -ItemType Directory -Force -Path $repoRoot | Out-Null
     $repoFiles = @(
         'manifests/scoop.json', 'manifests/phases.json', 'core/scoop-phases.ps1',
-        'shell/profile.ps1',
+        'core/set-dark-mode.ps1', 'shell/profile.ps1',
         'apps/sharex/fix-printscreen.ps1', 'apps/sharex/hotkeys.template.json',
         'apps/firefox/policies.template.json',
         'apps/github/setup-auth.ps1', 'apps/zed/configure.ps1',
@@ -628,6 +630,7 @@ $komorebiConfig  = Join-Path $repoRoot 'apps\komorebi\configure.ps1'
 $yasbConfig      = Join-Path $repoRoot 'apps\yasb\configure.ps1'
 $nuSetup         = Join-Path $repoRoot 'apps\nushell\setup.ps1'
 $starshipConfig  = Join-Path $repoRoot 'apps\starship\configure.ps1'
+$darkMode        = Join-Path $repoRoot 'core\set-dark-mode.ps1'
 Write-Ok "repo root: $repoRoot"
 
 if ($runMode -eq 'herdr') {
@@ -886,7 +889,19 @@ if (Test-Path $starshipConfig) {
     Write-Ok 'apps/starship/configure.ps1 not found - skipping'
 }
 
-# --- 20. Automatic cleanup on shutdown / logoff -----------------------------
+# --- 20. Check and enable Windows Dark Mode ---------------------------------
+if (Test-Path $darkMode) {
+    try {
+        & $darkMode
+    } catch {
+        # Cosmetic: never let a theme setting abort the bootstrap.
+        Write-Host "    Dark Mode setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Ok 'core/set-dark-mode.ps1 not found - skipping'
+}
+
+# --- 21. Automatic cleanup on shutdown / logoff -----------------------------
 $shutdownHook = Join-Path $repoRoot 'core\install-shutdown-hook.ps1'
 if (-not $SkipShutdownHook -and (Test-Path $shutdownHook)) {
     Write-Step 'Registering the shutdown cleanup hook'
@@ -912,6 +927,7 @@ Write-Host 'Komorebi hotkeys are ready (see apps/komorebi/whkdrc).' -ForegroundC
 Write-Host 'YASB status bar is configured; fill ~/.config/yasb/.env for weather/wallpapers.' -ForegroundColor Green
 Write-Host 'Type `n` in PowerShell or cmd to open Nushell.' -ForegroundColor Green
 Write-Host 'Starship is the prompt in new PowerShell and cmd windows.' -ForegroundColor Green
+Write-Host 'Dark Mode is on for apps and the system.' -ForegroundColor Green
 if (-not $SkipShutdownHook) {
     Write-Host 'Shutdown cleanup is registered: Firefox/Vicinae/Atuin back up to acer-ubuntu and local sign-ins (GitHub, Tailscale, Pear Desktop, Firefox) are cleared on shutdown/logoff.' -ForegroundColor Green
 }

@@ -6,6 +6,7 @@ PowerShell profile, restored from a single manifest.
 - `manifests/scoop.json` — buckets + apps (`scoop export` format; the single source of truth for versions)
 - `manifests/phases.json` — ordered install phases: phase 1 is the fast essentials (PowerShell 7, Rio, Vicinae, Herdr, Tailscale), the heavy apps come last
 - `core/scoop-phases.ps1` — validates the phase mapping and replays each phase as its own temporary `scoop import`
+- `core/set-dark-mode.ps1` — checks the Windows theme and turns on Dark Mode (apps + system) for the current user; a no-op when it is already dark
 - `shell/profile.ps1` — shell config (`zoxide` + `atuin` history search, Starship prompt), dot-sourced from your `$PROFILE`; aliases `btop-lhm` / `btop-lh` to `btop` and drops inherited `HERDR_*` variables so a fresh shell is not mistaken for a nested Herdr pane
 - `install.ps1` — one-shot bootstrap for a fresh machine (phased install, `-EssentialsOnly` for just the terminal/launcher)
 - `apps/firefox/policies.template.json` — Firefox policy for extensions, managed bookmarks, homepage, and password saving
@@ -104,7 +105,8 @@ cd skoop
 15. Deploys the YASB status bar from `apps/yasb/` via `apps/yasb/configure.ps1`: `config.yaml` and `styles.css` go to `~/.config/yasb` (changed originals are backed up), and a `.env` is created from `.env.example` if missing. YASB starts automatically; it watches the config, so edits reload without a restart (`.\apps\yasb\configure.ps1 -Restart` forces one). Fill `~/.config/yasb/.env` with a WeatherAPI key/location and optional wallpaper directory to enable those widgets. In-app updates are off so Scoop stays the version source. Source config: https://github.com/SleepyCatHey/Ultimate-Win11-Setup/tree/main/Komorebi/YASB%20config%20for%20Komorebi.
 16. Adds an `n` alias for Nushell in `shell/profile.ps1` (PowerShell) and a cmd.exe AutoRun doskey macro via `apps/nushell/setup.ps1`, so typing `n` opens Nushell from either shell. Existing cmd AutoRun entries are preserved; run `.\apps\nushell\setup.ps1 -Remove` to undo.
 17. Deploys the **Starship** prompt via `apps/starship/configure.ps1`: `apps/starship/starship.toml` (Catppuccin Mocha, directory/git/time/status modules) goes to `~/.config/starship.toml`, and `shell/profile.ps1` initialises Starship for PowerShell. For cmd.exe it writes `%LOCALAPPDATA%\clink\starship.lua` and runs `clink autorun install` (Clink is in `manifests/scoop.json`), which appends to the existing AutoRun entry so the Nushell macro survives. Use `-NoCmd` to skip cmd, `-NoAutorun` to leave the registry alone, or `-NoBackup` to overwrite without a `.bak`.
-18. Registers the per-user scheduled task `SkoopCleanupOnShutdown` via `core/install-shutdown-hook.ps1`. On shutdown/logoff it backs up Firefox profiles, Vicinae's config/data/state and Atuin's config + data (`%USERPROFILE%\.atuin`) to `acer-ubuntu`, verifies the upload, and only then clears local sign-ins: GitHub CLI/git/Credential Manager, SSH keys, the **Tailscale login** (`tailscale logout`), **Pear Desktop / YouTube Music** user data (saved Google login and cache), and Firefox `logins.json` / `key4.db`. Pass `-BackupUser` (or `$env:SKOOP_BACKUP_USER`) for the SSH user, or `-SkipShutdownHook` to opt out. `.\core\cleanup-before-shutdown.ps1 -DryRun` previews without changing anything; `-BackupOnly` uploads without removing anything.
+18. Checks the Windows theme via `core/set-dark-mode.ps1` and turns on **Dark Mode** for both apps and the system (`AppsUseLightTheme=0`, `SystemUsesLightTheme=0` in HKCU). Re-runs are a no-op when dark mode is already on, and a theme-change notification tells running apps to reload.
+19. Registers the per-user scheduled task `SkoopCleanupOnShutdown` via `core/install-shutdown-hook.ps1`. On shutdown/logoff it backs up Firefox profiles, Vicinae's config/data/state and Atuin's config + data (`%USERPROFILE%\.atuin`) to `acer-ubuntu`, verifies the upload, and only then clears local sign-ins: GitHub CLI/git/Credential Manager, SSH keys, the **Tailscale login** (`tailscale logout`), **Pear Desktop / YouTube Music** user data (saved Google login and cache), and Firefox `logins.json` / `key4.db`. Pass `-BackupUser` (or `$env:SKOOP_BACKUP_USER`) for the SSH user, or `-SkipShutdownHook` to opt out. `.\core\cleanup-before-shutdown.ps1 -DryRun` previews without changing anything; `-BackupOnly` uploads without removing anything.
 
 Then open a new PowerShell window and try:
 
@@ -146,6 +148,12 @@ Re-apply the Rio config after editing `apps/rio/config.toml`:
 .\apps\rio\configure.ps1
 ```
 
+Re-check and enforce Dark Mode after editing `core/set-dark-mode.ps1`:
+
+```powershell
+.\core\set-dark-mode.ps1
+```
+
 Re-apply the Komorebi hotkeys, padding or workspace rules after editing `apps/komorebi/whkdrc` or `apps/komorebi/komorebi.json` (add `-RestartPin` to relaunch the Rio/Firefox layout watcher, or `-NoPin` to skip it):
 
 ```powershell
@@ -171,7 +179,8 @@ scoop export | Out-File -Encoding utf8 manifests/scoop.json
 |---|---|
 | Normal (non-elevated) shell | Scoop installs per-user under `%USERPROFILE%\scoop` |
 | Elevated shell | Scoop installs system-wide under `C:\ProgramData\scoop` |
-| Piped via `irm \| iex` | `manifests/scoop.json`, `manifests/phases.json`, `core/scoop-phases.ps1`, `shell/profile.ps1`, `apps/firefox/policies.template.json`, `apps/sharex/fix-printscreen.ps1`, `apps/github/setup-auth.ps1`, `apps/git/setup-identity.ps1`, `apps/zed/configure.ps1`, `apps/herdr/setup-ssh.ps1`, `apps/tailscale/configure.ps1`, `apps/vicinae/enable-autostart.ps1`, `apps/vicinae/configure.ps1`, `apps/rio/configure.ps1`, `apps/komorebi/configure.ps1`, `apps/yasb/configure.ps1`, `apps/nushell/setup.ps1`, `apps/starship/configure.ps1`, `apps/vicinae/keybinds.json`, `apps/rio/config.toml`, `apps/komorebi/whkdrc`, `apps/komorebi/komorebi.json`, `apps/komorebi/pin-terminal-layout.ps1`, `apps/starship/starship.toml`, `apps/yasb/config.yaml`, `apps/yasb/styles.css`, `apps/yasb/.env.example` and `apps/zed/*.json` are fetched to `%LOCALAPPDATA%\skoop` |
+| Piped via `irm \| iex` | `manifests/scoop.json`, `manifests/phases.json`, `core/scoop-phases.ps1`, `core/set-dark-mode.ps1`, `shell/profile.ps1`, `apps/firefox/policies.template.json`, `apps/sharex/fix-printscreen.ps1`, `apps/github/setup-auth.ps1`, `apps/git/setup-identity.ps1`, `apps/zed/configure.ps1`, `apps/herdr/setup-ssh.ps1`, `apps/tailscale/configure.ps1`, `apps/vicinae/enable-autostart.ps1`, `apps/vicinae/configure.ps1`, `apps/rio/configure.ps1`, `apps/komorebi/configure.ps1`, `apps/yasb/configure.ps1`, `apps/nushell/setup.ps1`, `apps/starship/configure.ps1`, `apps/vicinae/keybinds.json`, `apps/rio/config.toml`, `apps/komorebi/whkdrc`, `apps/komorebi/komorebi.json`, `apps/komorebi/pin-terminal-layout.ps1`, `apps/starship/starship.toml`, `apps/yasb/config.yaml`, `apps/yasb/styles.css`, `apps/yasb/.env.example` and `apps/zed/*.json` are fetched to `%LOCALAPPDATA%\skoop` |
+| Windows theme / Dark Mode | `core/set-dark-mode.ps1` sets `AppsUseLightTheme=0` and `SystemUsesLightTheme=0` under HKCU `...\Themes\Personalize` only when they are not already dark, then broadcasts `ImmersiveColorSet`. No admin needed, and it never overrides an existing dark theme. Run `.\core\set-dark-mode.ps1` to re-apply |
 | Task Manager disabled by policy | `DisableTaskMgr` is set to `0` for the current user; elevated runs also clear the machine-wide value. A domain policy may reapply it on the next refresh |
 | From a clone | The files next to `install.ps1` are used, so edits apply directly |
 | Firefox default browser | `firefox --setDefaultBrowser` runs after install (skipped if Firefox is already the http handler); Windows 11 may open Settings for confirmation, and a failure is non-fatal |
