@@ -176,26 +176,28 @@ fn device_name(
         let _ = GetRawInputDeviceInfoW(Some(handle), RIDI_DEVICENAME, None, &mut size);
     }
     let (name, identified) = if size > 0 && size < 4096 {
-        let mut buffer = vec![0u16; size as usize / 2 + 1];
-        let written = unsafe {
+        // The first call may report either bytes or WCHARs depending on the
+        // RIDI_* command. Overallocate and pass the real byte capacity so a
+        // long physical HID path can never overflow the buffer.
+        let mut buffer = vec![0u16; size as usize + 4];
+        let mut capacity = (buffer.len() * mem::size_of::<u16>()) as u32;
+        unsafe {
             GetRawInputDeviceInfoW(
                 Some(handle),
                 RIDI_DEVICENAME,
                 Some(buffer.as_mut_ptr() as *mut c_void),
-                &mut size,
-            )
-        };
-        if written > 1 {
-            let raw = String::from_utf16_lossy(&buffer[..written as usize / 2])
-                .trim_end_matches('\0')
-                .to_string();
-            let identified = !raw.is_empty()
-                && raw.to_uppercase().contains("VID_")
-                && raw.to_uppercase().contains("PID_");
-            (raw, identified)
-        } else {
-            ("unknown-hid".to_string(), false)
+                &mut capacity,
+            );
         }
+        // The buffer is zero-filled and over-sized; read up to the first NUL
+        // instead of trusting the return value's units.
+        let raw = String::from_utf16_lossy(&buffer)
+            .trim_end_matches('\0')
+            .to_string();
+        let identified = !raw.is_empty()
+            && raw.to_uppercase().contains("VID_")
+            && raw.to_uppercase().contains("PID_");
+        (raw, identified)
     } else {
         ("unknown-hid".to_string(), false)
     };
@@ -260,14 +262,21 @@ unsafe fn handle_raw_input(lparam: LPARAM) {
         return;
     }
     let mut buffer = vec![0u8; size as usize];
+    let mut copied = buffer.len() as u32;
     let read = GetRawInputData(
         hraw,
         RID_INPUT,
         Some(buffer.as_mut_ptr() as *mut c_void),
-        &mut size,
+        &mut copied,
         header_size,
     );
-    if read == 0 || (size as usize) < buffer.len() {
+    if read == 0 || copied as usize > buffer.len() {
+        return;
+    }
+    // A mouse RAWMOUSE needs at least usButtonFlags (+4) and usButtonData (+6)
+    // after the header. Never read past the buffer even if Windows reports a
+    // short struct for an unexpected device.
+    if buffer.len() < header_size as usize + 8 {
         return;
     }
     let header = ptr::read_unaligned(buffer.as_ptr() as *const RAWINPUTHEADER);
