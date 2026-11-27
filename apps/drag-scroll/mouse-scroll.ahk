@@ -1,13 +1,13 @@
 ; Drag to scroll - AutoHotkey v2 port of Mikhail V.'s mouse-scroll-v04.ahk
 ; Source: https://github.com/Mikhail22/drag-scroll--autohotkey
-; Hold RIGHT Alt (RAlt) and move the mouse to scroll; release to stop.
-; A press with no scrolling sends RAlt so the key is not swallowed.
+; Hold LEFT Alt (LAlt) and move the mouse to scroll; release to stop.
+; A press with no scrolling sends LAlt so the key is not swallowed.
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 
 ; === User settings ===
 swap := false      ; true reverses the scroll direction
-horiz := true      ; true uses horizontal mouse movement as the input
+horiz := false     ; false uses vertical mouse movement as the input (up/down)
 k := 1             ; scroll speed coefficient (higher = faster)
 ; Lower k and higher S make scrolling slower; lower T makes it smoother
 ; (more frequent, smaller wheel steps instead of occasional bursts).
@@ -55,20 +55,20 @@ Watch() {
         Send("{WheelUp " n "}")
 }
 
-; Without ~ the native RAlt is suppressed while held, so it cannot trigger
+; Without ~ the native LAlt is suppressed while held, so it cannot trigger
 ; menu/shortcut side effects during a scroll drag. If the press produced no
-; scrolling, send RAlt so a plain press still behaves normally.
-RAlt:: {
+; scrolling, send LAlt so a plain press still behaves normally.
+LAlt:: {
     global running, dyTotal, mxLast, myLast
     running := true
     dyTotal := 0
     MouseGetPos(&mxLast, &myLast)
 }
 
-RAlt up:: {
+LAlt up:: {
     global running, scrollsTotal
     running := false
     if (scrollsTotal = 0)
-        Send("{RAlt}")
+        Send("{LAlt}")
     scrollsTotal := 0
 }
