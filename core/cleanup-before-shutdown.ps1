@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-    Back up Firefox profiles, Vicinae, Atuin, Pear Desktop and OpenCode data to
-    acer-ubuntu over Tailscale SSH, then remove local sign-ins (GitHub, Tailscale,
-    Pear Desktop, OpenCode, Firefox).
+    Back up Firefox profiles, Vicinae, Atuin, Pear Desktop, OpenCode data and the
+    registered repo list to acer-ubuntu over Tailscale SSH, then remove local
+    sign-ins (GitHub, Tailscale, Pear Desktop, OpenCode, Firefox).
 
 .DESCRIPTION
     Intended for public/shared PCs: run it before turning the machine off to leave
@@ -31,8 +31,9 @@
     ~/<VicinaeRemotePath>/<timestamp>/vicinae, Atuin in
     ~/<AtuinRemotePath>/<timestamp>/atuin, Pear Desktop in
     ~/<PearRemotePath>/<timestamp>/pear, OpenCode in
-    ~/<OpenCodeRemotePath>/<timestamp>/opencode and the SSH key in
-    ~/<SshRemotePath>/<timestamp>/ssh on acer-ubuntu, so
+    ~/<OpenCodeRemotePath>/<timestamp>/opencode, the SSH key in
+    ~/<SshRemotePath>/<timestamp>/ssh and the registered repo list in
+    ~/<ReposRemotePath>/<timestamp>/repos on acer-ubuntu, so
     restore-backup.ps1 can pick the latest of each app independently. Nothing is
     deleted until each remote copy has been verified; if verification fails, the
     staging copy is kept and the script stops. Close active Atuin shells before
@@ -95,6 +96,14 @@
 .PARAMETER NoSsh
     Leave ~/.ssh alone: skip both the SSH key snapshot and the local wipe.
 
+.PARAMETER ReposRemotePath
+    Repo-list destination folder relative to the remote home (default
+    'skoop-backups/repos'). The registered repos manifest (manifests/repos.json)
+    is uploaded there so a fresh machine can restore the clone list.
+
+.PARAMETER NoRepos
+    Skip the repo-list snapshot.
+
 .PARAMETER StagingDir
     Local folder used to assemble the backup before upload. Defaults to
     %LOCALAPPDATA%\skoop\backup and is removed after a verified upload.
@@ -137,6 +146,7 @@ param(
     [string] $PearRemotePath = 'skoop-backups/pear',
     [string] $OpenCodeRemotePath = 'skoop-backups/opencode',
     [string] $SshRemotePath = 'skoop-backups/ssh',
+    [string] $ReposRemotePath = 'skoop-backups/repos',
     [string] $StagingDir,
     [string] $LogPath,
     [switch] $NoVicinae,
@@ -144,6 +154,7 @@ param(
     [switch] $NoPear,
     [switch] $NoOpenCode,
     [switch] $NoSsh,
+    [switch] $NoRepos,
     [switch] $SkipBackup,
     [switch] $KeepFirefoxLogins,
     [switch] $BackupOnly,
@@ -569,6 +580,20 @@ function Copy-SshKeys {
     return $true
 }
 
+function Copy-ReposManifest {
+    param([string] $Destination)
+
+    $source = Join-Path (Split-Path -Parent $PSScriptRoot) 'manifests\repos.json'
+    if (-not (Test-Path -LiteralPath $source)) {
+        Write-Log 'manifests/repos.json not found - skipping repo-list snapshot'
+        return $false
+    }
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    Copy-Item -LiteralPath $source -Destination (Join-Path $Destination 'repos.json') -Force
+    Write-Log 'staged repos/repos.json (registered repo list)'
+    return $true
+}
+
 function Invoke-RemoteBackup {
     param(
         [string] $Source,
@@ -974,6 +999,14 @@ if (-not $SkipBackup) {
             if (Copy-SshKeys -Destination $sshRoot) {
                 $remoteBackups += Invoke-RemoteBackup -Source $sshRoot -Stamp $stamp -SshUser $sshUser `
                     -RemotePath $SshRemotePath -RequiredPaths @() -MinFiles 1
+            }
+        }
+
+        if (-not $NoRepos) {
+            $reposRoot = Join-Path $stagingRoot 'repos'
+            if (Copy-ReposManifest -Destination $reposRoot) {
+                $remoteBackups += Invoke-RemoteBackup -Source $reposRoot -Stamp $stamp -SshUser $sshUser `
+                    -RemotePath $ReposRemotePath -RequiredPaths @('repos.json') -MinFiles 1
             }
         }
 

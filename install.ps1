@@ -131,6 +131,9 @@
       an idempotent fallback; Firefox is closed and relaunched around the copy and
       Atuin warns you to close other Atuin shells. OpenCode config/state and
       credentials are restored at the end of the install, once its CLI exists.
+      The ponytail plugin (@dietrichgebert/ponytail) is then added to OpenCode
+      once (via `opencode plugin add`), checked against ~/.config/opencode/opencode.json;
+      a failure is reported but does not abort the bootstrap.
       The SSH key from ~/.ssh is also restored once at the end of the install
       (core/restore-backup.ps1 -Only ssh) so the backup made by the shutdown
       cleanup comes back on a fresh machine; -SkipSshRestore opts out.
@@ -1529,7 +1532,14 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue))
 Ensure-SkoopClone
 if (-not $SkipRepoClones -and $env:SKOOP_NO_REPO_CLONES -ne '1')
 {
-    Ensure-RegisteredRepos -Manifest (Join-Path $repoRoot 'manifests\repos.json')
+    # A list restored from acer-ubuntu takes precedence over the copy shipped
+    # in the checkout, so a fresh machine clones the latest registered repos.
+    $reposManifest = Join-Path $env:LOCALAPPDATA 'skoop\repos.json'
+    if (-not (Test-Path -LiteralPath $reposManifest))
+    {
+        $reposManifest = Join-Path $repoRoot 'manifests\repos.json'
+    }
+    Ensure-RegisteredRepos -Manifest $reposManifest
 }
 
 # --- 7. Install the phase manifests in order --------------------------------
