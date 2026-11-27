@@ -249,6 +249,11 @@
                  },
                  {
                      "Info":  "",
+                     "Source":  "nerd-fonts",
+                     "Name":  "JetBrainsMono-NF-Propo"
+                 },
+                 {
+                     "Info":  "",
                      "Source":  "zeldrisho",
                      "Name":  "unikey"
                  },

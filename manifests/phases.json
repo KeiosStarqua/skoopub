@@ -2,7 +2,7 @@
     "phases": [
         {
             "Name": "core-terminal",
-            "Description": "PowerShell 7, Rio, Vicinae, the Herdr TUI and Tailscale sign-in",
+            "Description": "PowerShell 7, Rio, Vicinae, the Herdr TUI, Tailscale sign-in and JetBrains Mono Nerd Fonts (regular + proportional)",
             "Buckets": [ "main", "extras", "nerd-fonts" ],
             "Apps": [
                 "git",
@@ -12,6 +12,7 @@
                 "herdr-core",
                 "vicinae",
                 "JetBrainsMono-NF",
+                "JetBrainsMono-NF-Propo",
                 "tailscale"
             ]
         },

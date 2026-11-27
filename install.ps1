@@ -78,18 +78,21 @@
       and a watcher that keeps Rio left / Firefox right in the Terminal workspace. It
       also auto-hides the Windows taskbar via apps/komorebi/set-taskbar-autohide.ps1 so
       tiling windows use the full screen (YASB is the visible bar).
-    - Deploys the repo-managed YASB status bar (config.yaml, styles.css and a .env
-      template) via apps/yasb/configure.ps1 and starts YASB for the Komorebi UI.
+    - Deploys the YASB status bar via apps/yasb/configure.ps1: it downloads the
+      chosen theme's config.yaml/styles.css from the community YASB themes
+      catalog (default Shibumi, id 92a8f104-ab80-45c0-95f1-82ebb2e12df6;
+      -ThemeId / SKOOP_YASB_THEME_ID picks another) and writes them to ~/.config/yasb
+      with backups, plus a .env template; no theme files are committed here.
       apps/yasb/setup-wallpapers.ps1 shallow-clones D3Ext/aesthetic-wallpapers once
       and points YASB_WALLPAPER_DIR at its images folder (Alt+E gallery); opt out
       with -NoWallpapers / SKOOP_NO_WALLPAPERS=1.
     - Adds an `n` alias for Nushell in PowerShell (profile.ps1) and a cmd.exe
       AutoRun doskey macro via apps/nushell/setup.ps1, preserving existing AutoRun entries.
     - Registers a per-user scheduled task (SkoopCleanupOnShutdown) via
-      core/install-shutdown-hook.ps1 so the Firefox/Vicinae/Atuin backup and local
-      sign-in cleanup (GitHub, Tailscale, Pear Desktop, Firefox) run automatically
-      on shutdown/logoff; -BackupUser / SKOOP_BACKUP_USER supplies the SSH user,
-      and -SkipShutdownHook opts out.
+      core/install-shutdown-hook.ps1 so the Firefox/Vicinae/Atuin/Pear Desktop
+      backup and local sign-in cleanup (GitHub, Tailscale, Pear Desktop, Firefox)
+      run automatically on shutdown/logoff; -BackupUser / SKOOP_BACKUP_USER
+      supplies the SSH user, and -SkipShutdownHook opts out.
     - Installs skoopub-mouse from the GitHub Release into %LOCALAPPDATA%\skoop\mouse
       via apps/mouse/configure.ps1 (non-fatal), so `apps/mouse/mouse.ps1 diagnose`
       can capture HID Raw Input vs WM_MOUSEWHEEL. It also sets the hardware DPI
@@ -101,10 +104,11 @@
     - Installs Rio before Herdr in phase 1, then opens Rio in ~/repos with Herdr
       already running. Skipped for non-interactive shells and Herdr panes;
       -NoAutoHerdr / SKOOP_NO_AUTO_HERDR=1 opts out.
-    - Restores Vicinae from the latest acer-ubuntu snapshot right after Tailscale
-      connects (via core/restore-backup.ps1 -Only vicinae), with a marker file so
-      repeated installs do not re-download it. Non-fatal; supply -BackupUser or
-      SKOOP_BACKUP_USER when running unattended.
+    - Restores Vicinae and Pear Desktop from the latest acer-ubuntu snapshot right
+      after Tailscale connects (via core/restore-backup.ps1 -Only vicinae / -Only
+      pear), with a marker file per app so repeated installs do not re-download
+      them. Non-fatal; supply -BackupUser or SKOOP_BACKUP_USER when running
+      unattended.
 
     By default the script runs the Full setup immediately with no options to
     choose. Pass -Menu (or $env:SKOOP_MENU=1) to open the optional interactive
@@ -811,7 +815,7 @@ if (-not $repoRoot) {
         'apps/vicinae/keybinds.json', 'apps/rio/config.toml',
         'apps/komorebi/whkdrc', 'apps/komorebi/komorebi.json',
         'apps/komorebi/pin-terminal-layout.ps1', 'apps/komorebi/set-taskbar-autohide.ps1',
-        'apps/yasb/config.yaml', 'apps/yasb/styles.css', 'apps/yasb/.env.example'
+        'apps/yasb/.env.example'
     )
     foreach ($file in $repoFiles) {
         $dest = Join-Path $repoRoot $file
@@ -846,7 +850,7 @@ Write-Ok "repo root: $repoRoot"
 
 if ($runMode -eq 'herdr') {
     Start-TailscaleDaemon
-    if (Test-Path $tailscaleConfig) { & $tailscaleConfig -RestoreVicinae -BackupUser $BackupUser }
+    if (Test-Path $tailscaleConfig) { & $tailscaleConfig -RestoreVicinae -RestorePearDesktop -BackupUser $BackupUser }
     Connect-HerdrRemote
     Write-Host ''
     Write-Host 'Done. Herdr machine saved - open Herdr and pick it from the sidebar; run the full setup to configure this machine.' -ForegroundColor Green
@@ -937,7 +941,7 @@ function Invoke-EssentialTerminalSetup {
     Start-TailscaleDaemon
     if (Test-Path $tailscaleConfig) {
         try {
-            & $tailscaleConfig -SignIn -RestoreVicinae -BackupUser $BackupUser
+            & $tailscaleConfig -SignIn -RestoreVicinae -RestorePearDesktop -BackupUser $BackupUser
         } catch {
             Write-Host "    Tailscale sign-in failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
         }
@@ -1164,7 +1168,6 @@ if (Test-Path $mouseConfig) {
         # Diagnostics are optional: never let a GitHub outage abort the setup.
         Write-Host "    skoopub-mouse install failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-} else {
     $mouseCli = Join-Path $repoRoot 'apps\mouse\mouse.ps1'
     if (-not $SkipMouseDpi -and $env:SKOOP_NO_MOUSE_DPI -ne '1' -and (Test-Path $mouseCli)) {
         Write-Step "Setting Logitech mouse DPI to $MouseDpi"
@@ -1174,6 +1177,7 @@ if (Test-Path $mouseConfig) {
             Write-Host "    Mouse DPI setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
+} else {
     Write-Ok 'apps/mouse/configure.ps1 not found - skipping'
 }
 
@@ -1192,5 +1196,5 @@ Write-Host 'Starship is the prompt in new PowerShell and cmd windows.' -Foregrou
 Write-Host 'Dark Mode is on for apps and the system.' -ForegroundColor Green
 Write-Host 'Wheel diagnostics: .\apps\mouse\mouse.ps1 diagnose (fix/restore are opt-in).' -ForegroundColor Green
 if (-not $SkipShutdownHook) {
-    Write-Host 'Shutdown cleanup is registered: Firefox/Vicinae/Atuin back up to acer-ubuntu and local sign-ins (GitHub, Tailscale, Pear Desktop, Firefox) are cleared on shutdown/logoff.' -ForegroundColor Green
+    Write-Host 'Shutdown cleanup is registered: Firefox/Vicinae/Atuin/Pear Desktop back up to acer-ubuntu and local sign-ins (GitHub, Tailscale, Pear Desktop, Firefox) are cleared on shutdown/logoff.' -ForegroundColor Green
 }

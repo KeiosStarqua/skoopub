@@ -1,23 +1,23 @@
 # apps/yasb/configure.ps1
-# Deploy a repo-managed YASB theme (config.yaml + styles.css) into ~/.config/yasb,
-# create a .env from the template when missing, and start YASB. Okinami is the
-# default; Adaptive Islands and the original Komorebi bar theme are preserved
-# under themes/ and can be restored with -Theme adaptive-islands / komorebi. It clones the
-# community aesthetic-wallpapers collection once and sets YASB_WALLPAPER_DIR.
-# The config watches for changes, so a restart is only needed with -Restart.
+# Fetch the selected theme's config.yaml + styles.css from the community YASB
+# themes catalog into ~/.config/yasb, create a .env from the template when
+# missing, clone the wallpaper collection once, and start YASB.
 #
-#   powershell -ExecutionPolicy Bypass -File .\apps/yasb/configure.ps1
-#   powershell -ExecutionPolicy Bypass -File .\apps/yasb/configure.ps1 -Theme adaptive-islands
-#   powershell -ExecutionPolicy Bypass -File .\apps/yasb/configure.ps1 -Theme komorebi
-#   powershell -ExecutionPolicy Bypass -File .\apps/yasb/configure.ps1 -Restart
+# Theme files are deliberately NOT committed to this repo: there are ~70 themes
+# in the catalog and YASB's Themes Manager (yasb_themes.exe) can install any of
+# them. This script only applies a known default on a fresh machine. Pass
+# -ThemeId (or set SKOOP_YASB_THEME_ID) to use a different catalog theme id.
+#
+#   powershell -ExecutionPolicy Bypass -File .\apps\yasb\configure.ps1
+#   powershell -ExecutionPolicy Bypass -File .\apps\yasb\configure.ps1 -ThemeId 92a8f104-ab80-45c0-95f1-82ebb2e12df6
+#   powershell -ExecutionPolicy Bypass -File .\apps\yasb\configure.ps1 -Restart
 [CmdletBinding()]
 param(
     # Resolved in the body: $PSScriptRoot is empty during param binding in PS 5.1.
     [string]$SourceDir = '',
     [string]$ConfigDir = '',
-    # Which repo-managed theme to deploy (default: Okinami).
-    [ValidateSet('okinami', 'adaptive-islands', 'komorebi')]
-    [string]$Theme = 'okinami',
+    # Catalog theme id to apply on fresh installs (default: Shibumi).
+    [string]$ThemeId = '92a8f104-ab80-45c0-95f1-82ebb2e12df6',
     # Overwrite changed files directly instead of keeping a timestamped .bak.
     [switch]$NoBackup,
     # Stop and relaunch YASB so the config is reloaded immediately.
@@ -27,62 +27,188 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+
+if ($env:SKOOP_YASB_THEME_ID) { $ThemeId = $env:SKOOP_YASB_THEME_ID }
+if ($ThemeId -notmatch '^[a-zA-Z0-9_-]+$') {
+    Write-Host "Invalid YASB theme id: $ThemeId" -ForegroundColor Yellow
+    return
+}
 
 if (-not $SourceDir) {
     $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
     if (-not $scriptDir) { $scriptDir = $PSScriptRoot }
     $SourceDir = $scriptDir
 }
-
 if (-not $ConfigDir) {
     if ($env:USERPROFILE) { $ConfigDir = Join-Path $env:USERPROFILE '.config\yasb' }
     else { $ConfigDir = Join-Path $env:APPDATA 'yasb' }
 }
-
-if (-not (Test-Path -LiteralPath $SourceDir)) {
-    Write-Host "YASB config source not found: $SourceDir" -ForegroundColor Yellow
-    return
-}
-
-$themeDir = if ($Theme -eq 'komorebi' -or $Theme -eq 'adaptive-islands') { Join-Path $SourceDir "themes\$Theme" } else { $SourceDir }
-if (-not (Test-Path -LiteralPath $themeDir)) {
-    Write-Host "YASB theme '$Theme' not found at $themeDir" -ForegroundColor Yellow
-    return
-}
-Write-Host "Deploying YASB theme: $Theme"
-
 New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
 
-function Copy-YasbFile {
-    param([string]$Source, [string]$Destination)
+$themeBase = 'https://raw.githubusercontent.com/amnweb/yasb-themes/main/themes/{0}' -f $ThemeId
+$themeName = $ThemeId
+try {
+    $catalog = Invoke-RestMethod 'https://raw.githubusercontent.com/amnweb/yasb-themes/refs/heads/main/themes.json' -TimeoutSec 30
+    $entry = @($catalog.PSObject.Properties | Where-Object { $_.Name -eq $ThemeId })
+    if ($entry.Count -gt 0 -and $entry[0].Value.name) { $themeName = $entry[0].Value.name }
+} catch {
+    # Name is cosmetic; the raw file URLs below are enough to apply the theme.
+}
 
-    $normalize = {
-        param([string]$Text)
-        return ($Text -replace "`r`n", "`n").TrimEnd()
-    }
+$patch = {
+    param([string]$Text)
+    # Keep no machine-specific paths and let Scoop own the version.
+    $text = $Text -replace '(?m)^(\s*image_path:\s*).*$', '$1"$env:YASB_WALLPAPER_DIR" # Set in ~/.config/yasb/.env (see .env.example)'
+    $text = $text -replace '(?m)^(\s*path:\s*)[''"]?[A-Za-z]:\\.*[Ww]allpaper.*$', '$1"$env:YASB_WALLPAPER_DIR"'
+    $text = $text -replace '(?m)^(\s*update_check:\s*).*$', '${1}false'
+    # Nerd Font supplies the F0xxx/EAF8 glyphs, Segoe Fluent Icons supplies E972
+    # and the Windows system glyphs; neither alone covers every theme label.
+    $text = $text -replace '(?m)^(\s*--icons-font(?:-fallback)?:\s*).*$', '$1"JetBrainsMono NFP", "Segoe Fluent Icons";'
+    $text = $text -replace '(?m)^(\s*font-family:\s*)"Segoe Fluent Icons".*$', '$1"JetBrainsMono NFP", "Segoe Fluent Icons";'
+    return $text
+}
 
-    if (Test-Path -LiteralPath $Destination) {
-        $existing = & $normalize (Get-Content -Raw -LiteralPath $Destination)
-        $desired  = & $normalize (Get-Content -Raw -LiteralPath $Source)
-        if ($existing -eq $desired) { return }
-
+function Set-DeployedFile {
+    param([string]$Name, [string]$Content)
+    $destination = Join-Path $ConfigDir $Name
+    $normalize = { param($s) (($s -replace "`r`n", "`n")).TrimEnd() }
+    $desired = & $normalize $Content
+    if (Test-Path -LiteralPath $destination) {
+        $existing = & $normalize ([System.IO.File]::ReadAllText($destination))
+        if ($existing -eq $desired) {
+            Write-Host "$Name already up to date."
+            return
+        }
         if (-not $NoBackup) {
-            $backup = '{0}.bak.{1}' -f $Destination, (Get-Date -Format 'yyyyMMdd-HHmmss')
-            Copy-Item -LiteralPath $Destination -Destination $backup -Force
-            Write-Host "Backed up $Destination -> $backup"
+            $backup = '{0}.bak.{1}' -f $destination, (Get-Date -Format 'yyyyMMdd-HHmmss')
+            Copy-Item -LiteralPath $destination -Destination $backup -Force
+            Write-Host "Backed up $destination -> $backup"
         }
     }
-
-    Copy-Item -LiteralPath $Source -Destination $Destination -Force
-    Write-Host "Installed $Destination"
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($destination, ($desired + "`r`n"), $utf8NoBom)
+    Write-Host "Installed $destination"
 }
 
 foreach ($file in @('config.yaml', 'styles.css')) {
-    $source = Join-Path $themeDir $file
-    if (Test-Path -LiteralPath $source) {
-        Copy-YasbFile -Source $source -Destination (Join-Path $ConfigDir $file)
+    try {
+        $raw = (Invoke-WebRequest -Uri "$themeBase/$file" -UseBasicParsing -TimeoutSec 45).Content
+        $content = & $patch $raw
+        Set-DeployedFile -Name $file -Content $content
+    } catch {
+        Write-Host "Could not fetch $file for '$themeName' ($($_.Exception.Message)) - existing file left untouched." -ForegroundColor Yellow
     }
 }
+
+# Fonts: theme CSS names fonts by their Windows family ("JetBrainsMono NFP"),
+# not by the Scoop package ("JetBrainsMono-NF-Propo"). Detect what is missing
+# and install known Nerd Font packages so icons are not boxes on Windows 10.
+$fontPackages = @{
+    'JetBrainsMono NFP'              = 'JetBrainsMono-NF-Propo'
+    'JetBrainsMono Nerd Font Propo'  = 'JetBrainsMono-NF-Propo'
+    'JetBrainsMono NF'               = 'JetBrainsMono-NF'
+    'JetBrainsMono Nerd Font'        = 'JetBrainsMono-NF'
+    'CaskaydiaCove NFP'              = 'CascadiaCode-NF-Propo'
+    'CaskaydiaCove NF'               = 'CascadiaCode-NF'
+    'CascadiaCode NFP'               = 'CascadiaCode-NF-Propo'
+    'CascadiaCode NF'                = 'CascadiaCode-NF'
+    'Symbols Nerd Font'              = 'NerdFontsSymbolsOnly'
+    'Symbols Nerd Font Mono'         = 'NerdFontsSymbolsOnly'
+    'Font Awesome'                   = 'Font-Awesome'
+    'Font Awesome 6 Free'            = 'Font-Awesome'
+}
+# Some themes spell the Nerd Font family differently from its Windows name.
+$fontAliases = @{
+    'JetBrainsMono Nerd Font Propo' = 'JetBrainsMono NFP'
+    'JetBrainsMono Nerd Font'       = 'JetBrainsMono NF'
+    'CaskaydiaCove NFP'             = 'CascadiaCode NFP'
+    'CaskaydiaCove NF'              = 'CascadiaCode NF'
+    'Font Awesome 6 Free'           = 'Font Awesome'
+}
+function Get-InstalledFontNames {
+    try {
+        Add-Type -AssemblyName System.Drawing
+        return @((New-Object System.Drawing.Text.InstalledFontCollection).Families | ForEach-Object { $_.Name })
+    } catch {
+        return @()
+    }
+}
+function Install-SegoeFluentIcons {
+    # Windows 10 does not ship this font; Microsoft provides it as a ZIP with an
+    # EULA at aka.ms/SegoeFluentIcons. Install per-user (no admin), never commit it.
+    $url = 'https://aka.ms/SegoeFluentIcons'
+    $zipPath = Join-Path $env:TEMP 'skoop-segoe-fluent-icons.zip'
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        Write-Host 'Downloading Segoe Fluent Icons from Microsoft (aka.ms/SegoeFluentIcons)...'
+        Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing -TimeoutSec 60
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+        try {
+            $entry = $zip.Entries | Where-Object { $_.FullName -like '*.ttf' } | Select-Object -First 1
+            if (-not $entry) { throw 'No TTF found in the Microsoft font archive.' }
+            $fontDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts'
+            New-Item -ItemType Directory -Force -Path $fontDir | Out-Null
+            $destination = Join-Path $fontDir 'Segoe Fluent Icons.ttf'
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $destination, $true)
+            $key = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
+            New-ItemProperty -Path $key -Name 'Segoe Fluent Icons (TrueType)' -Value $destination -PropertyType String -Force | Out-Null
+            Write-Host "Installed Segoe Fluent Icons at $destination"
+        } finally {
+            $zip.Dispose()
+            Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+        }
+    } catch {
+        Write-Host "Could not install Segoe Fluent Icons (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host '    Download it from https://aka.ms/SegoeFluentIcons and accept the EULA.' -ForegroundColor Yellow
+    }
+}
+function Ensure-ThemeFonts {
+    param([string]$StylesPath)
+    if (-not (Test-Path -LiteralPath $StylesPath)) { return }
+    $css = Get-Content -Raw -LiteralPath $StylesPath
+    $declared = @()
+    foreach ($match in [regex]::Matches($css, '(?m)^\s*(?:--[\w-]*font[\w-]*|font-family)\s*:\s*([^;]+);')) {
+        foreach ($quoted in [regex]::Matches($match.Groups[1].Value, '"([^"]+)"')) {
+            $declared += $quoted.Groups[1].Value
+        }
+    }
+    $installed = Get-InstalledFontNames
+    $missing = @($declared | Where-Object {
+        $installed -notcontains $_ -and -not ($fontAliases.ContainsKey($_) -and $installed -contains $fontAliases[$_])
+    } | Sort-Object -Unique)
+    if ($missing.Count -eq 0) { return }
+    $scoop = Get-Command scoop -ErrorAction SilentlyContinue
+    foreach ($name in $missing) {
+        if ($name -eq 'Segoe UI Variable') { continue } # Windows 11 only; CSS falls back to Segoe UI
+        if ($name -eq 'Segoe Fluent Icons') {
+            if ($installed -notcontains 'Segoe Fluent Icons') { Install-SegoeFluentIcons }
+            continue
+        }
+        if ($fontPackages.ContainsKey($name)) {
+            $package = $fontPackages[$name]
+            if (-not $scoop) {
+                Write-Host "Font '$name' missing; install it with: scoop install $package" -ForegroundColor Yellow
+                continue
+            }
+            Write-Host "Installing font '$name' via scoop install $package ..."
+            $previous = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                $output = & $scoop.Source install $package 2>&1 | Out-String
+                $code = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $previous
+            }
+            if ($code -ne 0) {
+                Write-Host "    scoop install $package failed (exit $code): $($output.Trim())" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "Font '$name' referenced by the theme is missing and has no known Scoop package." -ForegroundColor Yellow
+        }
+    }
+}
+Ensure-ThemeFonts -StylesPath (Join-Path $ConfigDir 'styles.css')
 
 # YASB reads secrets from .env in the same directory. Never overwrite a real one.
 $example = Join-Path $SourceDir '.env.example'
@@ -92,9 +218,8 @@ if ((Test-Path -LiteralPath $example) -and -not (Test-Path -LiteralPath $envFile
     Write-Host "Created $envFile from the template - fill in any values you need."
 }
 
-# The Adaptive Islands wallpapers widget reads YASB_WALLPAPER_DIR. Clone the
-# community collection once and point the env var at its images folder. This is
-# deliberately non-fatal so an offline bootstrap still gets a working bar.
+# The wallpapers widget reads YASB_WALLPAPER_DIR. Clone the community collection
+# once and point the env var at its images folder. Non-fatal when offline.
 $wallpapersScript = Join-Path $SourceDir 'setup-wallpapers.ps1'
 if ($NoWallpapers -or $env:SKOOP_NO_WALLPAPERS -eq '1') {
     Write-Host 'Skipping wallpaper setup (-NoWallpapers).' -ForegroundColor DarkGray
@@ -135,7 +260,6 @@ if ($running -and $Restart) {
     Start-Sleep -Milliseconds 700
     $running = $false
 }
-
 if (-not $running) {
     Write-Host 'Starting YASB...'
     & $yasbc start 2>&1 | ForEach-Object { Write-Host "    $_" }
@@ -153,7 +277,7 @@ if (-not $colorsExisted -and (Test-Path -LiteralPath $colorsFile) -and
 }
 
 if (Get-Process -Name yasb -ErrorAction SilentlyContinue) {
-    Write-Host "YASB is running with the '$Theme' theme ($ConfigDir)." -ForegroundColor Green
+    Write-Host "YASB is running with the '$themeName' theme ($ConfigDir)." -ForegroundColor Green
 } else {
     Write-Host 'YASB did not stay running; check `yasbc log`.' -ForegroundColor Yellow
 }
