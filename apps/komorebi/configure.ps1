@@ -19,7 +19,9 @@ param(
     # Do not deploy/start the watcher that keeps Rio left and Firefox right.
     [switch]$NoPin,
     # Restart the background pin watcher.
-    [switch]$RestartPin
+    [switch]$RestartPin,
+    # Do not auto-hide the Windows taskbar after Komorebi is set up.
+    [switch]$NoTaskbarAutohide
 )
 
 $ErrorActionPreference = 'Stop'
@@ -179,4 +181,19 @@ if (-not (Get-Process -Name whkd -ErrorAction SilentlyContinue)) {
 
 if (-not $NoPin) {
     Start-PinWatcher -Force:($RestartPin -or $pinChanged)
+}
+
+# With Komorebi managing windows (and YASB as the visible bar), hide the stock
+# taskbar to reclaim the bottom strip. Runs last so the Explorer restart does
+# not interrupt Komorebi/whkd startup; idempotent, so later runs are a no-op.
+if (-not $NoTaskbarAutohide) {
+    $autohideScript = Join-Path $SourceDir 'set-taskbar-autohide.ps1'
+    if (Test-Path -LiteralPath $autohideScript) {
+        Write-Host 'Setting the Windows taskbar to auto-hide for the Komorebi layout...'
+        try {
+            & $autohideScript
+        } catch {
+            Write-Host "    Taskbar auto-hide failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
 }

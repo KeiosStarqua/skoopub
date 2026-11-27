@@ -65,7 +65,9 @@
       2px container padding plus initial-workspace rules: Rio/Firefox on 1,
       Zed/VS Code/Pear Desktop on 2, Columns on workspace 1) to ~/.config via
       apps/komorebi/configure.ps1, then starts/reloads whkd (and Komorebi when needed)
-      and a watcher that keeps Rio left / Firefox right in the Terminal workspace.
+      and a watcher that keeps Rio left / Firefox right in the Terminal workspace. It
+      also auto-hides the Windows taskbar via apps/komorebi/set-taskbar-autohide.ps1 so
+      tiling windows use the full screen (YASB is the visible bar).
     - Deploys the repo-managed YASB status bar (config.yaml, styles.css and a .env
       template) via apps/yasb/configure.ps1 and starts YASB for the Komorebi UI.
     - Adds an `n` alias for Nushell in PowerShell (profile.ps1) and a cmd.exe
@@ -657,7 +659,7 @@ if (-not $repoRoot) {
         'apps/zed/settings.json', 'apps/zed/keymap.json', 'apps/zed/tasks.json',
         'apps/vicinae/keybinds.json', 'apps/rio/config.toml',
         'apps/komorebi/whkdrc', 'apps/komorebi/komorebi.json',
-        'apps/komorebi/pin-terminal-layout.ps1',
+        'apps/komorebi/pin-terminal-layout.ps1', 'apps/komorebi/set-taskbar-autohide.ps1',
         'apps/yasb/config.yaml', 'apps/yasb/styles.css', 'apps/yasb/.env.example'
     )
     foreach ($file in $repoFiles) {

@@ -403,7 +403,8 @@ if (Test-Path $zedConfig) {
     catch { Write-Host "Zed config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
-# 13. Deploy ~/.config/whkdrc and start/reload Komorebi's hotkey daemon.
+# 13. Deploy ~/.config/whkdrc, start/reload Komorebi's hotkey daemon and
+#     auto-hide the Windows taskbar via apps\komorebi\configure.ps1.
 $komorebiConfig = Join-Path $repo 'apps\komorebi\configure.ps1'
 if (Test-Path $komorebiConfig) {
     try { & $komorebiConfig }
