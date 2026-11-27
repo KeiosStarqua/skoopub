@@ -19,6 +19,9 @@ manager of its own — the files are the product.
 | `core/restore-backup.ps1` | PowerShell script | Restores the latest Firefox / Vicinae / Atuin snapshot from `acer-ubuntu` onto a fresh machine (standalone, opt-in). |
 | `manifests/scoop.json` | Manifest | Scoop `buckets` + `apps` in `scoop export` format; the single source of truth for versions. |
 | `manifests/phases.json` | Manifest | Ordered install phases; assigns every app in `scoop.json` to exactly one phase (phase 1 = pwsh, Rio, Vicinae, Herdr, Tailscale). |
+| `apps/mouse/Cargo.toml`, `apps/mouse/src/*.rs` | Rust source | `skoopub-mouse`: captures HID Raw Input and `WM_MOUSEWHEEL` to locate inverted wheel scrolling and (opt-in) correct it via `WH_MOUSE_LL`. |
+| `apps/mouse/configure.ps1` + `apps/mouse/mouse.ps1` | CLI wrapper | Downloads the GitHub Release exe to `%LOCALAPPDATA%\skoop\mouse` (or `-Build`s locally) and exposes `diagnose` / `monitor` / `fix` / `restore` / `status`. |
+| `.github/workflows/mouse-release.yml` | CI | Builds `skoopub-mouse.exe` on `mouse-v*` tags (or `workflow_dispatch`) and attaches it to the GitHub Release. |
 | `shell/profile.ps1` | Profile fragment | Dot-sourced from both PowerShell editions: zoxide, atuin, Starship, `n` -> `nu`, btop aliases, Herdr env scrubbing. |
 | `apps/firefox/policies.template.json` | JSON template | Firefox enterprise policy (extensions, bookmarks, homepage, password prompt). |
 | `apps/sharex/fix-printscreen.ps1` | PowerShell utility | Releases PrtSc from Snipping Tool and seeds `hotkeys.template.json`. |
@@ -77,6 +80,7 @@ Apps — `kbots`: kbots (local workflow orchestrator; personal bucket, builds fr
 - **Keep the three docs in sync** when behavior changes: `README.md` (users), `AGENTS.md` (inventory/conventions), and the comment-based help in `install.ps1`.
 - **Verify changes** with `scoop export` (manifest fidelity) and by re-running the affected script in a fresh `powershell` process; there is no automated test suite.
 - **Dark mode:** `core/set-dark-mode.ps1` is the single place for the OS theme: it reads `AppsUseLightTheme` / `SystemUsesLightTheme` under HKCU `...\Themes\Personalize`, sets both to `0` only when either is light, and best-effort broadcasts `ImmersiveColorSet`. Both bootstraps call it near the end (non-fatal), and piped installs fetch it alongside `core/scoop-phases.ps1`; keep those three references in sync when editing it.
+- **Mouse diagnostics:** diagnostics come before correction. `.github/workflows/mouse-release.yml` builds the Rust exe on `mouse-v*` tags; `apps/mouse/configure.ps1` downloads that asset and `apps/mouse/mouse.ps1` is the CLI. `fix` installs a `WH_MOUSE_LL` hook and only enables inversion when `diagnose` shows >= 5 mismatches and >= 60% mismatch; `restore` stops it. Do not auto-toggle registry, drivers or cafe-management software from this module, and keep the security note in `apps/mouse/README.md` (public PCs with broken activation/update/Defender) accurate.
 - **Editor config:** keep Zed user config in `apps/zed/` and re-run `.\apps\zed\configure.ps1` after edits. Never put credentials, API keys or tokens in these public JSON files.
 
 ## Git workflow

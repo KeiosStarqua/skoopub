@@ -1,0 +1,28 @@
+[package]
+name = "skoopub-mouse"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Mouse wheel diagnostics and correction for skoop (Windows Raw Input + WM_MOUSEWHEEL)"
+
+[[bin]]
+name = "skoopub-mouse"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Input",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+opt-level = 2
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"

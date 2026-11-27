@@ -25,6 +25,7 @@ PowerShell profile, restored from a single manifest.
 - `apps/starship/` + `apps/starship/configure.ps1` — Catppuccin Mocha Starship prompt for **PowerShell** and **cmd**: config copied to `~/.config/starship.toml`, and cmd loads it through Clink (`%LOCALAPPDATA%\clink\starship.lua` + `clink autorun install`)
 - `core/cleanup-before-shutdown.ps1` + `core/install-shutdown-hook.ps1` — shutdown/logoff backup of Firefox, Vicinae and Atuin to `acer-ubuntu`, then clears local sign-ins: GitHub, SSH keys, **Tailscale**, **Pear Desktop** and Firefox logins
 - `core/restore-backup.ps1` — restores the latest Firefox, Vicinae and/or Atuin snapshot from `acer-ubuntu` onto a fresh machine
+- `apps/mouse/` + `.github/workflows/mouse-release.yml` — Rust `skoopub-mouse` wheel diagnostics (HID Raw Input vs `WM_MOUSEWHEEL`), built on `mouse-v*` tags; `configure.ps1` downloads the release exe and `mouse.ps1` is the CLI
 
 ## Install with one command
 
@@ -128,6 +129,28 @@ It picks the newest timestamp under `~/skoop-backups/firefox`, `~/skoop-backups/
 
 Useful switches: `-List` shows the latest stamp per app, `-Only firefox` / `-Only vicinae` / `-Only atuin` restores one app, `-Stamp <timestamp>` pins all apps to one snapshot, `-DryRun` previews, and `-NoRestart` leaves a stopped Vicinae server stopped. `-User` defaults to `$env:SKOOP_BACKUP_USER`; `-TargetHost`, `-FirefoxRemotePath`, `-VicinaeRemotePath` and `-AtuinRemotePath` override the remote locations. If you changed the managed keybinds, run `.\apps\vicinae\configure.ps1 -Restart` after the restore. Nothing on the remote host is modified or deleted. The Atuin backup includes the encryption key and command history — protect the remote archives accordingly.
 
+### Mouse wheel diagnostics (random inverted scrolling)
+
+On shared PCs a wheel can report the right direction to HID but the wrong one to
+applications. `skoopub-mouse` captures both streams at once (`Raw Input` and
+`WM_MOUSEWHEEL`) and writes a JSON report so the fault can be attributed to the
+device/driver or to a software hook (G HUB, cafe client, …):
+
+```powershell
+.\apps\mouse\mouse.ps1 diagnose -Seconds 30   # turn the wheel during the capture
+.\apps\mouse\mouse.ps1 monitor                # stream events live
+.\apps\mouse\mouse.ps1 status
+.\apps\mouse\mouse.ps1 fix                    # opt-in: flip the sign when diagnosis is conclusive
+.\apps\mouse\mouse.ps1 fix -DryRun            # observe without changing events
+.\apps\mouse\mouse.ps1 restore                # stop the correction hook
+```
+
+`fix` only enables correction when the report shows >= 5 inverted events and >=
+60% mismatch; otherwise it prints why and leaves the input stream untouched.
+Use `--force` to override. Full details and limits are in `apps/mouse/README.md`.
+The executable is built by GitHub Actions on `mouse-v*` tags and downloaded from
+the release — you do not need Rust installed locally (`-Build` exists for that).
+
 ## Updating this machine later
 
 Re-run the installer; it replays the phases and skips what is already installed:
@@ -181,7 +204,7 @@ scoop export | Out-File -Encoding utf8 manifests/scoop.json
 |---|---|
 | Normal (non-elevated) shell | Scoop installs per-user under `%USERPROFILE%\scoop` |
 | Elevated shell | Scoop installs system-wide under `C:\ProgramData\scoop` |
-| Piped via `irm \| iex` | `manifests/scoop.json`, `manifests/phases.json`, `core/scoop-phases.ps1`, `core/set-dark-mode.ps1`, `shell/profile.ps1`, `apps/firefox/policies.template.json`, `apps/sharex/fix-printscreen.ps1`, `apps/github/setup-auth.ps1`, `apps/git/setup-identity.ps1`, `apps/zed/configure.ps1`, `apps/herdr/setup-ssh.ps1`, `apps/tailscale/configure.ps1`, `apps/vicinae/enable-autostart.ps1`, `apps/vicinae/configure.ps1`, `apps/rio/configure.ps1`, `apps/komorebi/configure.ps1`, `apps/yasb/configure.ps1`, `apps/nushell/setup.ps1`, `apps/starship/configure.ps1`, `apps/vicinae/keybinds.json`, `apps/rio/config.toml`, `apps/komorebi/whkdrc`, `apps/komorebi/komorebi.json`, `apps/komorebi/pin-terminal-layout.ps1`, `apps/starship/starship.toml`, `apps/yasb/config.yaml`, `apps/yasb/styles.css`, `apps/yasb/.env.example` and `apps/zed/*.json` are fetched to `%LOCALAPPDATA%\skoop` |
+| Piped via `irm \| iex` | `manifests/scoop.json`, `manifests/phases.json`, `core/scoop-phases.ps1`, `core/set-dark-mode.ps1`, `shell/profile.ps1`, `apps/firefox/policies.template.json`, `apps/sharex/fix-printscreen.ps1`, `apps/github/setup-auth.ps1`, `apps/git/setup-identity.ps1`, `apps/zed/configure.ps1`, `apps/herdr/setup-ssh.ps1`, `apps/tailscale/configure.ps1`, `apps/vicinae/enable-autostart.ps1`, `apps/vicinae/configure.ps1`, `apps/rio/configure.ps1`, `apps/komorebi/configure.ps1`, `apps/yasb/configure.ps1`, `apps/nushell/setup.ps1`, `apps/mouse/configure.ps1`, `apps/mouse/mouse.ps1`, `apps/starship/configure.ps1`, `apps/vicinae/keybinds.json`, `apps/rio/config.toml`, `apps/komorebi/whkdrc`, `apps/komorebi/komorebi.json`, `apps/komorebi/pin-terminal-layout.ps1`, `apps/starship/starship.toml`, `apps/yasb/config.yaml`, `apps/yasb/styles.css`, `apps/yasb/.env.example` and `apps/zed/*.json` are fetched to `%LOCALAPPDATA%\skoop` |
 | Windows theme / Dark Mode | `core/set-dark-mode.ps1` sets `AppsUseLightTheme=0` and `SystemUsesLightTheme=0` under HKCU `...\Themes\Personalize` only when they are not already dark, then broadcasts `ImmersiveColorSet`. No admin needed, and it never overrides an existing dark theme. Run `.\core\set-dark-mode.ps1` to re-apply |
 | Task Manager disabled by policy | `DisableTaskMgr` is set to `0` for the current user; elevated runs also clear the machine-wide value. A domain policy may reapply it on the next refresh |
 | From a clone | The files next to `install.ps1` are used, so edits apply directly |
@@ -209,6 +232,7 @@ scoop export | Out-File -Encoding utf8 manifests/scoop.json
 | gum picker falls back to the numbered list | gum draws its UI on **stderr** and only writes the answer to stdout. Capturing it with `2>&1` left it without a terminal, so it returned nothing; letting PowerShell inherit stderr instead turns the TUI into a `NativeCommandError` under `$ErrorActionPreference='Stop'`. The pickers now start gum through `System.Diagnostics.Process` with **only stdout redirected**, so the TUI stays on the console and the answer is captured — this works in Rio, WezTerm, Windows Terminal and Herdr. If a terminal still cannot draw it, pass `-NoGum` or set `$env:SKOOP_NO_GUM=1` |
 | `herdr` says "nested herdr"/inception | A long-lived launcher (often Vicinae) inherited `HERDR_ENV=1` from a Herdr pane and passes it to new terminals. Run `.\apps\vicinae\enable-autostart.ps1 -Restart`, then close and reopen Rio/WezTerm. `shell/profile.ps1` already clears the variables for new PowerShell sessions. `apps/herdr/setup-ssh.ps1` uses `herdr machine add`, so it does not start a nested client at all |
 | Rust toolchain | GNU is set as default only when no toolchain is active; switch with `rustup default stable-x86_64-pc-windows-msvc` (needs MSVC Build Tools) |
+| Mouse wheel diagnostics | `apps/mouse/configure.ps1` installs `skoopub-mouse.exe` from the latest `mouse-v*` GitHub Release to `%LOCALAPPDATA%\skoop\mouse`; re-runs skip the download unless `-Force`. `mouse.ps1 fix` installs a `WH_MOUSE_LL` hook and `restore` stops it; neither touches drivers, registry or cafe software |
 | `z` / `atuin` not found | The profile hook is missing or points at a missing `shell/profile.ps1`, or the window predates the install. `install.ps1` hooks both editions (Windows PowerShell 5.1 and PowerShell 7+ profiles are separate files); check `Get-Content $PROFILE` **in the shell that is missing the command** (pwsh reads `Documents\PowerShell\...`, 5.1 reads `Documents\WindowsPowerShell\...`); re-run `install.ps1` to rewrite both, then open a new window |
 | kbots daemon | The Scoop package installs the `kbots`, `kb`, `kbots-tui` and `kbots-gui` shims but deliberately does not start the daemon; run `kbots daemon start`, then `kb status`. The daemon binds authenticated TCP on `127.0.0.1:7878` |
 

@@ -75,6 +75,10 @@
       sign-in cleanup (GitHub, Tailscale, Pear Desktop, Firefox) run automatically
       on shutdown/logoff; -BackupUser / SKOOP_BACKUP_USER supplies the SSH user,
       and -SkipShutdownHook opts out.
+    - Installs skoopub-mouse from the GitHub Release into %LOCALAPPDATA%\skoop\mouse
+      via apps/mouse/configure.ps1 (non-fatal), so `apps/mouse/mouse.ps1 diagnose`
+      can capture HID Raw Input vs WM_MOUSEWHEEL. The correction hook is opt-in:
+      run `mouse.ps1 fix` / `mouse.ps1 restore` yourself after a diagnosis.
 
     Interactive CLI: when gum (charm-gum) is available, the script opens a menu
     to choose Full setup / Configure only / Connect Herdr only / Quit. It falls
@@ -648,6 +652,7 @@ if (-not $repoRoot) {
         'apps/vicinae/enable-autostart.ps1', 'apps/vicinae/configure.ps1',
         'apps/rio/configure.ps1', 'apps/komorebi/configure.ps1',
         'apps/yasb/configure.ps1', 'apps/nushell/setup.ps1',
+        'apps/mouse/configure.ps1', 'apps/mouse/mouse.ps1',
         'apps/starship/configure.ps1', 'apps/starship/starship.toml',
         'apps/zed/settings.json', 'apps/zed/keymap.json', 'apps/zed/tasks.json',
         'apps/vicinae/keybinds.json', 'apps/rio/config.toml',
@@ -682,6 +687,7 @@ $yasbConfig      = Join-Path $repoRoot 'apps\yasb\configure.ps1'
 $nuSetup         = Join-Path $repoRoot 'apps\nushell\setup.ps1'
 $starshipConfig  = Join-Path $repoRoot 'apps\starship\configure.ps1'
 $darkMode        = Join-Path $repoRoot 'core\set-dark-mode.ps1'
+$mouseConfig     = Join-Path $repoRoot 'apps\mouse\configure.ps1'
 Write-Ok "repo root: $repoRoot"
 
 if ($runMode -eq 'herdr') {
@@ -972,6 +978,19 @@ if (-not $SkipShutdownHook -and (Test-Path $shutdownHook)) {
     Write-Ok 'core/install-shutdown-hook.ps1 not found - skipping'
 }
 
+# --- 22. skoopub-mouse (wheel diagnostics, opt-in correction) -----------------
+if (Test-Path $mouseConfig) {
+    Write-Step 'Installing skoopub-mouse wheel diagnostics'
+    try {
+        & $mouseConfig
+    } catch {
+        # Diagnostics are optional: never let a GitHub outage abort the setup.
+        Write-Host "    skoopub-mouse install failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Ok 'apps/mouse/configure.ps1 not found - skipping'
+}
+
 Write-Host ''
 Write-Host 'Done. Open a new PowerShell window, then try: z ..' -ForegroundColor Green
 Write-Host 'git push will use your gh login (no username prompt).' -ForegroundColor Green
@@ -984,6 +1003,7 @@ Write-Host 'YASB status bar is configured; fill ~/.config/yasb/.env for weather/
 Write-Host 'Type `n` in PowerShell or cmd to open Nushell.' -ForegroundColor Green
 Write-Host 'Starship is the prompt in new PowerShell and cmd windows.' -ForegroundColor Green
 Write-Host 'Dark Mode is on for apps and the system.' -ForegroundColor Green
+Write-Host 'Wheel diagnostics: .\apps\mouse\mouse.ps1 diagnose (fix/restore are opt-in).' -ForegroundColor Green
 if (-not $SkipShutdownHook) {
     Write-Host 'Shutdown cleanup is registered: Firefox/Vicinae/Atuin back up to acer-ubuntu and local sign-ins (GitHub, Tailscale, Pear Desktop, Firefox) are cleared on shutdown/logoff.' -ForegroundColor Green
 }
