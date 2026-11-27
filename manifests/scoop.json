@@ -237,6 +237,16 @@
                      "Source":  "extras",
                      "Name":  "rio"
                  },
+                {
+                    "Info":  "",
+                    "Source":  "extras",
+                    "Name":  "alacritty"
+                },
+                {
+                    "Info":  "",
+                    "Source":  "extras",
+                    "Name":  "wezterm"
+                },
                  {
                      "Info":  "",
                      "Source":  "extras",
