@@ -74,3 +74,31 @@ if ((Get-Command starship -ErrorAction SilentlyContinue) -and
     (-not $starshipPrompt -or $starshipPrompt.Source -ne 'starship')) {
     Invoke-Expression (& { (starship init powershell | Out-String) })
 }
+
+# skoop-cleanup: short command for the shutdown backup. Uploads everything,
+# verifies it, then clears local sign-ins. -BackupOnly uploads without wiping.
+function skoop-cleanup {
+    param([switch]$BackupOnly)
+    $roots = @()
+    if ($env:SKOOP_REPO) { $roots += $env:SKOOP_REPO }
+    $roots += (Join-Path $env:USERPROFILE 'repos\skoopub')
+    $roots += (Join-Path $env:LOCALAPPDATA 'skoop')
+    $cleanup = $null
+    foreach ($root in $roots) {
+        $candidate = Join-Path $root 'core\cleanup-before-shutdown.ps1'
+        if (Test-Path -LiteralPath $candidate) { $cleanup = $candidate; break }
+    }
+    if (-not $cleanup) {
+        Write-Host 'skoop-cleanup: skoopub not found; set $env:SKOOP_REPO' -ForegroundColor Red
+        return
+    }
+    $user = $env:SKOOP_BACKUP_USER
+    if (-not $user) {
+        $userFile = Join-Path $env:LOCALAPPDATA 'skoop\backup-user'
+        if (Test-Path -LiteralPath $userFile) { $user = (Get-Content -Raw -LiteralPath $userFile).Trim() }
+    }
+    $cleanupArgs = @()
+    if ($user) { $cleanupArgs += @('-User', $user) }
+    if ($BackupOnly) { $cleanupArgs += '-BackupOnly' }
+    & $cleanup @cleanupArgs
+}

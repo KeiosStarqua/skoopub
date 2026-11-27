@@ -2002,6 +2002,13 @@ if ($opencode) {
 }
 
 # --- 21. Automatic cleanup on shutdown / logoff -----------------------------
+if ($BackupUser) {
+    # Remember the SSH user so the short `skoop-cleanup` profile command does
+    # not prompt on this machine.
+    $skoopDir = Join-Path $env:LOCALAPPDATA 'skoop'
+    New-Item -ItemType Directory -Force -Path $skoopDir | Out-Null
+    Set-Content -LiteralPath (Join-Path $skoopDir 'backup-user') -Value $BackupUser -Encoding ASCII
+}
 $shutdownHook = Join-Path $repoRoot 'core\install-shutdown-hook.ps1'
 if (-not $SkipShutdownHook -and (Test-Path $shutdownHook))
 {
