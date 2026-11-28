@@ -177,16 +177,19 @@
       Remote:  irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
     Runs under PowerShell 7 (pwsh) when it is already installed: from Windows
-    PowerShell 5.1 the script opens a NEW PowerShell 7 window running the same
-    options (`pwsh -NoExit -File`), so gum's TUI, native stderr and UTF-8 files
-    behave correctly and the calling console is left alone. Use -NoPwsh (or
-    $env:SKOOP_NO_PWSH=1) to stay on 5.1, e.g. before pwsh is installed. A piped
-    `irm ... | iex` run caches install.ps1 to %LOCALAPPDATA%\skoop\install.ps1 so
-    it can re-launch too; after phases are imported the process PATH is rebuilt
-    from the registry and executables are resolved from the Scoop roots, so newly
-    installed pwsh, Rio and Herdr are found without asking you to open a new
-    shell. Rio is then opened in ~/repos with Herdr already running, using that
-    PowerShell 7 executable.
+    PowerShell 5.1 the script continues in a NEW "skoop setup" Herdr tab when a
+    Herdr session is available, otherwise in a NEW PowerShell 7 window, running
+    the same options (`pwsh -NoExit -File`). The calling console is left alone,
+    and gum's TUI, native stderr and UTF-8 files behave correctly under pwsh.
+    Use -NoHerdrTab (or $env:SKOOP_NO_HERDR_TAB=1) to keep the separate window,
+    and -NoPwsh (or $env:SKOOP_NO_PWSH=1) to stay on 5.1, e.g. before pwsh is
+    installed. A piped `irm ... | iex` run caches install.ps1 to
+    %LOCALAPPDATA%\skoop\install.ps1 so it can re-launch too; after phases are
+    imported the process PATH is rebuilt from the registry and executables are
+    resolved from the Scoop roots, so newly installed pwsh, Rio and Herdr are
+    found without asking you to open a new shell. Rio is opened in ~/repos with
+    Herdr already running before the handoff, so the tab has a live session to
+    attach to.
     - Writes a transcript of the run to %LOCALAPPDATA%\skoop\install-<timestamp>.log
       (-LogPath overrides it, -NoLog opts out); the pwsh re-launch shares that file.
       PowerShell 5.1 transcripts capture the script's own messages but not native
@@ -241,6 +244,10 @@
 .PARAMETER NoPwsh
     Do not re-launch under PowerShell 7. Stays on Windows PowerShell 5.1 (also
     $env:SKOOP_NO_PWSH=1).
+
+.PARAMETER NoHerdrTab
+    Keep the PowerShell 7 handoff in a separate window instead of a new Herdr
+    tab (also $env:SKOOP_NO_HERDR_TAB=1). Implied by -NoAutoHerdr.
 
 .PARAMETER NoAutoHerdr
     Do not open Rio with Herdr after the essentials phase (also
@@ -321,6 +328,8 @@ param(
     [switch]$NoMenu,
     [switch]$NoGum,
     [switch]$NoPwsh,
+    # Keep the pwsh handoff in a separate window instead of a Herdr tab.
+    [switch]$NoHerdrTab,
     [switch]$NoAutoHerdr,
     [int]$MouseDpi = 1200,
     [switch]$SkipMouseDpi,
@@ -387,6 +396,9 @@ if ($env:SKOOP_NO_WALLPAPERS -eq '1')
 if ($env:SKOOP_NO_WALLPAPER -eq '1')
 { $NoWallpaper = $true 
 }
+if ($env:SKOOP_NO_HERDR_TAB -eq '1')
+{ $NoHerdrTab = $true 
+}
 if ($env:SKOOP_FORCE_INSTALL -eq '1')
 { $ForceInstall = $true 
 }
@@ -441,8 +453,8 @@ Usage:
   .\install.ps1 -SkipHerdrConnect        # configure only
   irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
-Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -ForceFirefoxRestore -ForceAtuinRestore -SkipFirefoxRestore -SkipAtuinRestore -SkipSshRestore -SkipRepoClones -EssentialsOnly -BackupUser -SkipShutdownHook -LogPath <file> -NoLog -ThrottleLimit <n> -Help
-Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_FORCE_FIREFOX_RESTORE, SKOOP_FORCE_ATUIN_RESTORE, SKOOP_NO_FIREFOX_RESTORE, SKOOP_NO_ATUIN_RESTORE, SKOOP_NO_SSH_RESTORE, SKOOP_NO_REPO_CLONES, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL, SKOOP_LOG_PATH, SKOOP_NO_LOG, SKOOP_THROTTLE
+Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoHerdrTab -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -ForceFirefoxRestore -ForceAtuinRestore -SkipFirefoxRestore -SkipAtuinRestore -SkipSshRestore -SkipRepoClones -EssentialsOnly -BackupUser -SkipShutdownHook -LogPath <file> -NoLog -ThrottleLimit <n> -Help
+Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_HERDR_TAB, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_FORCE_FIREFOX_RESTORE, SKOOP_FORCE_ATUIN_RESTORE, SKOOP_NO_FIREFOX_RESTORE, SKOOP_NO_ATUIN_RESTORE, SKOOP_NO_SSH_RESTORE, SKOOP_NO_REPO_CLONES, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL, SKOOP_LOG_PATH, SKOOP_NO_LOG, SKOOP_THROTTLE
 '@
     Stop-SkoopLog
     return
@@ -558,6 +570,9 @@ function Get-SkoopReLaunchArgs
     if ($NoAutoHerdr)
     { $list += '-NoAutoHerdr' 
     }
+    if ($NoHerdrTab)
+    { $list += '-NoHerdrTab' 
+    }
     if ($MouseDpi -ne 1200)
     { $list += @('-MouseDpi', "$MouseDpi") 
     }
@@ -612,6 +627,67 @@ function Get-SkoopReLaunchArgs
     return $list
 }
 
+function Start-SkoopPwshInHerdrTab
+{
+    param(
+        [string]$PwshPath,
+        [string[]]$RelaunchArgs
+    )
+    if ($NoHerdrTab -or $env:SKOOP_NO_HERDR_TAB -eq '1' -or $NoAutoHerdr -or $env:SKOOP_NO_AUTO_HERDR -eq '1')
+    { return $false 
+    }
+    if (-not [Environment]::UserInteractive) { return $false }
+
+    Update-SkoopProcessPath
+    $herdrPath = Get-SkoopExePath -Name herdr
+    if (-not $herdrPath) { return $false }
+
+    # The CLI talks to a running Herdr server. A Rio window opened by the
+    # phase-1 callback may still be starting, so wait briefly for the server.
+    $deadline = (Get-Date).AddSeconds(30)
+    $running = $false
+    do
+    {
+        try
+        {
+            $state = & $herdrPath session list --json 2>$null | Out-String | ConvertFrom-Json -ErrorAction Stop
+            $running = [bool]($state.sessions | Where-Object { $_.running } | Select-Object -First 1)
+        } catch
+        {
+            $running = $false
+        }
+        if (-not $running -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+    } while (-not $running -and (Get-Date) -lt $deadline)
+    if (-not $running) { return $false }
+
+    $tabId = $null
+    try
+    {
+        # The tab's shell inherits SKOOP_PWSH_RELAUNCHED from the server, not
+        # this process, so pass the guard explicitly with --env.
+        $created = & $herdrPath tab create --label 'skoop setup' --cwd (Get-Location).ProviderPath --env 'SKOOP_PWSH_RELAUNCHED=1' --focus 2>$null | Out-String | ConvertFrom-Json -ErrorAction Stop
+        $paneId = $created.result.root_pane.pane_id
+        $tabId = $created.result.tab.tab_id
+        if (-not $paneId) { return $false }
+
+        $quotedArgs = ($RelaunchArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
+        # Herdr's default Windows pane shell is PowerShell, so use the call
+        # operator with a quoted executable path. -NoExit keeps the summary
+        # visible when the installer finishes.
+        $command = "& `"$PwshPath`" $quotedArgs"
+        & $herdrPath pane run $paneId $command 2>$null | Out-Null
+        Write-Host "    continuing in Herdr tab '$($created.result.tab.label)' ($paneId)" -ForegroundColor DarkGray
+        return $true
+    } catch
+    {
+        if ($tabId)
+        { & $herdrPath tab close $tabId 2>$null | Out-Null 
+        }
+        Write-Host "    Herdr tab unavailable ($($_.Exception.Message)) - using a separate window" -ForegroundColor Yellow
+        return $false
+    }
+}
+
 function Invoke-PwshReLaunch
 {
     param([switch]$SkipMenu)
@@ -631,7 +707,7 @@ function Invoke-PwshReLaunch
     { return $false 
     }
 
-    Write-Host '    opening a new PowerShell 7 window to continue (pass -NoPwsh to stay on 5.1)' -ForegroundColor DarkGray
+    Write-Host '    opening a PowerShell 7 continuation (Herdr tab when available, else a new window)' -ForegroundColor DarkGray
     # Guard inherited by the child, so a broken pwsh shim cannot loop forever.
     $env:SKOOP_PWSH_RELAUNCHED = '1'
     try
@@ -646,10 +722,14 @@ function Invoke-PwshReLaunch
         # value that contains a space (script path, -LogPath).
         $argLine = ($relaunchArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
         Stop-SkoopLog
-        # A separate window, not the calling console: the installing shell may be
-        # a 5.1 console (or a Herdr pane) and must not be taken over. -NoExit
-        # keeps the summary on screen after the script finishes.
-        Start-Process -FilePath $pwshPath -ArgumentList $argLine -WorkingDirectory (Get-Location).Path | Out-Null
+        # Prefer a tab in the Herdr session so the setup stays in the TUI. The
+        # caller (possibly a 5.1 console or Herdr pane) is never taken over; a
+        # standalone window is the fallback when no Herdr server is available.
+        # -NoExit keeps the summary on screen either way.
+        if (-not (Start-SkoopPwshInHerdrTab -PwshPath $pwshPath -RelaunchArgs $relaunchArgs))
+        {
+            Start-Process -FilePath $pwshPath -ArgumentList $argLine -WorkingDirectory (Get-Location).Path | Out-Null
+        }
         exit 0
     } catch
     {
@@ -2233,8 +2313,15 @@ $phaseResult = Invoke-SkoopPhases -Scoop $scoop -ManifestPath $manifest -PhasesP
         'core-terminal'
         {
             # pwsh now exists (phase 1 installs it), so the rest of the run moves
-            # to a new PowerShell 7 window; Invoke-PwshReLaunch exits this one.
+            # to a Herdr tab (or a separate pwsh window) and this process exits.
+            # Bring Rio/Herdr up first when a tab handoff is planned, otherwise
+            # there is no session for the new tab to join yet.
             Update-SkoopProcessPath
+            $willHandOff = ($PSVersionTable.PSEdition -eq 'Desktop' -and -not $NoPwsh -and $env:SKOOP_NO_PWSH -ne '1' -and $env:SKOOP_PWSH_RELAUNCHED -ne '1')
+            $wantsHerdrTab = ($willHandOff -and -not $NoHerdrTab -and $env:SKOOP_NO_HERDR_TAB -ne '1' -and -not $NoAutoHerdr -and $env:SKOOP_NO_AUTO_HERDR -ne '1')
+            if ($wantsHerdrTab)
+            { Invoke-CoreTerminalSetup 
+            }
             if (Invoke-PwshReLaunch -SkipMenu)
             { return 
             }
