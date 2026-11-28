@@ -261,11 +261,22 @@ function Invoke-SkoopPhases {
                     }
                 }
                 $results = @()
+                # Without this the phase looks frozen until every import finishes;
+                # phase 5 can run for minutes.
+                Write-Host ('    importing {0} package(s): {1}' -f $items.Count, (($items | ForEach-Object { $_.Name }) -join ', ')) -ForegroundColor DarkGray
                 if ($ThrottleLimit -gt 1 -and $PSVersionTable.PSVersion.Major -ge 7) {
                     $results = @($items | ForEach-Object -Parallel {
                         $item = $_
                         $scoopExe = $item.Scoop
                         $file = $item.File
+                        # Scoop/rustup write warnings to stderr (e.g. "installing
+                        # msvc toolchain without its prerequisites"); a parallel
+                        # runspace turns that into a terminating error under the
+                        # caller's Stop preference. Judge the import by its exit
+                        # code and the app directory instead.
+                        $ErrorActionPreference = 'Continue'
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        Write-Host ('      {0} - installing' -f $item.Name) -ForegroundColor DarkGray
                         $watch = [System.Diagnostics.Stopwatch]::StartNew()
                         $errorText = ''
                         try {
@@ -276,6 +287,7 @@ function Invoke-SkoopPhases {
                             $errorText = $_.Exception.Message
                         }
                         $watch.Stop()
+                        Write-Host ('      {0} - {1} ({2:n1}s)' -f $item.Name, $(if ($code -eq 0) { 'done' } else { 'failed' }), $watch.Elapsed.TotalSeconds) -ForegroundColor DarkGray
                         [pscustomobject]@{
                             Name    = $item.Name
                             Seconds = $watch.Elapsed.TotalSeconds
@@ -287,6 +299,13 @@ function Invoke-SkoopPhases {
                     foreach ($item in $items) {
                         $scoopExe = $item.Scoop
                         $file = $item.File
+                        # Same reason as the parallel branch: a stderr warning
+                        # must not be mistaken for a failed import. Scoped so the
+                        # rest of this function keeps the caller's Stop.
+                        $previousEap = $ErrorActionPreference
+                        $ErrorActionPreference = 'Continue'
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        Write-Host ('      {0} - installing' -f $item.Name) -ForegroundColor DarkGray
                         $watch = [System.Diagnostics.Stopwatch]::StartNew()
                         $errorText = ''
                         try {
@@ -295,8 +314,11 @@ function Invoke-SkoopPhases {
                         } catch {
                             $code = 1
                             $errorText = $_.Exception.Message
+                        } finally {
+                            $ErrorActionPreference = $previousEap
                         }
                         $watch.Stop()
+                        Write-Host ('      {0} - {1} ({2:n1}s)' -f $item.Name, $(if ($code -eq 0) { 'done' } else { 'failed' }), $watch.Elapsed.TotalSeconds) -ForegroundColor DarkGray
                         $results += [pscustomobject]@{
                             Name    = $item.Name
                             Seconds = $watch.Elapsed.TotalSeconds

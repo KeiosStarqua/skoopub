@@ -54,6 +54,9 @@ if ($env:SKOOP_NO_FIREFOX_RESTORE -eq '1') { $SkipFirefoxRestore = $true }
 if ($env:SKOOP_NO_ATUIN_RESTORE -eq '1') { $SkipAtuinRestore = $true }
 
 $ErrorActionPreference = 'Stop'
+# Keep the pre-7.4 native stderr behaviour (scoop/git/rustup warn on stderr and
+# the script judges them by exit code); see install.ps1.
+$PSNativeCommandUseErrorActionPreference = $false
 $repo = Split-Path -Parent $PSScriptRoot
 
 function Set-SkoopBackupUserCache {
