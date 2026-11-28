@@ -25,8 +25,9 @@ After the phase, in this order:
 1. Refresh this process's `PATH` from the registry and resolve Scoop executables
    from the Scoop roots, so apps installed in this phase are visible without
    opening a new shell.
-2. The pwsh re-launch: a Windows PowerShell 5.1 process stops here and the run
-   continues under PowerShell 7 (piped runs use a cached copy of `install.ps1`).
+2. The pwsh handoff: a Windows PowerShell 5.1 process stops here and a **new
+   PowerShell 7 window** continues with the same options (`-NoExit`, so the
+   summary stays on screen); piped runs use a cached copy of `install.ps1`.
 3. `apps/rio/configure.ps1` (font size / zoom).
 4. Open Rio in `~/repos` with Herdr already running, using the resolved pwsh 7
    executable (`-NoAutoHerdr` opts out). Skipped when a Rio window is already

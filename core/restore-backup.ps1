@@ -423,7 +423,7 @@ function Save-Snapshot {
         }
     }
 
-    $scpArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10', '-o', 'LogLevel=ERROR', '-r', ($peer + ':' + $RemoteFolder), $StageRoot)
+    $scpArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10', '-o', 'LogLevel=ERROR', '-o', 'BatchMode=yes', '-r', ($peer + ':' + $RemoteFolder), $StageRoot)
     Write-Log ("scp command: scp " + ($scpArgs -join ' '))
     & scp @scpArgs 2>&1 | ForEach-Object { Write-Log ("scp: " + $_.ToString().Trim()) }
     if ($LASTEXITCODE -ne 0) {
@@ -902,7 +902,12 @@ foreach ($tool in @('ssh', 'scp')) {
 $sshUser = Resolve-SshUser
 # LogLevel=ERROR keeps OpenSSH's "Permanently added ..." INFO notice off stderr,
 # so `2>&1` cannot mix it into stdout values such as the remote home path.
-$sshArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10', '-o', 'LogLevel=ERROR', ($sshUser + '@' + $TargetHost))
+# -n (stdin from NUL) is essential: four restore children started with
+# -NoNewWindow share one console, and ssh forwarding console stdin stalls the
+# session for a minute or more. BatchMode turns a would-be prompt into an error
+# instead of a hang, and the keepalives reap a dead session in ~45 s.
+$sshArgs = @('-n', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10', '-o', 'LogLevel=ERROR',
+    '-o', 'BatchMode=yes', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', ($sshUser + '@' + $TargetHost))
 $peer = $sshUser + '@' + $TargetHost
 
 Write-Log ("ssh command: ssh " + ($sshArgs -join ' ') + ' printf %s "$HOME"')

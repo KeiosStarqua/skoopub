@@ -13,8 +13,8 @@
       apps are already installed and leave them out of the phase manifests, so
       only missing apps are imported; -ForceInstall re-imports the existing ones.
       Phase 1 finishes its own setup (Rio config, Herdr check) and opens Rio in
-      ~/repos with Herdr running before Tailscale. The script re-launches itself
-      under pwsh as soon as phase 1 installs it. -EssentialsOnly stops right
+      ~/repos with Herdr running before Tailscale. The script opens a new
+      PowerShell 7 window as soon as phase 1 installs pwsh. -EssentialsOnly stops right
       after the Tailscale phase. Inside a phase, app imports run in parallel on
       PowerShell 7 (up to -ThrottleLimit, default 4); 1 or 5.1 runs them
       sequentially. Phase order and the per-phase callbacks never change.
@@ -172,15 +172,16 @@
       Remote:  irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
     Runs under PowerShell 7 (pwsh) when it is already installed: from Windows
-    PowerShell 5.1 the script re-launches itself with the same options via
-    `pwsh -NoProfile -File`, so gum's TUI, native stderr and UTF-8 files behave
-    correctly. Use -NoPwsh (or $env:SKOOP_NO_PWSH=1) to stay on 5.1, e.g. before
-    pwsh is installed. A piped `irm ... | iex` run caches install.ps1 to
-    %LOCALAPPDATA%\skoop\install.ps1 so it can re-launch too; after phases are
-    imported the process PATH is rebuilt from the registry and executables are
-    resolved from the Scoop roots, so newly installed pwsh, Rio and Herdr are
-    found without asking you to open a new shell. Rio is then opened in ~/repos
-    with Herdr already running, using that PowerShell 7 executable.
+    PowerShell 5.1 the script opens a NEW PowerShell 7 window running the same
+    options (`pwsh -NoExit -File`), so gum's TUI, native stderr and UTF-8 files
+    behave correctly and the calling console is left alone. Use -NoPwsh (or
+    $env:SKOOP_NO_PWSH=1) to stay on 5.1, e.g. before pwsh is installed. A piped
+    `irm ... | iex` run caches install.ps1 to %LOCALAPPDATA%\skoop\install.ps1 so
+    it can re-launch too; after phases are imported the process PATH is rebuilt
+    from the registry and executables are resolved from the Scoop roots, so newly
+    installed pwsh, Rio and Herdr are found without asking you to open a new
+    shell. Rio is then opened in ~/repos with Herdr already running, using that
+    PowerShell 7 executable.
     - Writes a transcript of the run to %LOCALAPPDATA%\skoop\install-<timestamp>.log
       (-LogPath overrides it, -NoLog opts out); the pwsh re-launch shares that file.
       PowerShell 5.1 transcripts capture the script's own messages but not native
@@ -625,19 +626,32 @@ function Invoke-PwshReLaunch
     { return $false 
     }
 
-    Write-Host '    re-launching under PowerShell 7 (pwsh); pass -NoPwsh to stay on 5.1' -ForegroundColor DarkGray
+    Write-Host '    opening a new PowerShell 7 window to continue (pass -NoPwsh to stay on 5.1)' -ForegroundColor DarkGray
     # Guard inherited by the child, so a broken pwsh shim cannot loop forever.
     $env:SKOOP_PWSH_RELAUNCHED = '1'
     try
     {
+        $relaunchArgs = @('-NoLogo', '-NoProfile', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', $script:InstallScriptPath) +
+            @(Get-SkoopReLaunchArgs -SkipMenu:$SkipMenu)
+        # Start-Process joins the list without quoting wrapping, so protect any
+        # value that contains a space (script path, -LogPath).
+        $argLine = ($relaunchArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
         Stop-SkoopLog
-        & $pwshPath @(Get-SkoopReLaunchArgs -SkipMenu:$SkipMenu)
-        exit $LASTEXITCODE
+        # A separate window, not the calling console: the installing shell may be
+        # a 5.1 console (or a Herdr pane) and must not be taken over. -NoExit
+        # keeps the summary on screen after the script finishes.
+        Start-Process -FilePath $pwshPath -ArgumentList $argLine -WorkingDirectory (Get-Location).Path | Out-Null
+        exit 0
     } catch
     {
         Start-SkoopLog
         Write-Host "    could not start pwsh ($($_.Exception.Message)) - continuing on Windows PowerShell 5.1" -ForegroundColor Yellow
         return $false
+    } finally
+    {
+        # Never leave the guard in the calling console: otherwise every later
+        # `.\install.ps1` in that window would skip the re-launch.
+        Remove-Item Env:SKOOP_PWSH_RELAUNCHED -ErrorAction SilentlyContinue
     }
 }
 
@@ -2155,11 +2169,12 @@ $phaseResult = Invoke-SkoopPhases -Scoop $scoop -ManifestPath $manifest -PhasesP
     {
         'core-terminal'
         {
-            # pwsh now exists (phase 1 installs it), so move the rest of the run to 7.
+            # pwsh now exists (phase 1 installs it), so the rest of the run moves
+            # to a new PowerShell 7 window; Invoke-PwshReLaunch exits this one.
             Update-SkoopProcessPath
             if (Invoke-PwshReLaunch -SkipMenu)
             { return 
-            }   # exits the script
+            }
             Invoke-CoreTerminalSetup
         }
         'tailscale'
