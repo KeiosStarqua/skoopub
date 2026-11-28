@@ -978,6 +978,69 @@ function Resolve-TailscaleCli {
     return $null
 }
 
+function Ensure-TailscaleForBackup {
+    param([string] $TargetHost)
+
+    $cli = Resolve-TailscaleCli
+    if (-not $cli) {
+        Write-Log 'tailscale.exe not found - cannot auto-start the tailnet for backup'
+        return $false
+    }
+
+    $isRunning = {
+        # cmd /c merges stderr so PS 5.1 does not turn a health warning into a
+        # terminating NativeCommandError under $ErrorActionPreference = 'Stop'.
+        $out = (& cmd /c ('"{0}" status --json 2>&1' -f $cli) | Out-String)
+        return ($out -match '"BackendState"\s*:\s*"Running"')
+    }
+    if (& $isRunning) { return $true }
+
+    Write-Log 'Tailscale is not running (NoState) - starting it from the Scoop Apps shortcut'
+    $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE 'scoop' }
+    $trayExe = Join-Path $scoopRoot 'apps\tailscale\current\tailscale-ipn.exe'
+    $shortcut = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Microsoft\Windows\Start Menu\Programs\Scoop Apps\Tailscale.lnk'
+    $started = $false
+    if (Test-Path -LiteralPath $shortcut) {
+        try {
+            Start-Process -FilePath $shortcut
+            Write-Log 'started the Tailscale tray from its Scoop Apps shortcut'
+            $started = $true
+        } catch {
+            Write-Log ('could not start the Tailscale shortcut: ' + $_.Exception.Message)
+        }
+    }
+    if (-not $started -and (Test-Path -LiteralPath $trayExe)) {
+        try {
+            Start-Process -FilePath $trayExe
+            Write-Log 'started tailscale-ipn.exe (Tailscale tray fallback)'
+            $started = $true
+        } catch {
+            Write-Log ('could not start tailscale-ipn.exe: ' + $_.Exception.Message)
+        }
+    }
+    if (-not $started) {
+        Write-Log 'no Tailscale Start Menu shortcut or tailscale-ipn.exe found'
+        return $false
+    }
+
+    $deadline = (Get-Date).AddSeconds(90)
+    do {
+        $running = (& $isRunning)
+        $resolves = $false
+        if ($running) {
+            try { [System.Net.Dns]::GetHostAddresses($TargetHost) | Out-Null; $resolves = $true } catch { }
+        }
+        if ($running -and $resolves) {
+            Write-Log ('Tailscale is running and ' + $TargetHost + ' resolves')
+            return $true
+        }
+        Start-Sleep -Seconds 3
+    } while ((Get-Date) -lt $deadline)
+
+    Write-Log ('Tailscale did not become ready within 90s (' + $TargetHost + ' still unresolved)')
+    return $false
+}
+
 function Remove-TailscaleAuth {
     $cli = Resolve-TailscaleCli
     if ($DryRun) {
@@ -1033,6 +1096,9 @@ if ($SkipBackup -and -not $DryRun -and -not $Force) {
 if (-not $SkipBackup) {
     $sshUser = Resolve-SshUser
     Write-Log ("backup target: " + $sshUser + '@' + $TargetHost)
+    if (-not $DryRun -and -not (Ensure-TailscaleForBackup -TargetHost $TargetHost)) {
+        throw 'Tailscale is not running / target host does not resolve - backup aborted'
+    }
     $profiles = @(Get-FirefoxProfilePaths)
 
     $stagingRoot = Join-Path $logDir $stamp
