@@ -986,29 +986,36 @@ function Show-TailscaleSignInHint
     # Tailscale's daemon and tray app work without the CLI; only peer listing
     # needs it. Probe the CLI so the sign-in advice matches this machine, and
     # never let a broken CLI fail the bootstrap.
-    $tailscale = Get-Command tailscale -ErrorAction SilentlyContinue
+    $tailscale = Get-SkoopExePath -Name tailscale
     if (-not $tailscale)
     {
         Write-Host '    Tailscale CLI not found - sign in from the Tailscale tray icon.' -ForegroundColor Yellow
         return
     }
-    $raw = (& cmd /c ('"{0}" status 2>&1' -f $tailscale.Source) | Out-String)
-    if ($LASTEXITCODE -ne 0)
+    $raw = (& cmd /c ('"{0}" status 2>&1' -f $tailscale) | Out-String)
+    $exit = $LASTEXITCODE
+    # A logged-out node makes `tailscale status` exit 1 too, but that is a
+    # normal "not signed in" state, not a daemon connectivity failure.
+    if ($raw -match 'Logged out|NeedsLogin|not logged in')
+    {
+        Write-Ok 'Tailscale is running but not signed in - sign in from the tray icon or run `tailscale up`'
+        return
+    }
+    if ($raw -match 'stopped')
+    {
+        Write-Ok 'Tailscale is stopped - start it from the tray icon or run `tailscale up`'
+        return
+    }
+    if ($exit -ne 0)
     {
         $line = ($raw -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 1)
         if (-not $line)
-        { $line = "exit code $LASTEXITCODE" 
+        { $line = "exit code $exit" 
         }
         Write-Host "    Tailscale CLI cannot reach the daemon ($($line.Trim())); use the tray icon to sign in." -ForegroundColor Yellow
         return
     }
-    if ($raw -match 'Logged out|NeedsLogin|not logged in|stopped')
-    {
-        Write-Ok 'Tailscale is running but not signed in - sign in from the tray icon or run `tailscale up`'
-    } else
-    {
-        Write-Ok 'Tailscale is connected'
-    }
+    Write-Ok 'Tailscale is connected'
 }
 
 function Start-TailscaleDaemon
