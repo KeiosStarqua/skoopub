@@ -63,10 +63,15 @@ $repo = Split-Path -Parent $PSScriptRoot
 $earlyRestoreArgs = @{}
 if (-not $SkipFirefoxRestore) {
     $earlyRestoreArgs.RestoreFirefox = $true
+    # A failed restore must stop the run before gh auth / repo clones. Keep this
+    # switch out of the phase-1 and end-of-run retries, which stay non-fatal.
+    $earlyRestoreArgs.FailOnFirefoxRestoreError = $true
     if ($ForceFirefoxRestore) { $earlyRestoreArgs.ForceFirefoxRestore = $true }
 }
 $restoreAppsArgs = @{}
-foreach ($key in $earlyRestoreArgs.Keys) { $restoreAppsArgs[$key] = $earlyRestoreArgs[$key] }
+foreach ($key in @('RestoreFirefox', 'ForceFirefoxRestore')) {
+    if ($earlyRestoreArgs.ContainsKey($key)) { $restoreAppsArgs[$key] = $earlyRestoreArgs[$key] }
+}
 if (-not $SkipAtuinRestore) {
     $restoreAppsArgs.RestoreAtuin = $true
     if ($ForceAtuinRestore) { $restoreAppsArgs.ForceAtuinRestore = $true }
@@ -493,6 +498,45 @@ function Start-TailscaleDaemon {
     Show-TailscaleSignInHint
 }
 
+function Install-FirefoxBeforeRestore {
+    # Make the browser available before its profile is restored so the user can
+    # launch it immediately. Import the pinned entry from scoop.json, the same
+    # way the apps phase does, so the version and hold stay in sync.
+    param([string]$ManifestPath, [switch]$Force)
+
+    $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE 'scoop' }
+    $installedExe = Join-Path $scoopRoot 'apps\firefox\current\firefox.exe'
+    if ((Test-Path -LiteralPath $installedExe) -and -not $Force) {
+        Write-Host 'Firefox already installed with Scoop.'
+        return
+    }
+    if (-not (Test-Path -LiteralPath $ManifestPath)) { throw "manifest not found: $ManifestPath" }
+    $plan = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+    $app = @($plan.apps | Where-Object { $_.Name -eq 'firefox' })[0]
+    if (-not $app) { throw 'firefox is missing from manifests/scoop.json' }
+    $bucket = @($plan.buckets | Where-Object { $_.Name -eq 'extras' })[0]
+    if (-not (Test-Path -LiteralPath (Join-Path $scoopRoot 'buckets\extras\bucket'))) {
+        try {
+            if ($bucket -and $bucket.Source) { scoop bucket add extras $bucket.Source } else { scoop bucket add extras }
+            if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+        } catch {
+            throw "Could not add the extras bucket for Firefox: $($_.Exception.Message)"
+        }
+    }
+    $buckets = if ($bucket) { @($bucket) } else { @() }
+    $tmp = Join-Path $env:TEMP 'skoop-firefox-early.json'
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($tmp, ([pscustomobject]@{ buckets = $buckets; apps = @($app) } | ConvertTo-Json -Depth 12), $utf8)
+    $versionLabel = if ($app.Version) { $app.Version } else { 'latest' }
+    Write-Host "Installing Firefox $versionLabel with Scoop before restoring its profile..."
+    & scoop import $tmp
+    $exit = $LASTEXITCODE
+    Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    if ($exit -ne 0) { throw "scoop import failed for the early Firefox install (exit $exit)." }
+    $env:Path = "$scoopRoot\shims;$env:Path"
+    Write-Host "Firefox $versionLabel installed with Scoop."
+}
+
 # 1. Install Scoop if it is missing (no admin needed unless already elevated).
 if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
     $installer = Join-Path $env:TEMP 'install-scoop.ps1'
@@ -539,11 +583,20 @@ if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) {
         catch { Write-Host "Tailscale install failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
     }
 }
+$earlyManifest = Join-Path $repo 'manifests\scoop.json'
+Install-FirefoxBeforeRestore -ManifestPath $earlyManifest -Force:$ForceInstall
 Start-TailscaleDaemon
+$firefoxRestoreRequired = $earlyRestoreArgs.ContainsKey('FailOnFirefoxRestoreError')
 if (Test-Path $tailscaleConfig) {
     # Restore the Firefox profile while Tailscale is connected, before gh auth.
     try { & $tailscaleConfig -SignIn -BackupUser $BackupUser @earlyRestoreArgs }
-    catch { Write-Host "Tailscale sign-in / Firefox restore failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+    catch {
+        $message = "Tailscale sign-in / Firefox restore failed: $($_.Exception.Message)"
+        if ($firefoxRestoreRequired) { throw $message }
+        Write-Host "$message (non-fatal)" -ForegroundColor Yellow
+    }
+} elseif ($firefoxRestoreRequired) {
+    throw "apps/tailscale/configure.ps1 not found at $tailscaleConfig - cannot restore Firefox before GitHub auth."
 }
 if (Test-Path $ghAuth) {
     try { & $ghAuth -SkipLogin:$SkipGhLogin }

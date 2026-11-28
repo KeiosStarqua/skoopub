@@ -189,6 +189,15 @@ function Resolve-SshUser {
     return $answer.Trim()
 }
 
+function Remove-SshDiagnostics {
+    # ssh writes host-key/banner notices to stderr; with 2>&1 they are mixed
+    # into stdout, so never treat them as the remote home path.
+    param([object[]] $Lines)
+    return @($Lines |
+        ForEach-Object { $_.ToString().Trim() } |
+        Where-Object { $_ -and $_ -notmatch '^(Warning: Permanently added|Pseudo-terminal will not be allocated|Banner:)' })
+}
+
 function Get-LatestStamps {
     param([string[]] $SshArgs, [string] $Path)
 
@@ -241,14 +250,52 @@ function Get-ProfilesIniSections {
 }
 
 function Save-Snapshot {
-    param([string] $RemoteFolder, [string] $StageRoot, [string] $FolderName)
+    param(
+        [string] $RemoteFolder,
+        [string] $StageRoot,
+        [string] $FolderName,
+        [string[]] $Excludes = @()
+    )
 
     # Drop a stale target from an earlier interrupted run so the download is clean.
     $target = Join-Path $StageRoot $FolderName
     if ((Test-Path -LiteralPath $target)) {
         Remove-Item -LiteralPath $target -Recurse -Force
     }
-    $scpArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10', '-r', ($peer + ':' + $RemoteFolder), $StageRoot)
+    New-Item -ItemType Directory -Force -Path $target | Out-Null
+
+    # A tar stream avoids Windows' 260-character path limit that scp hits on
+    # deep Firefox cache paths. cmd.exe carries the binary stream straight from
+    # ssh to tar; PowerShell 5.1 would corrupt it through its text pipeline.
+    $tarCmd = Get-Command tar -ErrorAction SilentlyContinue
+    if ($tarCmd) {
+        $excludeArgs = @()
+        foreach ($pattern in $Excludes) { $excludeArgs += "--exclude='$pattern'" }
+        $tarExcludes = if ($excludeArgs.Count) { ' ' + ($excludeArgs -join ' ') } else { '' }
+        $remoteCmd = "cd '$RemoteFolder' && tar -cf -$tarExcludes ."
+        $sshQuoted = @($sshArgs | ForEach-Object { '"' + $_ + '"' }) -join ' '
+        # Separate stderr files: both sides of a cmd pipeline writing to the
+        # same append target causes a sharing violation on Windows.
+        $sshErrLog = $script:LogPath + '.ssh.err'
+        $tarErrLog = $script:LogPath + '.tar.err'
+        foreach ($errLog in @($sshErrLog, $tarErrLog)) {
+            if (Test-Path -LiteralPath $errLog) { Remove-Item -LiteralPath $errLog -Force }
+        }
+        $cmdLine = "ssh $sshQuoted `"$remoteCmd`" 2>>`"$sshErrLog`" | `"$($tarCmd.Source)`" -xf - -C `"$target`" 2>>`"$tarErrLog`""
+        Write-Log ("tar stream: ssh " + ($sshArgs -join ' ') + " '$remoteCmd' | tar -xf - -C $target")
+        & cmd.exe /d /c $cmdLine | Out-Null
+        $tarExit = $LASTEXITCODE
+        foreach ($errLog in @($sshErrLog, $tarErrLog)) {
+            if (Test-Path -LiteralPath $errLog) {
+                Get-Content -LiteralPath $errLog | ForEach-Object { Write-Log ("stream: " + $_.Trim()) }
+            }
+        }
+        if ($tarExit -eq 0) { return }
+        Write-Warn "tar download failed for $RemoteFolder (exit $tarExit); falling back to scp."
+        if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+    }
+
+    $scpArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10', '-o', 'LogLevel=ERROR', '-r', ($peer + ':' + $RemoteFolder), $StageRoot)
     Write-Log ("scp command: scp " + ($scpArgs -join ' '))
     & scp @scpArgs 2>&1 | ForEach-Object { Write-Log ("scp: " + $_.ToString().Trim()) }
     if ($LASTEXITCODE -ne 0) {
@@ -616,16 +663,19 @@ foreach ($tool in @('ssh', 'scp')) {
 }
 
 $sshUser = Resolve-SshUser
-$sshArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10', ($sshUser + '@' + $TargetHost))
+# LogLevel=ERROR keeps OpenSSH's "Permanently added ..." INFO notice off stderr,
+# so `2>&1` cannot mix it into stdout values such as the remote home path.
+$sshArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10', '-o', 'LogLevel=ERROR', ($sshUser + '@' + $TargetHost))
 $peer = $sshUser + '@' + $TargetHost
 
 Write-Log ("ssh command: ssh " + ($sshArgs -join ' ') + ' printf %s "$HOME"')
 $homeOutput = & ssh @sshArgs 'printf %s "$HOME"' 2>&1
-foreach ($line in $homeOutput) { Write-Log ("ssh: " + $line.ToString().Trim()) }
+$homeLines = @(Remove-SshDiagnostics $homeOutput)
+foreach ($line in $homeLines) { Write-Log ("ssh: " + $line) }
 if ($LASTEXITCODE -ne 0) {
-    throw ("ssh to " + $peer + " failed: " + ($homeOutput | Out-String))
+    throw ("ssh to " + $peer + " failed: " + ($homeLines | Out-String))
 }
-$remoteHome = ($homeOutput | Select-Object -Last 1).ToString().Trim()
+$remoteHome = ($homeLines | Select-Object -Last 1)
 if (-not $remoteHome) { throw 'Could not determine the remote home directory.' }
 Write-Log ("remote home: " + $remoteHome)
 
@@ -731,7 +781,12 @@ try {
     if ($doFirefox) {
         $remoteFolder = Get-SnapshotRemotePath -BasePath $FirefoxRemotePath -FolderName 'firefox' -TheStamp $ffStamp
         Write-Log ("restoring Firefox from " + $peer + ':' + $remoteFolder)
-        if (-not $DryRun) { Save-Snapshot -RemoteFolder $remoteFolder -StageRoot $stage -FolderName 'firefox' }
+        if (-not $DryRun) {
+            # Skip browser caches: they are not part of the usable profile and
+            # contain paths longer than Windows' MAX_PATH (scp cannot create them).
+            $firefoxExcludes = @('cache', 'cache2', 'startupCache', 'offlineCache', 'thumbnails', 'jumpListCache')
+            Save-Snapshot -RemoteFolder $remoteFolder -StageRoot $stage -FolderName 'firefox' -Excludes $firefoxExcludes
+        }
         if (-not $DryRun -and -not (Test-Path -LiteralPath (Join-Path $stage 'firefox\profiles.ini'))) {
             throw 'Downloaded Firefox snapshot has no profiles.ini.'
         }

@@ -87,6 +87,11 @@
     SSH user on acer-ubuntu for the optional restore steps. Defaults to
     $env:SKOOP_BACKUP_USER.
 
+.PARAMETER FailOnFirefoxRestoreError
+    Treat a failed Firefox restore as a terminating error instead of a warning.
+    The bootstraps pass this so an install stops before GitHub auth and repo
+    clones when the Firefox profile could not be restored.
+
 .EXAMPLE
     .\apps\tailscale\configure.ps1
 
@@ -120,6 +125,7 @@ param(
     [switch]$ForceFirefoxRestore,
     [switch]$ForceAtuinRestore,
     [switch]$ForceOpenCodeRestore,
+    [switch]$FailOnFirefoxRestoreError,
     [string]$BackupUser = "$env:SKOOP_BACKUP_USER"
 )
 
@@ -236,13 +242,16 @@ function Invoke-RestoreOnConnect {
         [string] $Label,
         [switch] $ForceRestore,
         [string] $ForceSwitch,
-        [string] $MarkerName
+        [string] $MarkerName,
+        [switch] $FailOnRestoreError
     )
 
     $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     $restoreScript = Join-Path $repoRoot 'core\restore-backup.ps1'
     if (-not (Test-Path -LiteralPath $restoreScript)) {
-        Write-Warn "core/restore-backup.ps1 not found - skipping $Label auto-restore."
+        $message = "core/restore-backup.ps1 not found - skipping $Label auto-restore."
+        if ($FailOnRestoreError) { throw $message }
+        Write-Warn $message
         return
     }
     if ($App -eq 'opencode' -and -not (Get-Command opencode -ErrorAction SilentlyContinue)) {
@@ -256,7 +265,9 @@ function Invoke-RestoreOnConnect {
         return
     }
     if (-not $BackupUser -and -not [Environment]::UserInteractive) {
-        Write-Warn "no SSH user for acer-ubuntu - set -BackupUser / SKOOP_BACKUP_USER to auto-restore $Label."
+        $message = "no SSH user for acer-ubuntu - set -BackupUser / SKOOP_BACKUP_USER to auto-restore $Label."
+        if ($FailOnRestoreError) { throw $message }
+        Write-Warn $message
         return
     }
     # Hashtable splatting binds these as named parameters. A string array would
@@ -270,7 +281,11 @@ function Invoke-RestoreOnConnect {
     $closedFirefox = $null
     if ($App -eq 'firefox') {
         $closedFirefox = Close-FirefoxForRestore
-        if (-not $closedFirefox.Ok) { return }
+        if (-not $closedFirefox.Ok) {
+            $message = "Firefox is still running - cannot restore its profile; close it and re-run."
+            if ($FailOnRestoreError) { throw $message }
+            return
+        }
     } elseif ($App -eq 'atuin') {
         Write-Warn 'Close other shells with active Atuin sessions before using the restored history.'
     }
@@ -283,7 +298,9 @@ function Invoke-RestoreOnConnect {
         [System.IO.File]::WriteAllText($marker, (Get-Date -Format 'o'))
         Write-Ok "$Label restored; marker written to $marker"
     } catch {
-        Write-Warn "$Label auto-restore failed (non-fatal): $($_.Exception.Message)"
+        $message = "$Label auto-restore failed: $($_.Exception.Message)"
+        if ($FailOnRestoreError) { throw $message }
+        Write-Warn "$message (non-fatal)"
     } finally {
         # Only relaunch when a running Firefox was actually closed for the copy.
         if ($closedFirefox -and $closedFirefox.WasRunning -and $closedFirefox.Exe) {
@@ -328,6 +345,14 @@ if ($SignIn) {
 # After a successful sign-in, allow status --json a few seconds to report Online.
 $connected = Test-TailscaleConnected $cli
 if ($signInCompleted -and -not $connected) { $connected = Wait-TailscaleConnected $cli }
+# When a bootstrap asks for a mandatory Firefox restore, a disconnected node
+# must not fall through to gh auth and repo clones with the stale profile.
+if ($RestoreFirefox -and $FailOnFirefoxRestoreError -and -not $connected) {
+    $firefoxMarker = Join-Path $env:LOCALAPPDATA 'skoop\firefox-restore.done'
+    if ($ForceFirefoxRestore -or -not (Test-Path -LiteralPath $firefoxMarker)) {
+        throw 'Firefox restore is required but Tailscale is not connected - sign in to Tailscale, then re-run install.ps1.'
+    }
+}
 if ($RestoreVicinae -and $connected) {
     Invoke-RestoreOnConnect -App vicinae -Label 'Vicinae' -ForceRestore:$ForceVicinaeRestore -ForceSwitch 'ForceVicinaeRestore'
 }
@@ -335,7 +360,7 @@ if ($RestorePearDesktop -and $connected) {
     Invoke-RestoreOnConnect -App pear -Label 'Pear Desktop' -ForceRestore:$ForcePearDesktopRestore -ForceSwitch 'ForcePearDesktopRestore'
 }
 if ($RestoreFirefox -and $connected) {
-    Invoke-RestoreOnConnect -App firefox -Label 'Firefox' -ForceRestore:$ForceFirefoxRestore -ForceSwitch 'ForceFirefoxRestore' -MarkerName 'firefox-restore.done'
+    Invoke-RestoreOnConnect -App firefox -Label 'Firefox' -ForceRestore:$ForceFirefoxRestore -ForceSwitch 'ForceFirefoxRestore' -MarkerName 'firefox-restore.done' -FailOnRestoreError:$FailOnFirefoxRestoreError
 }
 if ($RestoreAtuin -and $connected) {
     Invoke-RestoreOnConnect -App atuin -Label 'Atuin' -ForceRestore:$ForceAtuinRestore -ForceSwitch 'ForceAtuinRestore' -MarkerName 'atuin-restore.done'
