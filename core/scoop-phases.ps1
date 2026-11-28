@@ -10,11 +10,11 @@
     That keeps versions in one place and makes a missing assignment a hard
     error instead of a silently skipped package.
 
-    Every phase gets its own generated manifest with just the buckets and apps
-    it needs, so the first phase does not clone buckets that only the heavy
-    phase uses. Phase 1 failures abort; later phase failures are reported and
-    the remaining phases still run, so the essentials are never lost to a slow
-    download.
+    Each app in a phase is imported from its own generated manifest so its
+    install time can be reported; buckets are added on the first app only, so
+    the first phase does not clone buckets that only the heavy phase uses.
+    Phase 1 failures abort; later phase failures are reported and the remaining
+    phases still run, so the essentials are never lost to a slow download.
 
     Dot-source this file from install.ps1 / core/bootstrap.ps1. Loading it has
     no side effects.
@@ -90,20 +90,26 @@ function New-SkoopPhaseManifest {
         [Parameter(Mandatory)]$Plan,
         [Parameter(Mandatory)]$Phase,
         [string[]]$ExcludeApps = @(),
+        [string[]]$OnlyApps = @(),
+        [switch]$NoBuckets,
         [string]$TempDir = $env:TEMP
     )
 
     $apps = @()
-    foreach ($name in @($Phase.Apps)) {
+    $names = if ($OnlyApps.Count -gt 0) { $OnlyApps } else { @($Phase.Apps) }
+    foreach ($name in $names) {
         if ($ExcludeApps -contains $name) { continue }
         $apps += $Plan.AppsByName[$name]
     }
 
     $buckets = @()
-    foreach ($name in @($Phase.Buckets)) { $buckets += $Plan.BucketsByName[$name] }
+    if (-not $NoBuckets) {
+        foreach ($name in @($Phase.Buckets)) { $buckets += $Plan.BucketsByName[$name] }
+    }
 
     $payload = [pscustomobject]@{ buckets = $buckets; apps = $apps }
-    $path = Join-Path $TempDir ('skoop-phase-{0}.json' -f $Phase.Name)
+    $suffix = if ($OnlyApps.Count -eq 1) { '-' + $OnlyApps[0] } else { '' }
+    $path = Join-Path $TempDir ('skoop-phase-{0}{1}.json' -f $Phase.Name, $suffix)
     $json = $payload | ConvertTo-Json -Depth 20
 
     # BOM-less UTF-8: PowerShell 5.1's Set-Content -Encoding UTF8 adds a BOM.
@@ -188,20 +194,43 @@ function Invoke-SkoopPhases {
 
         $pending = @($Phase.Apps | Where-Object { $effectiveExclude -notcontains $_ })
         $exit = 0
-        $timer = $null
+        $timer = [System.Diagnostics.Stopwatch]::StartNew()
+        $timings = @()
         if ($pending.Count -eq 0) {
             Write-Host '    all apps already installed - skipping scoop import' -ForegroundColor DarkGray
+            $timer.Stop()
+            $timer = $null
         } else {
-            $phaseFile = New-SkoopPhaseManifest -Plan $plan -Phase $phase -ExcludeApps $effectiveExclude
-            $timer = [System.Diagnostics.Stopwatch]::StartNew()
-            try {
-                & $Scoop import $phaseFile
-                $exit = $LASTEXITCODE
-            } catch {
-                $exit = 1
-                Write-Host "    $($_.Exception.Message)" -ForegroundColor Yellow
+            for ($i = 0; $i -lt $pending.Count; $i++) {
+                $name = [string]$pending[$i]
+                # Add the phase's buckets once, on the first app's import.
+                $appFile = New-SkoopPhaseManifest -Plan $plan -Phase $phase `
+                    -OnlyApps @($name) -NoBuckets:($i -gt 0)
+                $appTimer = [System.Diagnostics.Stopwatch]::StartNew()
+                try {
+                    & $Scoop import $appFile
+                    $appExit = $LASTEXITCODE
+                } catch {
+                    $appExit = 1
+                    Write-Host "    $($_.Exception.Message)" -ForegroundColor Yellow
+                }
+                $appTimer.Stop()
+                $timings += [pscustomobject]@{
+                    Name    = $name
+                    Seconds = $appTimer.Elapsed.TotalSeconds
+                    Ok      = ($appExit -eq 0)
+                }
+                if ($appExit -ne 0) { $exit = $appExit; break }
             }
             $timer.Stop()
+        }
+
+        if ($timings.Count -gt 0) {
+            Write-Host '    package times:' -ForegroundColor DarkGray
+            foreach ($row in $timings) {
+                $status = if ($row.Ok) { '' } else { '  failed' }
+                Write-Host ('      {0,-24} {1,7:n1}s{2}' -f $row.Name, $row.Seconds, $status) -ForegroundColor DarkGray
+            }
         }
 
         if ($exit -ne 0) {
