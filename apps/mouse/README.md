@@ -87,11 +87,13 @@ the requested DPI it does nothing.
 .\apps\mouse\mouse.ps1 dpi -DryRun                 # report current/list, change nothing
 ```
 
-It finds the first Logitech mouse exposing the HID++ vendor collection
-(usage page `0xff00`), reads the supported range, writes the DPI over the
-interrupt-OUT interface, then reads it back to verify. G H UB can be running;
-if it holds the HID++ channel the command fails with a clear, non-fatal error.
-Other brands (and mice without feature `0x2201`) are left untouched.
+It finds every Logitech mouse exposing the HID++ vendor collection
+(usage page `0xff00`) and sets each one: read the supported range, write the DPI
+over the interrupt-OUT interface, then read it back to verify. A device without
+feature `0x2201` is skipped with a message so the other mice still get set; the
+command fails only when no device could be set. G H UB can be running; if it
+holds the HID++ channel the command fails with a clear, non-fatal error. Other
+brands are left untouched.
 
 ## Commands
 

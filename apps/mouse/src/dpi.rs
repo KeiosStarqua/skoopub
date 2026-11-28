@@ -44,7 +44,7 @@ struct Mouse {
     read: HidDevice,
 }
 
-fn open_mouse(api: &HidApi) -> Result<Mouse, String> {
+fn open_mice(api: &HidApi) -> Vec<Mouse> {
     let mut found: Vec<(String, u16, u16, Option<HidDevice>, Option<HidDevice>)> = Vec::new();
     for info in api.device_list() {
         if info.vendor_id() != LOGITECH_VID || info.usage_page() != 0xff00 {
@@ -72,6 +72,7 @@ fn open_mouse(api: &HidApi) -> Result<Mouse, String> {
         }
     }
 
+    let mut mice = Vec::new();
     for (_, vid, pid, write, read) in found {
         let (write, read) = match (write, read) {
             (Some(w), Some(r)) => (w, r),
@@ -83,9 +84,9 @@ fn open_mouse(api: &HidApi) -> Result<Mouse, String> {
             .and_then(|i| i.product_string())
             .unwrap_or("Logitech mouse")
             .to_string();
-        return Ok(Mouse { product, vid, pid, write, read });
+        mice.push(Mouse { product, vid, pid, write, read });
     }
-    Err("no Logitech HID++ mouse found (vendor interface 0xff00 not accessible)".to_string())
+    mice
 }
 
 fn request(mouse: &mut Mouse, feature: u8, func: u8, params: [u8; 3]) -> Result<[u8; 20], String> {
@@ -174,19 +175,8 @@ fn option(args: &[String], name: &str) -> Result<Option<String>, String> {
     Ok(found)
 }
 
-pub fn run(args: &[String]) -> Result<(), String> {
-    let raw = option(args, "value")?
-        .or(option(args, "dpi")?)
-        .unwrap_or_else(|| "1200".to_string());
-    let dpi: u16 = raw
-        .parse()
-        .map_err(|_| format!("invalid DPI value: {}", raw))?;
-    let dry_run = args.iter().any(|a| a == "--dry-run");
-
-    let api = HidApi::new().map_err(|e| format!("hidapi init failed: {}", e))?;
-    let mut mouse = open_mouse(&api)?;
-
-    let root = request(&mut mouse, FEATURE_ROOT, 0x00, FEATURE_ADJUSTABLE_DPI)?;
+fn apply_dpi(mouse: &mut Mouse, dpi: u16, dry_run: bool) -> Result<(), String> {
+    let root = request(mouse, FEATURE_ROOT, 0x00, FEATURE_ADJUSTABLE_DPI)?;
     let feature = root[4];
     if feature == 0 {
         return Err(format!(
@@ -195,13 +185,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
         ));
     }
 
-    let count = request(&mut mouse, feature, GET_SENSOR_COUNT, [0, 0, 0])?[4];
+    let count = request(mouse, feature, GET_SENSOR_COUNT, [0, 0, 0])?[4];
     if count == 0 {
         return Err("no DPI sensor reported by the mouse".to_string());
     }
     let sensor = 0u8;
-    let info = dpi_list(&mut mouse, feature, sensor)?;
-    let before = current_dpi(&mut mouse, feature, sensor)?;
+    let info = dpi_list(mouse, feature, sensor)?;
+    let before = current_dpi(mouse, feature, sensor)?;
 
     println!(
         "{} (VID {:04x}:PID {:04x}), sensor {}: DPI {} (range {}..{} step {}).",
@@ -221,12 +211,45 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
 
     println!("Setting DPI {} -> {} ...", before, dpi);
-    set_dpi(&mut mouse, feature, sensor, dpi)?;
+    set_dpi(mouse, feature, sensor, dpi)?;
     std::thread::sleep(Duration::from_millis(150));
-    let after = current_dpi(&mut mouse, feature, sensor)?;
+    let after = current_dpi(mouse, feature, sensor)?;
     if after != dpi {
         return Err(format!("DPI change did not stick (expected {}, got {})", dpi, after));
     }
     println!("DPI is now {} (verified).", after);
+    Ok(())
+}
+
+pub fn run(args: &[String]) -> Result<(), String> {
+    let raw = option(args, "value")?
+        .or(option(args, "dpi")?)
+        .unwrap_or_else(|| "1200".to_string());
+    let dpi: u16 = raw
+        .parse()
+        .map_err(|_| format!("invalid DPI value: {}", raw))?;
+    let dry_run = args.iter().any(|a| a == "--dry-run");
+
+    let api = HidApi::new().map_err(|e| format!("hidapi init failed: {}", e))?;
+    let mice = open_mice(&api);
+    if mice.is_empty() {
+        return Err("no Logitech HID++ mouse found (vendor interface 0xff00 not accessible)".to_string());
+    }
+
+    // One device lacking the DPI feature must not stop the others.
+    let mut applied = 0;
+    let mut failures = Vec::new();
+    for mut mouse in mice {
+        match apply_dpi(&mut mouse, dpi, dry_run) {
+            Ok(()) => applied += 1,
+            Err(e) => {
+                println!("{}: {}", mouse.product, e);
+                failures.push(e);
+            }
+        }
+    }
+    if applied == 0 {
+        return Err(failures.join("; "));
+    }
     Ok(())
 }
