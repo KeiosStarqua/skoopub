@@ -259,8 +259,11 @@ function Invoke-RestoreOnConnect {
         Write-Warn "no SSH user for acer-ubuntu - set -BackupUser / SKOOP_BACKUP_USER to auto-restore $Label."
         return
     }
-    $restoreArgs = @('-Only', $App)
-    if ($BackupUser) { $restoreArgs += @('-User', $BackupUser) }
+    # Hashtable splatting binds these as named parameters. A string array would
+    # bind positionally (-Only -> -User, firefox -> -TargetHost), producing the
+    # bogus "-Only@firefox" SSH target.
+    $restoreArgs = @{ Only = $App }
+    if ($BackupUser) { $restoreArgs.User = $BackupUser }
 
     # No CLI-existence guard for Firefox/Atuin: their restore is a plain file
     # copy and must work before the apps are installed in later phases.
