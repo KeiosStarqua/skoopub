@@ -86,20 +86,29 @@ reported and the remaining phases still run.
 
 ## Before the phases (every run)
 
-1. Mode selection: Full by default; `-Menu` opts into the selector, `-HerdrPeer`
+1. Storage selection (`core/storage/select.ps1`), before logging or any download:
+   for a fresh Scoop only, rank fixed NTFS volumes with at least `-MinFreeGB`
+   (30) free, exclude game labels and non-writable volumes, prefer another disk
+   or `userdisk`, then persist the choice to `%LOCALAPPDATA%\skoop\storage.json`
+   and the user environment. An existing Scoop is reused unless `-MigrateScoop`;
+   `-StorageRoot` overrides, `-SelectStorage` prompts, `-DiagnoseStorage` exits
+   after the report.
+2. Mode selection: Full by default; `-Menu` opts into the selector, `-HerdrPeer`
    runs only the Herdr connection.
-2. Locate the checkout, or download the repo files to `%LOCALAPPDATA%\skoop`.
-3. Dark Mode (`core/set-dark-mode.ps1`) — no network, so the rest is already dark.
-4. Execution policy + the repo-managed profile hook (`Install-ProfileHook`), then
+3. Locate the checkout, or download the repo files to `%LOCALAPPDATA%\skoop`.
+4. Dark Mode (`core/set-dark-mode.ps1`) — no network, so the rest is already dark.
+5. Execution policy + the repo-managed profile hook (`Install-ProfileHook`), then
    verify the profile loads in a fresh shell.
-5. skoopub-mouse install + the Logitech DPI value (early, before the slow
-   downloads; needs step 4 because the CLI is a `.ps1`).
-6. Clear the Task Manager policy.
-7. Check Windows activation (and activate when it is not).
-8. Install Scoop when its shims are missing.
-9. Put the shims on PATH and cache the backup user.
-10. Install git when missing — buckets are git repos.
-11. Run the phases above.
+6. skoopub-mouse install + the Logitech DPI value (early, before the slow
+   downloads; needs step 5 because the CLI is a `.ps1`).
+7. Clear the Task Manager policy.
+8. Check Windows activation (and activate when it is not).
+9. Install Scoop when its shims are missing; a fresh install receives
+   `-ScoopDir` / `-ScoopGlobalDir` from the selected root and sets
+   `scoop config cache_path` to its cache.
+10. Put the shims on PATH and cache the backup user.
+11. Install git when missing — buckets are git repos.
+12. Run the phases above.
 
 ## After the phases
 

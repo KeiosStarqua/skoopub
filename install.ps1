@@ -191,6 +191,12 @@
     found without asking you to open a new shell. Rio is opened in ~/repos with
     Herdr already running before the handoff, so the tab has a live session to
     attach to.
+    - For a fresh Scoop install, selects storage before logging or downloads:
+      fixed NTFS volumes with -MinFreeGB free are probed with a real write,
+      game drives are excluded unless -AllowGameDrives, and a drive on another
+      physical disk or labelled "userdisk" wins. The choice is persisted to
+      %LOCALAPPDATA%\skoop\storage.json and the user environment; an existing
+      Scoop installation is reused unless -MigrateScoop is passed.
     - Writes a transcript of the run to %LOCALAPPDATA%\skoop\install-<timestamp>.log
       (-LogPath overrides it, -NoLog opts out); the pwsh re-launch shares that file.
       PowerShell 5.1 transcripts capture the script's own messages but not native
@@ -249,6 +255,29 @@
 .PARAMETER NoHerdrTab
     Keep the PowerShell 7 handoff in a separate window instead of a new Herdr
     tab (also $env:SKOOP_NO_HERDR_TAB=1). Implied by -NoAutoHerdr.
+
+.PARAMETER StorageRoot
+    Explicit installation root, e.g. B:\skoopub (also $env:SKOOP_STORAGE_ROOT).
+    Used only when a fresh Scoop installation is needed or -MigrateScoop is set.
+
+.PARAMETER AllowGameDrives
+    Include volumes labelled GAME in automatic storage selection (also
+    $env:SKOOP_ALLOW_GAME_DRIVES=1). Excluded by default.
+
+.PARAMETER MinFreeGB
+    Minimum free space for a candidate volume (default 30; also
+    $env:SKOOP_MIN_FREE_GB).
+
+.PARAMETER SelectStorage
+    Show the numbered drive picker instead of choosing automatically (also
+    $env:SKOOP_SELECT_STORAGE=1). Default is no prompt.
+
+.PARAMETER DiagnoseStorage
+    Print the storage report and exit without installing anything.
+
+.PARAMETER MigrateScoop
+    Ignore the existing Scoop installation and select a new storage root for a
+    fresh install. The old installation is left untouched, not deleted.
 
 .PARAMETER NoAutoHerdr
     Do not open Rio with Herdr after the essentials phase (also
@@ -331,6 +360,13 @@ param(
     [switch]$NoPwsh,
     # Keep the pwsh handoff in a separate window instead of a Herdr tab.
     [switch]$NoHerdrTab,
+    # Storage selection (automatic by default; only used for a fresh Scoop).
+    [string]$StorageRoot = "$env:SKOOP_STORAGE_ROOT",
+    [switch]$AllowGameDrives,
+    [int]$MinFreeGB = 30,
+    [switch]$SelectStorage,
+    [switch]$DiagnoseStorage,
+    [switch]$MigrateScoop,
     [switch]$NoAutoHerdr,
     [int]$MouseDpi = 1200,
     [switch]$SkipMouseDpi,
@@ -400,6 +436,10 @@ if ($env:SKOOP_NO_WALLPAPER -eq '1')
 if ($env:SKOOP_NO_HERDR_TAB -eq '1')
 { $NoHerdrTab = $true 
 }
+if ($env:SKOOP_MIN_FREE_GB -match '^\d+$') { $MinFreeGB = [int]$env:SKOOP_MIN_FREE_GB }
+if ($env:SKOOP_ALLOW_GAME_DRIVES -eq '1') { $AllowGameDrives = $true }
+if ($env:SKOOP_SELECT_STORAGE -eq '1') { $SelectStorage = $true }
+if ($env:SKOOP_MIGRATE_SCOOP -eq '1') { $MigrateScoop = $true }
 if ($env:SKOOP_FORCE_INSTALL -eq '1')
 { $ForceInstall = $true 
 }
@@ -434,7 +474,6 @@ function Stop-SkoopLog
     try { Stop-Transcript -ErrorAction Stop | Out-Null } catch { }
     $script:SkoopLogActive = $false
 }
-Start-SkoopLog
 
 # `--help` arrives in $args with CmdletBinding; handle it before any side effect.
 # --help binds to the first positional string parameter ($RepoRawBase) when
@@ -450,23 +489,21 @@ Usage:
   .\install.ps1 -Menu                    # menu: Full / Essentials / Configure / Herdr / Quit
   .\install.ps1 -EssentialsOnly          # only pwsh, Rio, Vicinae, the Herdr TUI and Tailscale
   .\install.ps1 -HerdrPeer              # interactive peer picker
+  .\install.ps1 -DiagnoseStorage         # storage report only, no install
+  .\install.ps1 -StorageRoot "G:\skoopub" # explicit storage root (fresh Scoop)
   .\install.ps1 -Peer <machine> -HerdrUser <user>
   .\install.ps1 -SkipHerdrConnect        # configure only
   irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
-Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoHerdrTab -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -ForceFirefoxRestore -ForceAtuinRestore -SkipFirefoxRestore -SkipAtuinRestore -SkipSshRestore -SkipRepoClones -EssentialsOnly -BackupUser -SkipShutdownHook -LogPath <file> -NoLog -ThrottleLimit <n> -Help
-Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_HERDR_TAB, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_FORCE_FIREFOX_RESTORE, SKOOP_FORCE_ATUIN_RESTORE, SKOOP_NO_FIREFOX_RESTORE, SKOOP_NO_ATUIN_RESTORE, SKOOP_NO_SSH_RESTORE, SKOOP_NO_REPO_CLONES, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL, SKOOP_LOG_PATH, SKOOP_NO_LOG, SKOOP_THROTTLE
+Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoHerdrTab -StorageRoot <path> -AllowGameDrives -MinFreeGB <n> -SelectStorage -DiagnoseStorage -MigrateScoop -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -ForceFirefoxRestore -ForceAtuinRestore -SkipFirefoxRestore -SkipAtuinRestore -SkipSshRestore -SkipRepoClones -EssentialsOnly -BackupUser -SkipShutdownHook -LogPath <file> -NoLog -ThrottleLimit <n> -Help
+Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_HERDR_TAB, SKOOP_STORAGE_ROOT, SKOOP_ALLOW_GAME_DRIVES, SKOOP_MIN_FREE_GB, SKOOP_SELECT_STORAGE, SKOOP_MIGRATE_SCOOP, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_FORCE_FIREFOX_RESTORE, SKOOP_FORCE_ATUIN_RESTORE, SKOOP_NO_FIREFOX_RESTORE, SKOOP_NO_ATUIN_RESTORE, SKOOP_NO_SSH_RESTORE, SKOOP_NO_REPO_CLONES, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL, SKOOP_LOG_PATH, SKOOP_NO_LOG, SKOOP_THROTTLE
 '@
     Stop-SkoopLog
     return
 }
 
-# Prefer PowerShell 7+ when it is installed: Windows PowerShell 5.1 rewrites
-# native stderr (gum's TUI becomes a NativeCommandError) and decodes BOM-less
-# UTF-8 as ANSI. Phase 1 installs pwsh, so the same check runs again after that
-# phase and re-launches the rest of the setup under pwsh. -NoPwsh /
-# $env:SKOOP_NO_PWSH=1 stays on 5.1. A piped run caches the installer so there
-# is still a script file for pwsh to re-launch.
+# Piped runs cache install.ps1 and the storage selector before any setup; the
+# re-launch below and the storage init both need those files on disk.
 $script:InstallScriptPath = $PSCommandPath
 if (-not $script:InstallScriptPath)
 {
@@ -480,14 +517,108 @@ if (-not $script:InstallScriptPath)
         $oldProgress = $ProgressPreference
         $ProgressPreference = 'SilentlyContinue'
         Invoke-WebRequest -UseBasicParsing -Uri "$RepoRawBase/install.ps1" -OutFile $script:InstallScriptPath
-        $ProgressPreference = $oldProgress
         Unblock-File $script:InstallScriptPath
+        $storageScript = Join-Path $cachedDir 'core\storage\select.ps1'
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $storageScript) | Out-Null
+        Invoke-WebRequest -UseBasicParsing -Uri "$RepoRawBase/core/storage/select.ps1" -OutFile $storageScript
+        Unblock-File $storageScript
+        $ProgressPreference = $oldProgress
     } catch
     {
         Write-Host "    could not cache install.ps1 for the pwsh re-launch: $($_.Exception.Message)" -ForegroundColor Yellow
         $script:InstallScriptPath = $null
     }
 }
+
+# --- Storage selection (before logging, downloads and package installs) ------
+function Initialize-SkoopStorage {
+    $selector = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'core\storage\select.ps1')) {
+        Join-Path $PSScriptRoot 'core\storage\select.ps1'
+    } else {
+        Join-Path $env:LOCALAPPDATA 'skoop\core\storage\select.ps1'
+    }
+    if (-not (Test-Path -LiteralPath $selector)) {
+        Write-Host '    storage selector unavailable - keeping default paths' -ForegroundColor Yellow
+        return
+    }
+    . $selector
+
+    if ($DiagnoseStorage) {
+        Show-SkoopStorageDiagnostics -MinFreeGB $MinFreeGB -AllowGameDrives:$AllowGameDrives |
+            Format-Table -AutoSize | Out-String | Write-Host
+        return
+    }
+
+    $configPath = Join-Path $env:LOCALAPPDATA 'skoop\storage.json'
+    $config = $null
+    if (Test-Path -LiteralPath $configPath) {
+        try { $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json } catch { }
+    }
+
+    $existingRoot = @($env:SCOOP, (Join-Path $env:USERPROFILE 'scoop'), (Join-Path $env:ProgramData 'scoop')) |
+        Where-Object { $_ -and (Test-Path -LiteralPath (Join-Path $_ 'shims\scoop.cmd')) } |
+        Select-Object -First 1
+    if (-not $StorageRoot -and $existingRoot -and -not $MigrateScoop) {
+        if (-not $env:SCOOP) { $env:SCOOP = $existingRoot }
+        if ($config -and $config.paths) {
+            foreach ($entry in $config.paths.PSObject.Properties) {
+                if ($entry.Name -eq 'SCOOP' -and -not (Test-Path -LiteralPath (Join-Path $entry.Value 'shims\scoop.cmd'))) { continue }
+                Set-Item -Path "Env:$($entry.Name)" -Value $entry.Value
+            }
+        }
+        Write-Host "    reusing existing Scoop at $($env:SCOOP) (use -MigrateScoop to choose a new drive)" -ForegroundColor DarkGray
+        return
+    }
+    # A persisted choice wins over re-scoring: do not change disks mid-install
+    # or between the pwsh handoff and the resumed run.
+    if (-not $StorageRoot -and $config -and $config.root -and (Test-StorageWritable -Path $config.root))
+    { $StorageRoot = $config.root 
+    }
+
+    $selected = Select-ScoopStorage -MinFreeGB $MinFreeGB -AllowGameDrives:$AllowGameDrives -Interactive:$SelectStorage -OverrideRoot $StorageRoot
+    $root = $selected.Root
+    $paths = [ordered]@{
+        SCOOP                 = Join-Path $root 'scoop'
+        SCOOP_GLOBAL          = Join-Path $root 'scoop-global'
+        SCOOP_CACHE           = Join-Path $root 'cache\scoop'
+        TEMP                  = Join-Path $root 'temp'
+        TMP                   = Join-Path $root 'temp'
+        RUSTUP_HOME           = Join-Path $root 'rustup'
+        CARGO_HOME            = Join-Path $root 'cargo'
+        UV_CACHE_DIR          = Join-Path $root 'cache\uv'
+        BUN_INSTALL_CACHE_DIR = Join-Path $root 'cache\bun'
+        npm_config_cache      = Join-Path $root 'cache\npm'
+    }
+    foreach ($dir in @($root) + @($paths.Values | Select-Object -Unique)) {
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    }
+    foreach ($entry in $paths.GetEnumerator()) { Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value }
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $configPath) | Out-Null
+        $payload = [pscustomobject]@{ root = $root; paths = $paths }
+        $utf8 = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($configPath, ($payload | ConvertTo-Json -Depth 5), $utf8)
+        foreach ($entry in $paths.GetEnumerator()) {
+            [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'User')
+        }
+    } catch {
+        Write-Host "    could not persist storage config (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    $script:SkoopFreshInstall = $true
+    Write-Host "==> Selected storage: $($selected.Drive) $($selected.Label) ($($selected.FreeGB) GB free)" -ForegroundColor Cyan
+    Write-Host "    installation root: $root" -ForegroundColor DarkGray
+}
+
+Initialize-SkoopStorage
+if ($DiagnoseStorage) { return }
+Start-SkoopLog
+
+# Prefer PowerShell 7+ when it is installed: Windows PowerShell 5.1 rewrites
+# native stderr (gum's TUI becomes a NativeCommandError) and decodes BOM-less
+# UTF-8 as ANSI. Phase 1 installs pwsh, so the same check runs again after that
+# phase and re-launches the rest of the setup under pwsh. -NoPwsh /
+# $env:SKOOP_NO_PWSH=1 stays on 5.1. A piped run caches the installer so there
+# is still a script file for pwsh to re-launch.
 
 # Scoop installs shims into a directory that a long-running shell never adds to
 # its own PATH. Resolve executables from the known Scoop roots as a fallback and
@@ -573,6 +704,21 @@ function Get-SkoopReLaunchArgs
     }
     if ($NoHerdrTab)
     { $list += '-NoHerdrTab' 
+    }
+    if ($StorageRoot)
+    { $list += @('-StorageRoot', $StorageRoot) 
+    }
+    if ($AllowGameDrives)
+    { $list += '-AllowGameDrives' 
+    }
+    if ($MinFreeGB -ne 30)
+    { $list += @('-MinFreeGB', "$MinFreeGB") 
+    }
+    if ($SelectStorage)
+    { $list += '-SelectStorage' 
+    }
+    if ($MigrateScoop)
+    { $list += '-MigrateScoop' 
     }
     if ($MouseDpi -ne 1200)
     { $list += @('-MouseDpi', "$MouseDpi") 
@@ -1675,9 +1821,10 @@ function Test-UniKeyInstalled
 function Find-ScoopShims
 {
     @(
+        $(if ($env:SCOOP) { Join-Path $env:SCOOP 'shims' }),
         (Join-Path $env:USERPROFILE 'scoop\shims'),
         (Join-Path $env:ProgramData 'scoop\shims')
-    ) | Where-Object { Test-Path (Join-Path $_ 'scoop.cmd') } | Select-Object -First 1
+    ) | Where-Object { $_ -and (Test-Path (Join-Path $_ 'scoop.cmd')) } | Select-Object -First 1
 }
 
 function Ensure-SkoopClone
@@ -1942,7 +2089,7 @@ if (-not $repoRoot)
     New-Item -ItemType Directory -Force -Path $repoRoot | Out-Null
     $repoFiles = @(
         'manifests/scoop.json', 'manifests/phases.json', 'manifests/repos.json', 'core/scoop-phases.ps1',
-        'core/set-dark-mode.ps1', 'core/restore-backup.ps1', 'shell/profile.ps1',
+        'core/set-dark-mode.ps1', 'core/storage/select.ps1', 'core/restore-backup.ps1', 'shell/profile.ps1',
         'apps/sharex/fix-printscreen.ps1', 'apps/sharex/hotkeys.template.json',
         'apps/firefox/policies.template.json',
         'apps/unikey/configure.ps1', 'apps/unikey/unikey.reg',
@@ -2172,10 +2319,16 @@ if (-not $shimDir)
         [Security.Principal.WindowsBuiltInRole]::Administrator)
     if ($elevated)
     {
-        Write-Ok 'elevated shell detected - installing Scoop system-wide (C:\ProgramData\scoop)'
+        Write-Ok "elevated shell detected - installing Scoop with -RunAsAdmin (root: $(if ($env:SCOOP) { $env:SCOOP } else { 'C:\ProgramData\scoop' }))"
     }
 
-    & $installer -RunAsAdmin:$elevated
+    if ($script:SkoopFreshInstall -and $env:SCOOP -and $env:SCOOP_GLOBAL)
+    {
+        & $installer -ScoopDir $env:SCOOP -ScoopGlobalDir $env:SCOOP_GLOBAL -RunAsAdmin:$elevated
+    } else
+    {
+        & $installer -RunAsAdmin:$elevated
+    }
     $shimDir = Find-ScoopShims
 } else
 {
@@ -2184,6 +2337,13 @@ if (-not $shimDir)
 
 if (-not $shimDir)
 { throw 'Scoop installed but its shims directory was not found.' 
+}
+if ($script:SkoopFreshInstall -and $env:SCOOP_CACHE)
+{
+    $scoopCmd = Join-Path $shimDir 'scoop.cmd'
+    if (Test-Path -LiteralPath $scoopCmd)
+    { & $scoopCmd config cache_path $env:SCOOP_CACHE 
+    }
 }
 
 # --- 5. Put the shims on PATH for this process -------------------------------
