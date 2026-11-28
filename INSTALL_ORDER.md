@@ -90,9 +90,10 @@ reported and the remaining phases still run.
    for a fresh Scoop only, rank fixed NTFS volumes with at least `-MinFreeGB`
    (30) free, exclude game labels and non-writable volumes, prefer another disk
    or `userdisk`, then persist the choice to `%LOCALAPPDATA%\skoop\storage.json`
-   and the user environment. An existing Scoop is reused unless `-MigrateScoop`;
-   `-StorageRoot` overrides, `-SelectStorage` prompts, `-DiagnoseStorage` exits
-   after the report.
+   and the user environment. An existing Scoop is reused unless `-MigrateScoop`
+   (fresh root, C: apps not counted as installed) or `-PartialMigrate` (old
+   apps/shims stay, only missing apps install on the new root); `-StorageRoot`
+   overrides, `-SelectStorage` prompts, `-DiagnoseStorage` exits after the report.
 2. Mode selection: Full by default; `-Menu` opts into the selector, `-HerdrPeer`
    runs only the Herdr connection.
 3. Locate the checkout, or download the repo files to `%LOCALAPPDATA%\skoop`.

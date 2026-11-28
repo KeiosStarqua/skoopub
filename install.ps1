@@ -279,6 +279,11 @@
     Ignore the existing Scoop installation and select a new storage root for a
     fresh install. The old installation is left untouched, not deleted.
 
+.PARAMETER PartialMigrate
+    Keep the existing Scoop/apps but point new installs at the selected root:
+    already-installed apps are skipped, only missing apps go to the new disk.
+    Shims from both roots stay usable.
+
 .PARAMETER NoAutoHerdr
     Do not open Rio with Herdr after the essentials phase (also
     $env:SKOOP_NO_AUTO_HERDR=1). Useful for unattended installs.
@@ -367,6 +372,8 @@ param(
     [switch]$SelectStorage,
     [switch]$DiagnoseStorage,
     [switch]$MigrateScoop,
+    # Keep old Scoop/apps, but install new apps under the selected root.
+    [switch]$PartialMigrate,
     [switch]$NoAutoHerdr,
     [int]$MouseDpi = 1200,
     [switch]$SkipMouseDpi,
@@ -440,6 +447,7 @@ if ($env:SKOOP_MIN_FREE_GB -match '^\d+$') { $MinFreeGB = [int]$env:SKOOP_MIN_FR
 if ($env:SKOOP_ALLOW_GAME_DRIVES -eq '1') { $AllowGameDrives = $true }
 if ($env:SKOOP_SELECT_STORAGE -eq '1') { $SelectStorage = $true }
 if ($env:SKOOP_MIGRATE_SCOOP -eq '1') { $MigrateScoop = $true }
+if ($env:SKOOP_PARTIAL_MIGRATE -eq '1') { $PartialMigrate = $true }
 if ($env:SKOOP_FORCE_INSTALL -eq '1')
 { $ForceInstall = $true 
 }
@@ -491,12 +499,13 @@ Usage:
   .\install.ps1 -HerdrPeer              # interactive peer picker
   .\install.ps1 -DiagnoseStorage         # storage report only, no install
   .\install.ps1 -StorageRoot "G:\skoopub" # explicit storage root (fresh Scoop)
+  .\install.ps1 -PartialMigrate          # old apps stay on C:, new apps on selected disk
   .\install.ps1 -Peer <machine> -HerdrUser <user>
   .\install.ps1 -SkipHerdrConnect        # configure only
   irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
-Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoHerdrTab -StorageRoot <path> -AllowGameDrives -MinFreeGB <n> -SelectStorage -DiagnoseStorage -MigrateScoop -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -ForceFirefoxRestore -ForceAtuinRestore -SkipFirefoxRestore -SkipAtuinRestore -SkipSshRestore -SkipRepoClones -EssentialsOnly -BackupUser -SkipShutdownHook -LogPath <file> -NoLog -ThrottleLimit <n> -Help
-Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_HERDR_TAB, SKOOP_STORAGE_ROOT, SKOOP_ALLOW_GAME_DRIVES, SKOOP_MIN_FREE_GB, SKOOP_SELECT_STORAGE, SKOOP_MIGRATE_SCOOP, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_FORCE_FIREFOX_RESTORE, SKOOP_FORCE_ATUIN_RESTORE, SKOOP_NO_FIREFOX_RESTORE, SKOOP_NO_ATUIN_RESTORE, SKOOP_NO_SSH_RESTORE, SKOOP_NO_REPO_CLONES, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL, SKOOP_LOG_PATH, SKOOP_NO_LOG, SKOOP_THROTTLE
+Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoHerdrTab -StorageRoot <path> -AllowGameDrives -MinFreeGB <n> -SelectStorage -DiagnoseStorage -MigrateScoop -PartialMigrate -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -ForceFirefoxRestore -ForceAtuinRestore -SkipFirefoxRestore -SkipAtuinRestore -SkipSshRestore -SkipRepoClones -EssentialsOnly -BackupUser -SkipShutdownHook -LogPath <file> -NoLog -ThrottleLimit <n> -Help
+Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_HERDR_TAB, SKOOP_STORAGE_ROOT, SKOOP_ALLOW_GAME_DRIVES, SKOOP_MIN_FREE_GB, SKOOP_SELECT_STORAGE, SKOOP_MIGRATE_SCOOP, SKOOP_PARTIAL_MIGRATE, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_FORCE_FIREFOX_RESTORE, SKOOP_FORCE_ATUIN_RESTORE, SKOOP_NO_FIREFOX_RESTORE, SKOOP_NO_ATUIN_RESTORE, SKOOP_NO_SSH_RESTORE, SKOOP_NO_REPO_CLONES, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL, SKOOP_LOG_PATH, SKOOP_NO_LOG, SKOOP_THROTTLE
 '@
     Stop-SkoopLog
     return
@@ -563,6 +572,47 @@ function Initialize-SkoopStorage {
     $existingRoot = @($env:SCOOP, (Join-Path $env:USERPROFILE 'scoop'), (Join-Path $env:ProgramData 'scoop')) |
         Where-Object { $_ -and (Test-Path -LiteralPath (Join-Path $_ 'shims\scoop.cmd')) } |
         Select-Object -First 1
+    function Set-SkoopStorageHere {
+        param([string]$Root, [switch]$Fresh)
+        $paths = [ordered]@{
+            SCOOP                 = Join-Path $Root 'scoop'
+            SCOOP_GLOBAL          = Join-Path $Root 'scoop-global'
+            SCOOP_CACHE           = Join-Path $Root 'cache\scoop'
+            TEMP                  = Join-Path $Root 'temp'
+            TMP                   = Join-Path $Root 'temp'
+            RUSTUP_HOME           = Join-Path $Root 'rustup'
+            CARGO_HOME            = Join-Path $Root 'cargo'
+            UV_CACHE_DIR          = Join-Path $Root 'cache\uv'
+            BUN_INSTALL_CACHE_DIR = Join-Path $Root 'cache\bun'
+            npm_config_cache      = Join-Path $Root 'cache\npm'
+        }
+        foreach ($dir in @($Root) + @($paths.Values | Select-Object -Unique)) {
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        }
+        foreach ($entry in $paths.GetEnumerator()) { Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value }
+        try {
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $configPath) | Out-Null
+            $payload = [pscustomobject]@{ root = $Root; migrate = [bool]$Fresh; paths = $paths }
+            $utf8 = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($configPath, ($payload | ConvertTo-Json -Depth 5), $utf8)
+            foreach ($entry in $paths.GetEnumerator()) {
+                [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'User')
+            }
+        } catch {
+            Write-Host "    could not persist storage config (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+        if ($Fresh) { $script:SkoopFreshInstall = $true } else { $script:SkoopPartialMigrate = $true }
+        Write-Host "==> Selected storage: $($selected.Drive) $($selected.Label) ($($selected.FreeGB) GB free)" -ForegroundColor Cyan
+        Write-Host "    installation root: $Root" -ForegroundColor DarkGray
+    }
+
+    if ($PartialMigrate -and $existingRoot) {
+        if (-not $StorageRoot -and $config -and $config.root -and (Test-StorageWritable -Path $config.root)) { $StorageRoot = $config.root }
+        $selected = Select-ScoopStorage -MinFreeGB $MinFreeGB -AllowGameDrives:$AllowGameDrives -Interactive:$SelectStorage -OverrideRoot $StorageRoot
+        Set-SkoopStorageHere -Root $selected.Root
+        Write-Host "    partial migration: existing apps stay on $existingRoot; new/missing apps install to $($selected.Root)" -ForegroundColor DarkGray
+        return
+    }
     if (-not $StorageRoot -and $existingRoot -and -not $MigrateScoop) {
         if (-not $env:SCOOP) { $env:SCOOP = $existingRoot }
         if ($config -and $config.paths) {
@@ -581,37 +631,7 @@ function Initialize-SkoopStorage {
     }
 
     $selected = Select-ScoopStorage -MinFreeGB $MinFreeGB -AllowGameDrives:$AllowGameDrives -Interactive:$SelectStorage -OverrideRoot $StorageRoot
-    $root = $selected.Root
-    $paths = [ordered]@{
-        SCOOP                 = Join-Path $root 'scoop'
-        SCOOP_GLOBAL          = Join-Path $root 'scoop-global'
-        SCOOP_CACHE           = Join-Path $root 'cache\scoop'
-        TEMP                  = Join-Path $root 'temp'
-        TMP                   = Join-Path $root 'temp'
-        RUSTUP_HOME           = Join-Path $root 'rustup'
-        CARGO_HOME            = Join-Path $root 'cargo'
-        UV_CACHE_DIR          = Join-Path $root 'cache\uv'
-        BUN_INSTALL_CACHE_DIR = Join-Path $root 'cache\bun'
-        npm_config_cache      = Join-Path $root 'cache\npm'
-    }
-    foreach ($dir in @($root) + @($paths.Values | Select-Object -Unique)) {
-        New-Item -ItemType Directory -Force -Path $dir | Out-Null
-    }
-    foreach ($entry in $paths.GetEnumerator()) { Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value }
-    try {
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $configPath) | Out-Null
-        $payload = [pscustomobject]@{ root = $root; migrate = $true; paths = $paths }
-        $utf8 = New-Object System.Text.UTF8Encoding($false)
-        [System.IO.File]::WriteAllText($configPath, ($payload | ConvertTo-Json -Depth 5), $utf8)
-        foreach ($entry in $paths.GetEnumerator()) {
-            [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'User')
-        }
-    } catch {
-        Write-Host "    could not persist storage config (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-    $script:SkoopFreshInstall = $true
-    Write-Host "==> Selected storage: $($selected.Drive) $($selected.Label) ($($selected.FreeGB) GB free)" -ForegroundColor Cyan
-    Write-Host "    installation root: $root" -ForegroundColor DarkGray
+    Set-SkoopStorageHere -Root $selected.Root -Fresh
 }
 
 Initialize-SkoopStorage
@@ -724,6 +744,9 @@ function Get-SkoopReLaunchArgs
     }
     if ($MigrateScoop)
     { $list += '-MigrateScoop' 
+    }
+    if ($PartialMigrate)
+    { $list += '-PartialMigrate' 
     }
     if ($MouseDpi -ne 1200)
     { $list += @('-MouseDpi', "$MouseDpi") 
@@ -1825,11 +1848,15 @@ function Test-UniKeyInstalled
 
 function Find-ScoopShims
 {
-    @(
-        $(if ($env:SCOOP) { Join-Path $env:SCOOP 'shims' }),
-        (Join-Path $env:USERPROFILE 'scoop\shims'),
-        (Join-Path $env:ProgramData 'scoop\shims')
-    ) | Where-Object { $_ -and (Test-Path (Join-Path $_ 'scoop.cmd')) } | Select-Object -First 1
+    param([switch]$RootOnly)
+    $roots = if ($RootOnly) {
+        @($env:SCOOP)
+    } else {
+        @($env:SCOOP, (Join-Path $env:USERPROFILE 'scoop'), (Join-Path $env:ProgramData 'scoop'))
+    }
+    @($roots | ForEach-Object {
+        if ($_) { $candidate = Join-Path $_ 'shims'; if (Test-Path -LiteralPath (Join-Path $candidate 'scoop.cmd')) { $candidate } }
+    }) | Select-Object -First 1
 }
 
 function Ensure-SkoopClone
@@ -2312,7 +2339,7 @@ if ($activationStatus -eq 1)
     Write-Host "    Windows reported an unknown activation status ($activationStatus)." -ForegroundColor Yellow
 }
 # --- 4. Install Scoop if its shims are missing -------------------------------
-$shimDir = Find-ScoopShims
+$shimDir = Find-ScoopShims -RootOnly:$script:SkoopFreshInstall
 if (-not $shimDir)
 {
     Write-Step 'Installing Scoop'
@@ -2334,7 +2361,7 @@ if (-not $shimDir)
     {
         & $installer -RunAsAdmin:$elevated
     }
-    $shimDir = Find-ScoopShims
+    $shimDir = Find-ScoopShims -RootOnly:$script:SkoopFreshInstall
 } else
 {
     Write-Ok "Scoop already installed ($shimDir)"
@@ -2343,7 +2370,7 @@ if (-not $shimDir)
 if (-not $shimDir)
 { throw 'Scoop installed but its shims directory was not found.' 
 }
-if ($script:SkoopFreshInstall -and $env:SCOOP_CACHE)
+if (($script:SkoopFreshInstall -or $script:SkoopPartialMigrate) -and $env:SCOOP_CACHE)
 {
     $scoopCmd = Join-Path $shimDir 'scoop.cmd'
     if (Test-Path -LiteralPath $scoopCmd)
@@ -2352,7 +2379,7 @@ if ($script:SkoopFreshInstall -and $env:SCOOP_CACHE)
 }
 
 # --- 5. Put the shims on PATH for this process -------------------------------
-$env:SCOOP = Split-Path $shimDir -Parent
+if (-not $env:SCOOP) { $env:SCOOP = Split-Path $shimDir -Parent }
 $env:Path  = "$shimDir;$env:Path"
 $script:SkoopShimDir = $shimDir
 $scoop     = Join-Path $shimDir 'scoop.cmd'
@@ -2527,7 +2554,7 @@ $phaseResult = Invoke-SkoopPhases -Scoop $scoop -ManifestPath $manifest -PhasesP
     } else
     { @() 
     }) `
-    -SkipInstalled -Force:$ForceInstall -ScoopRoot $env:SCOOP -ThrottleLimit $ThrottleLimit `
+    -SkipInstalled -Force:$ForceInstall -ScoopRoot $env:SCOOP -ThrottleLimit $ThrottleLimit -RootOnly:$script:SkoopFreshInstall `
     -StopAfterPhase $(if ($EssentialsOnly)
     { 'tailscale' 
     } else

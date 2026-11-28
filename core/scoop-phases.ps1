@@ -136,13 +136,17 @@ function Get-SkoopInstalledApps {
     # avoids parsing `scoop list` (locale-dependent) and works even when the
     # scoop shim itself is not on PATH yet.
     [CmdletBinding()]
-    param([string]$ScoopRoot = '')
+    param([string]$ScoopRoot = '', [switch]$RootOnly)
 
     $roots = @()
+    if ($RootOnly) {
+        if ($ScoopRoot) { $roots += $ScoopRoot }
+    } else {
     if ($ScoopRoot) { $roots += $ScoopRoot }
     if ($env:SCOOP) { $roots += $env:SCOOP }
     if ($env:USERPROFILE) { $roots += (Join-Path $env:USERPROFILE 'scoop') }
     if ($env:ProgramData) { $roots += (Join-Path $env:ProgramData 'scoop') }
+    }
 
     $appsDir = $null
     foreach ($root in $roots) {
@@ -163,14 +167,19 @@ function Test-SkoopAppInstalled {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Name,
-        [string]$ScoopRoot = ''
+        [string]$ScoopRoot = '',
+        [switch]$RootOnly
     )
 
     $roots = @()
+    if ($RootOnly) {
+        if ($ScoopRoot) { $roots += $ScoopRoot }
+    } else {
     if ($ScoopRoot) { $roots += $ScoopRoot }
     if ($env:SCOOP) { $roots += $env:SCOOP }
     if ($env:USERPROFILE) { $roots += (Join-Path $env:USERPROFILE 'scoop') }
     if ($env:ProgramData) { $roots += (Join-Path $env:ProgramData 'scoop') }
+    }
     foreach ($root in $roots) {
         if ($root -and (Test-Path -LiteralPath (Join-Path $root ("apps\{0}\current" -f $Name)))) {
             return $true
@@ -202,13 +211,14 @@ function Invoke-SkoopPhases {
         [string]$ScoopRoot = '',
         [scriptblock]$AfterPhase,
         [string]$StopAfterPhase = '',
-        [int]$ThrottleLimit = 4
+        [int]$ThrottleLimit = 4,
+        [switch]$RootOnly
     )
 
     $plan = Get-SkoopPhasePlan -ManifestPath $ManifestPath -PhasesPath $PhasesPath
     $effectiveExclude = @($ExcludeApps)
     if ($SkipInstalled -and -not $Force) {
-        $installed = @(Get-SkoopInstalledApps -ScoopRoot $ScoopRoot)
+        $installed = @(Get-SkoopInstalledApps -ScoopRoot $ScoopRoot -RootOnly:$RootOnly)
         if ($installed.Count -gt 0) {
             $alreadyPresent = @()
             foreach ($app in @($plan.Manifest.apps)) {
@@ -257,6 +267,7 @@ function Invoke-SkoopPhases {
                         AppName   = [string]$name
                         Scoop     = $Scoop
                         ScoopRoot = $ScoopRoot
+                        RootOnly  = [bool]$RootOnly
                         File      = New-SkoopPhaseManifest -Plan $plan -Phase $phase -OnlyApps @($name) -NoBuckets
                     }
                 }
@@ -345,7 +356,7 @@ function Invoke-SkoopPhases {
                 }
                 foreach ($item in $items) {
                     $result = @($results | Where-Object { $_.Name -eq $item.Name })[0]
-                    if ($result.Exit -eq 0 -and -not (Test-SkoopAppInstalled -Name $item.AppName -ScoopRoot $item.ScoopRoot)) {
+                    if ($result.Exit -eq 0 -and -not (Test-SkoopAppInstalled -Name $item.AppName -ScoopRoot $item.ScoopRoot -RootOnly:$item.RootOnly)) {
                         $result.Exit = 1
                         $result.Error = "scoop import reported success but '$($item.AppName)' is not installed"
                     }
