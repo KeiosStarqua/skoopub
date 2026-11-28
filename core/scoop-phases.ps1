@@ -101,7 +101,17 @@ function New-SkoopPhaseManifest {
         $names = if ($OnlyApps.Count -gt 0) { $OnlyApps } else { @($Phase.Apps) }
         foreach ($name in $names) {
             if ($ExcludeApps -contains $name) { continue }
-            $apps += $Plan.AppsByName[$name]
+            $app = $Plan.AppsByName[$name]
+            if ($NoBuckets -and $app.Source -and $Plan.BucketsByName.ContainsKey([string]$app.Source)) {
+                # `scoop import` only maps Source to "<bucket>/<app>" when that
+                # bucket is declared in the same Scoopfile. Per-app manifests
+                # carry no buckets (they were added once by the buckets-only
+                # import), so qualify the source here or Scoop tries to install
+                # the bucket name itself - and still exits 0 on that failure.
+                $app = $app.PSObject.Copy()
+                $app.Source = "$($app.Source)/$($app.Name)"
+            }
+            $apps += $app
         }
     }
 
@@ -144,6 +154,29 @@ function Get-SkoopInstalledApps {
     return @(Get-ChildItem -LiteralPath $appsDir -Directory -ErrorAction SilentlyContinue |
         Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'current') } |
         ForEach-Object { $_.Name })
+}
+
+function Test-SkoopAppInstalled {
+    # `scoop import` ignores the exit code of its child `scoop install`, so a
+    # failed import still exits 0. Verify the app directory afterwards instead
+    # of trusting that exit code.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [string]$ScoopRoot = ''
+    )
+
+    $roots = @()
+    if ($ScoopRoot) { $roots += $ScoopRoot }
+    if ($env:SCOOP) { $roots += $env:SCOOP }
+    if ($env:USERPROFILE) { $roots += (Join-Path $env:USERPROFILE 'scoop') }
+    if ($env:ProgramData) { $roots += (Join-Path $env:ProgramData 'scoop') }
+    foreach ($root in $roots) {
+        if ($root -and (Test-Path -LiteralPath (Join-Path $root ("apps\{0}\current" -f $Name)))) {
+            return $true
+        }
+    }
+    return $false
 }
 
 function Invoke-SkoopPhases {
@@ -220,9 +253,11 @@ function Invoke-SkoopPhases {
                 $items = @()
                 foreach ($name in $pending) {
                     $items += [pscustomobject]@{
-                        Name  = [string]$name
-                        Scoop = $Scoop
-                        File  = New-SkoopPhaseManifest -Plan $plan -Phase $phase -OnlyApps @($name) -NoBuckets
+                        Name      = [string]$name
+                        AppName   = [string]$name
+                        Scoop     = $Scoop
+                        ScoopRoot = $ScoopRoot
+                        File      = New-SkoopPhaseManifest -Plan $plan -Phase $phase -OnlyApps @($name) -NoBuckets
                     }
                 }
                 $results = @()
@@ -272,6 +307,10 @@ function Invoke-SkoopPhases {
                 }
                 foreach ($item in $items) {
                     $result = @($results | Where-Object { $_.Name -eq $item.Name })[0]
+                    if ($result.Exit -eq 0 -and -not (Test-SkoopAppInstalled -Name $item.AppName -ScoopRoot $item.ScoopRoot)) {
+                        $result.Exit = 1
+                        $result.Error = "scoop import reported success but '$($item.AppName)' is not installed"
+                    }
                     if ($result.Error) { Write-Host "    $($result.Error)" -ForegroundColor Yellow }
                     $timings += [pscustomobject]@{
                         Name    = $result.Name
