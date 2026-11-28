@@ -563,9 +563,22 @@ function Restore-Vicinae {
         if (-not $DryRun) { [SkoopCredential]::Write('vicinae-master-key', $masterKey) }
     } else {
         Write-Log 'snapshot has no Vicinae master key (older snapshot); leaving the keychain alone'
-        if (-not $DryRun -and (Test-SqliteEncrypted -Path (Join-Path $stageRootVicinae 'data\vicinae.db')) -and
+        $dbDir = Join-Path $base 'data'
+        if (-not $DryRun -and (Test-Path -LiteralPath (Join-Path $dbDir 'vicinae.db')) -and
+            (Test-SqliteEncrypted -Path (Join-Path $dbDir 'vicinae.db')) -and
             -not [SkoopCredential]::Read('vicinae-master-key')) {
-            Write-Warn 'The restored Vicinae database is encrypted but no master key exists in Windows Credential Manager; vicinae-server will refuse to start. Delete %LOCALAPPDATA%\vicinae\data\vicinae.db* and clipboard.db* to reset it.'
+            # Without the key those databases are unreadable and vicinae-server
+            # fatals on startup, so reset them instead of leaving a dead launcher.
+            foreach ($name in @('vicinae.db', 'clipboard.db')) {
+                foreach ($suffix in @('', '-wal', '-shm')) {
+                    $file = Join-Path $dbDir ($name + $suffix)
+                    if (Test-Path -LiteralPath $file) {
+                        Remove-Item -LiteralPath $file -Force
+                        Write-Log ('removed unreadable vicinae/data/' + $name + $suffix)
+                    }
+                }
+            }
+            Write-Warn 'The restored Vicinae database is encrypted but its master key is in neither the snapshot nor Windows Credential Manager; reset the unreadable databases so vicinae-server can start (their history is lost).'
         }
     }
 }
