@@ -158,7 +158,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$script:LogPath = $null
+# NB: do not reset $LogPath here. In a script, $script:LogPath IS the -LogPath
+# parameter, so assigning $null silently discards it and every restore falls
+# back to a second-granularity default name (parallel children then collide).
 $remoteHome = $null
 $peer = $null
 $sshArgs = @()
@@ -811,7 +813,7 @@ function Start-VicinaeServer {
 # --- set up logging ------------------------------------------------------------
 $restoreRoot = if ($StagingDir) { $StagingDir } else { Join-Path $env:LOCALAPPDATA 'skoop\restore' }
 $runStamp = Get-Date -Format 'yyyy-MM-dd-HHmmss'
-$script:LogPath = if ($LogPath) { $LogPath } else { Join-Path $restoreRoot ('restore-' + $runStamp + '.log') }
+$script:LogPath = if ($LogPath) { $LogPath } else { Join-Path $restoreRoot ('restore-' + $runStamp + '-' + $PID + '.log') }
 $logParent = Split-Path -Parent $script:LogPath
 if (-not $logParent) { $logParent = '.' }
 New-Item -ItemType Directory -Force -Path $logParent | Out-Null
@@ -851,13 +853,16 @@ if ($Stamp) {
     $ssStamps = @($Stamp)
     $rsStamps = @($Stamp)
 } else {
-    $ffStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $FirefoxRemotePath)
-    $vcStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $VicinaeRemotePath)
-    $atStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $AtuinRemotePath)
-    $peStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $PearRemotePath)
-    $ocStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $OpenCodeRemotePath)
-    $ssStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $SshRemotePath)
-    $rsStamps = @(Get-LatestStamps -SshArgs $sshArgs -Path $ReposRemotePath)
+    # Only probe the snapshots this run will restore: every probe is a separate
+    # SSH round trip, so a `-Only atuin` child would otherwise make seven
+    # connections (and the four parallel children, 28) just to find a folder.
+    $ffStamps = if ($Only -contains 'firefox')  { @(Get-LatestStamps -SshArgs $sshArgs -Path $FirefoxRemotePath) } else { @() }
+    $vcStamps = if ($Only -contains 'vicinae')  { @(Get-LatestStamps -SshArgs $sshArgs -Path $VicinaeRemotePath) } else { @() }
+    $atStamps = if ($Only -contains 'atuin')    { @(Get-LatestStamps -SshArgs $sshArgs -Path $AtuinRemotePath) } else { @() }
+    $peStamps = if ($Only -contains 'pear')     { @(Get-LatestStamps -SshArgs $sshArgs -Path $PearRemotePath) } else { @() }
+    $ocStamps = if ($Only -contains 'opencode') { @(Get-LatestStamps -SshArgs $sshArgs -Path $OpenCodeRemotePath) } else { @() }
+    $ssStamps = if ($Only -contains 'ssh')      { @(Get-LatestStamps -SshArgs $sshArgs -Path $SshRemotePath) } else { @() }
+    $rsStamps = if ($Only -contains 'repos')    { @(Get-LatestStamps -SshArgs $sshArgs -Path $ReposRemotePath) } else { @() }
 }
 $ffStamp = if ($ffStamps.Count) { $ffStamps[0] } else { $null }
 $vcStamp = if ($vcStamps.Count) { $vcStamps[0] } else { $null }
