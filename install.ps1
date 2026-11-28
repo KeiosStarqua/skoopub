@@ -15,7 +15,9 @@
       Phase 1 finishes its own setup (Rio config, Herdr check) and opens Rio in
       ~/repos with Herdr running before Tailscale. The script re-launches itself
       under pwsh as soon as phase 1 installs it. -EssentialsOnly stops right
-      after the Tailscale phase.
+      after the Tailscale phase. Inside a phase, app imports run in parallel on
+      PowerShell 7 (up to -ThrottleLimit, default 4); 1 or 5.1 runs them
+      sequentially. Phase order and the per-phase callbacks never change.
     - Installs the Firefox policy once Firefox is installed:
       auto-installs Bitwarden, mymind and "I still don't care about cookies",
       shows the bookmarks toolbar, sets ChatGPT as the homepage, and disables
@@ -267,6 +269,11 @@
 .PARAMETER NoLog
     Do not write a log (also $env:SKOOP_NO_LOG=1).
 
+.PARAMETER ThrottleLimit
+    Maximum number of app imports running at once inside each phase (default 4;
+    also $env:SKOOP_THROTTLE). 1 runs them sequentially; Windows PowerShell 5.1
+    always runs sequentially. Phase order itself never changes.
+
 .EXAMPLE
     # One command: configure this machine, then pick a tailnet machine and add it to Herdr.
     powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
@@ -316,6 +323,8 @@ param(
     [switch]$NoWallpaper,
     [string]$LogPath = (Join-Path $env:LOCALAPPDATA ("skoop\install-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))),
     [switch]$NoLog,
+    # Concurrent app imports inside a phase; 1 = sequential (also SKOOP_THROTTLE).
+    [int]$ThrottleLimit = 4,
     [switch]$Help
 )
 
@@ -368,6 +377,7 @@ if ($NoGum)
 }
 if ($env:SKOOP_LOG_PATH) { $LogPath = $env:SKOOP_LOG_PATH }
 if ($env:SKOOP_NO_LOG -eq '1') { $NoLog = $true }
+if ($env:SKOOP_THROTTLE -match '^\d+$') { $ThrottleLimit = [int]$env:SKOOP_THROTTLE }
 
 # One transcript per run; the pwsh re-launch stops here and appends from the child.
 $script:SkoopLogActive = $false
@@ -413,8 +423,8 @@ Usage:
   .\install.ps1 -SkipHerdrConnect        # configure only
   irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
-Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -ForceFirefoxRestore -ForceAtuinRestore -SkipFirefoxRestore -SkipAtuinRestore -SkipSshRestore -SkipRepoClones -EssentialsOnly -BackupUser -SkipShutdownHook -LogPath <file> -NoLog -Help
-Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_FORCE_FIREFOX_RESTORE, SKOOP_FORCE_ATUIN_RESTORE, SKOOP_NO_FIREFOX_RESTORE, SKOOP_NO_ATUIN_RESTORE, SKOOP_NO_SSH_RESTORE, SKOOP_NO_REPO_CLONES, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL, SKOOP_LOG_PATH, SKOOP_NO_LOG
+Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -ForceFirefoxRestore -ForceAtuinRestore -SkipFirefoxRestore -SkipAtuinRestore -SkipSshRestore -SkipRepoClones -EssentialsOnly -BackupUser -SkipShutdownHook -LogPath <file> -NoLog -ThrottleLimit <n> -Help
+Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_FORCE_FIREFOX_RESTORE, SKOOP_FORCE_ATUIN_RESTORE, SKOOP_NO_FIREFOX_RESTORE, SKOOP_NO_ATUIN_RESTORE, SKOOP_NO_SSH_RESTORE, SKOOP_NO_REPO_CLONES, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL, SKOOP_LOG_PATH, SKOOP_NO_LOG, SKOOP_THROTTLE
 '@
     Stop-SkoopLog
     return
@@ -510,6 +520,9 @@ function Get-SkoopReLaunchArgs
     { $list += '-NoLog' 
     } else
     { $list += @('-LogPath', $LogPath) 
+    }
+    if ($ThrottleLimit -ne 4)
+    { $list += @('-ThrottleLimit', "$ThrottleLimit") 
     }
     return $list
 }
@@ -1978,7 +1991,7 @@ $phaseResult = Invoke-SkoopPhases -Scoop $scoop -ManifestPath $manifest -PhasesP
     } else
     { @() 
     }) `
-    -SkipInstalled -Force:$ForceInstall -ScoopRoot $env:SCOOP `
+    -SkipInstalled -Force:$ForceInstall -ScoopRoot $env:SCOOP -ThrottleLimit $ThrottleLimit `
     -StopAfterPhase $(if ($EssentialsOnly)
     { 'tailscale' 
     } else

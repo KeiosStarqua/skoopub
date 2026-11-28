@@ -15,7 +15,10 @@
     and/or -RestoreOpenCode, a connected node also restores that app from the
     latest acer-ubuntu snapshot through core/restore-backup.ps1 (-Only vicinae /
     pear / firefox / atuin / opencode). A marker under %LOCALAPPDATA%\skoop keeps
-    re-runs from downloading it again; failures are non-fatal. -ForceVicinaeRestore
+    re-runs from downloading it again. OpenCode is restored first; Vicinae, Pear
+    Desktop, Firefox and Atuin then run as parallel child processes and the parent
+    waits for all of them. Failures are non-fatal unless -FailOnFirefoxRestoreError
+    / -FailOnOpenCodeRestoreError is set. -ForceVicinaeRestore
     / -ForcePearDesktopRestore / -ForceFirefoxRestore / -ForceAtuinRestore /
     -ForceOpenCodeRestore repeat one app even when its marker exists. These run
     right after the Tailscale connect probe, so Firefox, Atuin and OpenCode may be
@@ -131,7 +134,9 @@ param(
     [switch]$ForceOpenCodeRestore,
     [switch]$FailOnFirefoxRestoreError,
     [switch]$FailOnOpenCodeRestoreError,
-    [string]$BackupUser = "$env:SKOOP_BACKUP_USER"
+    [string]$BackupUser = "$env:SKOOP_BACKUP_USER",
+    # Internal: per-app log path used when restores run as parallel child jobs.
+    [string]$RestoreLogPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -294,6 +299,7 @@ function Invoke-RestoreOnConnect {
     # bogus "-Only@firefox" SSH target.
     $restoreArgs = @{ Only = $App }
     if ($BackupUser) { $restoreArgs.User = $BackupUser }
+    if ($RestoreLogPath) { $restoreArgs.LogPath = $RestoreLogPath }
 
     # No CLI-existence guard for Firefox/Atuin: their restore is a plain file
     # copy and must work before the apps are installed in later phases.
@@ -377,22 +383,72 @@ if ($RestoreOpenCode -and $FailOnOpenCodeRestoreError -and -not $connected) {
         throw 'OpenCode auth restore is required but Tailscale is not connected - sign in to Tailscale, then re-run install.ps1.'
     }
 }
-if ($RestoreVicinae -and $connected) {
-    Invoke-RestoreOnConnect -App vicinae -Label 'Vicinae' -ForceRestore:$ForceVicinaeRestore -ForceSwitch 'ForceVicinaeRestore'
-}
-if ($RestorePearDesktop -and $connected) {
-    Invoke-RestoreOnConnect -App pear -Label 'Pear Desktop' -ForceRestore:$ForcePearDesktopRestore -ForceSwitch 'ForcePearDesktopRestore'
-}
 # OpenCode credentials first: the bootstraps require them to be in place before
 # the Firefox profile is copied and before gh auth prompts.
 if ($RestoreOpenCode -and $connected) {
     Invoke-RestoreOnConnect -App opencode -Label 'OpenCode' -ForceRestore:$ForceOpenCodeRestore -ForceSwitch 'ForceOpenCodeRestore' -MarkerName 'opencode-restore.done' -FailOnRestoreError:$FailOnOpenCodeRestoreError
 }
+
+# The remaining snapshots touch different apps, so run each in its own child
+# process and wait for all of them before tagging or returning. Firefox is
+# closed and relaunched by its own worker.
+$restoreJobs = @()
+if ($RestoreVicinae -and $connected) {
+    $restoreJobs += [pscustomobject]@{ App='vicinae'; Label='Vicinae'; Switch='-RestoreVicinae'; Marker=$null; Force=$ForceVicinaeRestore; ForceSwitch='ForceVicinaeRestore'; Fail=$false }
+}
+if ($RestorePearDesktop -and $connected) {
+    $restoreJobs += [pscustomobject]@{ App='pear'; Label='Pear Desktop'; Switch='-RestorePearDesktop'; Marker=$null; Force=$ForcePearDesktopRestore; ForceSwitch='ForcePearDesktopRestore'; Fail=$false }
+}
 if ($RestoreFirefox -and $connected) {
-    Invoke-RestoreOnConnect -App firefox -Label 'Firefox' -ForceRestore:$ForceFirefoxRestore -ForceSwitch 'ForceFirefoxRestore' -MarkerName 'firefox-restore.done' -FailOnRestoreError:$FailOnFirefoxRestoreError
+    $restoreJobs += [pscustomobject]@{ App='firefox'; Label='Firefox'; Switch='-RestoreFirefox'; Marker='firefox-restore.done'; Force=$ForceFirefoxRestore; ForceSwitch='ForceFirefoxRestore'; Fail=[bool]$FailOnFirefoxRestoreError }
 }
 if ($RestoreAtuin -and $connected) {
-    Invoke-RestoreOnConnect -App atuin -Label 'Atuin' -ForceRestore:$ForceAtuinRestore -ForceSwitch 'ForceAtuinRestore' -MarkerName 'atuin-restore.done'
+    $restoreJobs += [pscustomobject]@{ App='atuin'; Label='Atuin'; Switch='-RestoreAtuin'; Marker='atuin-restore.done'; Force=$ForceAtuinRestore; ForceSwitch='ForceAtuinRestore'; Fail=$false }
+}
+
+if ($restoreJobs.Count -eq 1) {
+    $job = $restoreJobs[0]
+    $params = @{ App = $job.App; Label = $job.Label; ForceRestore = $job.Force; ForceSwitch = $job.ForceSwitch; FailOnRestoreError = $job.Fail }
+    if ($job.Marker) { $params.MarkerName = $job.Marker }
+    Invoke-RestoreOnConnect @params
+} elseif ($restoreJobs.Count -gt 1) {
+    Write-Step ('Restoring {0} backups in parallel' -f $restoreJobs.Count)
+    $exe = (Get-Process -Id $PID).Path
+    if (-not $exe) {
+        $exe = if ($PSVersionTable.PSEdition -eq 'Core') { Join-Path $PSHOME 'pwsh.exe' } else { Join-Path $PSHOME 'powershell.exe' }
+    }
+    $scriptPath = if ($PSCommandPath) { $PSCommandPath } else { Join-Path $PSScriptRoot 'configure.ps1' }
+    $running = @()
+    try {
+        foreach ($job in $restoreJobs) {
+            $logPath = Join-Path $env:LOCALAPPDATA ('skoop\restore\restore-{0}-{1}.log' -f $job.App, (Get-Date -Format 'yyyy-MM-dd-HHmmss'))
+            $argLine = '-NoLogo -NoProfile -ExecutionPolicy Bypass -File "{0}" -SkipTag {1} -RestoreLogPath "{2}"' -f $scriptPath, $job.Switch, $logPath
+            if ($BackupUser) { $argLine += ' -BackupUser "{0}"' -f $BackupUser }
+            if ($job.Force) { $argLine += ' -' + $job.ForceSwitch }
+            if ($job.Fail) { $argLine += ' -FailOnFirefoxRestoreError' }
+            $running += [pscustomobject]@{ Job = $job; Process = (Start-Process -FilePath $exe -ArgumentList $argLine -NoNewWindow -PassThru) }
+        }
+    } catch {
+        if ($running.Count -gt 0) {
+            foreach ($entry in $running) { $entry.Process.WaitForExit() }
+            throw
+        }
+        Write-Warn "parallel restores unavailable ($($_.Exception.Message)) - running sequentially"
+        foreach ($job in $restoreJobs) {
+            $params = @{ App = $job.App; Label = $job.Label; ForceRestore = $job.Force; ForceSwitch = $job.ForceSwitch; FailOnRestoreError = $job.Fail }
+            if ($job.Marker) { $params.MarkerName = $job.Marker }
+            Invoke-RestoreOnConnect @params
+        }
+        $restoreJobs = @()
+    }
+    foreach ($entry in $running) {
+        $entry.Process.WaitForExit()
+        if ($entry.Process.ExitCode -ne 0) {
+            $message = "$($entry.Job.Label) auto-restore failed (exit $($entry.Process.ExitCode))."
+            if ($entry.Job.Fail) { throw $message }
+            Write-Warn "$message (non-fatal)"
+        }
+    }
 }
 
 if ($SkipTag) { Write-Ok 'Tailnet tagging skipped (-SkipTag).'; return }

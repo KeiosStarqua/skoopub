@@ -1,10 +1,13 @@
 # Install order
 
-`install.ps1` runs every step **sequentially**; there are no parallel install
-groups. Package order comes from `manifests/phases.json` (phase order, then app
-order inside a phase) and versions from `manifests/scoop.json`. This file mirrors
-the script; when the order changes, change the manifest or `install.ps1` first and
-then update this page.
+`install.ps1` runs every step **sequentially**; there is no DAG. Package order
+comes from `manifests/phases.json` (phase order, then app order inside a phase)
+and versions from `manifests/scoop.json`. On PowerShell 7, app imports **within
+one phase** may run concurrently (default `-ThrottleLimit 4`); the script waits
+for all of them before the next phase or callback, so phase order is unchanged.
+`-ThrottleLimit 1` and Windows PowerShell 5.1 run app imports sequentially.
+This file mirrors the script; when the order changes, change the manifest or
+`install.ps1` first and then update this page.
 
 `core/bootstrap.ps1` is the older `-File` bootstrap and does not follow this list.
 
@@ -35,8 +38,9 @@ Installs Tailscale, then the callback does everything that needs the network:
    restores need the CLI / the browser profile; skipped with `-EssentialsOnly`).
 2. Start the Tailscale daemon.
 3. `apps/tailscale/configure.ps1 -SignIn`: `tailscale up --qr`, wait until online,
-   then restore Vicinae, Pear Desktop, OpenCode, Firefox and Atuin from
-   `acer-ubuntu`, then advertise `tag:public-client`.
+   then restore OpenCode first, followed by Vicinae, Pear Desktop, Firefox and
+   Atuin as parallel child processes (each with its own restore log), then
+   advertise `tag:public-client`.
 4. Restore the SSH key (`core/restore-backup.ps1 -Only ssh`).
 5. Restore the registered repo list (`-Only repos`).
 6. Apply the Vicinae config (Ctrl+Space) and autostart on top of the restored data.
@@ -58,10 +62,11 @@ vscode, zed, lazygit, rustup, mingw, bun.
 firefox, sharex, grok-bot, pear-desktop, chatgpt, blender, yasb, komorebi, whkd,
 cava, ollama-full, unikey, kbots.
 
-Each phase imports its apps **one at a time** in the order above; the phase's
-buckets are added on the first app only. Apps already installed are left out
-(`-ForceInstall` re-imports them). A phase 1 failure aborts the run; later phase
-failures are reported and the remaining phases still run.
+Each phase adds its buckets first, then imports its apps in the order above —
+concurrently on PowerShell 7 (up to `-ThrottleLimit`, so completion order can
+differ from the list). Apps already installed are left out (`-ForceInstall`
+re-imports them). A phase 1 failure aborts the run; later phase failures are
+reported and the remaining phases still run.
 
 ## Before the phases (every run)
 
@@ -113,6 +118,8 @@ Why these boundaries matter:
 - Vicinae config/autostart after its restore, so the repo-managed keybinds win.
 - YASB before the wallpaper step, because that step reuses the wallpaper clone.
 - Tray apps last, so nothing they spawn is disturbed by an Explorer restart.
+- A phase boundary is a barrier: buckets and every app import in that phase
+  finish (or fail) before `AfterPhase` or the next phase starts.
 
 ## Where to change the order
 
@@ -120,4 +127,6 @@ Why these boundaries matter:
   machine-readable plan — there is no separate `install-plan.json` or DAG, and
   `core/scoop-phases.ps1` rejects unassigned, duplicated or unknown apps.
 - Step order: the numbered `# --- N.` sections in `install.ps1`; keep the help
-  text, `README.md` and `AGENTS.md` in sync.
+  text, `README.md`, `AGENTS.md` and this file in sync.
+- Concurrency inside a phase: `-ThrottleLimit` on `install.ps1` /
+  `Invoke-SkoopPhases` (or `SKOOP_THROTTLE`); it never changes the order above.

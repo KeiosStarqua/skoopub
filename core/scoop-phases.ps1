@@ -91,15 +91,18 @@ function New-SkoopPhaseManifest {
         [Parameter(Mandatory)]$Phase,
         [string[]]$ExcludeApps = @(),
         [string[]]$OnlyApps = @(),
+        [switch]$BucketsOnly,
         [switch]$NoBuckets,
         [string]$TempDir = $env:TEMP
     )
 
     $apps = @()
-    $names = if ($OnlyApps.Count -gt 0) { $OnlyApps } else { @($Phase.Apps) }
-    foreach ($name in $names) {
-        if ($ExcludeApps -contains $name) { continue }
-        $apps += $Plan.AppsByName[$name]
+    if (-not $BucketsOnly) {
+        $names = if ($OnlyApps.Count -gt 0) { $OnlyApps } else { @($Phase.Apps) }
+        foreach ($name in $names) {
+            if ($ExcludeApps -contains $name) { continue }
+            $apps += $Plan.AppsByName[$name]
+        }
     }
 
     $buckets = @()
@@ -108,7 +111,7 @@ function New-SkoopPhaseManifest {
     }
 
     $payload = [pscustomobject]@{ buckets = $buckets; apps = $apps }
-    $suffix = if ($OnlyApps.Count -eq 1) { '-' + $OnlyApps[0] } else { '' }
+    $suffix = if ($BucketsOnly) { '-buckets' } elseif ($OnlyApps.Count -eq 1) { '-' + $OnlyApps[0] } else { '' }
     $path = Join-Path $TempDir ('skoop-phase-{0}{1}.json' -f $Phase.Name, $suffix)
     $json = $payload | ConvertTo-Json -Depth 20
 
@@ -151,7 +154,9 @@ function Invoke-SkoopPhases {
         which is what -EssentialsOnly uses. -SkipInstalled drops apps that are
         already present in Scoop from the generated manifests, so re-runs only
         import what is missing; -Force defeats that check (but never overrides
-        an explicit -ExcludeApps such as an existing UniKey).
+        an explicit -ExcludeApps such as an existing UniKey). Apps within one
+        phase are imported in parallel on PowerShell 7 (bounded by
+        -ThrottleLimit); 1 means sequential, and 5.1 always runs sequentially.
     #>
     [CmdletBinding()]
     param(
@@ -163,7 +168,8 @@ function Invoke-SkoopPhases {
         [switch]$Force,
         [string]$ScoopRoot = '',
         [scriptblock]$AfterPhase,
-        [string]$StopAfterPhase = ''
+        [string]$StopAfterPhase = '',
+        [int]$ThrottleLimit = 4
     )
 
     $plan = Get-SkoopPhasePlan -ManifestPath $ManifestPath -PhasesPath $PhasesPath
@@ -201,26 +207,79 @@ function Invoke-SkoopPhases {
             $timer.Stop()
             $timer = $null
         } else {
-            for ($i = 0; $i -lt $pending.Count; $i++) {
-                $name = [string]$pending[$i]
-                # Add the phase's buckets once, on the first app's import.
-                $appFile = New-SkoopPhaseManifest -Plan $plan -Phase $phase `
-                    -OnlyApps @($name) -NoBuckets:($i -gt 0)
-                $appTimer = [System.Diagnostics.Stopwatch]::StartNew()
-                try {
-                    & $Scoop import $appFile
-                    $appExit = $LASTEXITCODE
-                } catch {
-                    $appExit = 1
-                    Write-Host "    $($_.Exception.Message)" -ForegroundColor Yellow
+            # Buckets must exist before any app import starts.
+            $bucketFile = New-SkoopPhaseManifest -Plan $plan -Phase $phase -BucketsOnly
+            try {
+                & $Scoop import $bucketFile
+                $exit = $LASTEXITCODE
+            } catch {
+                $exit = 1
+                Write-Host "    $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+            if ($exit -eq 0) {
+                $items = @()
+                foreach ($name in $pending) {
+                    $items += [pscustomobject]@{
+                        Name  = [string]$name
+                        Scoop = $Scoop
+                        File  = New-SkoopPhaseManifest -Plan $plan -Phase $phase -OnlyApps @($name) -NoBuckets
+                    }
                 }
-                $appTimer.Stop()
-                $timings += [pscustomobject]@{
-                    Name    = $name
-                    Seconds = $appTimer.Elapsed.TotalSeconds
-                    Ok      = ($appExit -eq 0)
+                $results = @()
+                if ($ThrottleLimit -gt 1 -and $PSVersionTable.PSVersion.Major -ge 7) {
+                    $results = @($items | ForEach-Object -Parallel {
+                        $item = $_
+                        $scoopExe = $item.Scoop
+                        $file = $item.File
+                        $watch = [System.Diagnostics.Stopwatch]::StartNew()
+                        $errorText = ''
+                        try {
+                            & $scoopExe import $file
+                            $code = $LASTEXITCODE
+                        } catch {
+                            $code = 1
+                            $errorText = $_.Exception.Message
+                        }
+                        $watch.Stop()
+                        [pscustomobject]@{
+                            Name    = $item.Name
+                            Seconds = $watch.Elapsed.TotalSeconds
+                            Exit    = $code
+                            Error   = $errorText
+                        }
+                    } -ThrottleLimit $ThrottleLimit)
+                } else {
+                    foreach ($item in $items) {
+                        $scoopExe = $item.Scoop
+                        $file = $item.File
+                        $watch = [System.Diagnostics.Stopwatch]::StartNew()
+                        $errorText = ''
+                        try {
+                            & $scoopExe import $file
+                            $code = $LASTEXITCODE
+                        } catch {
+                            $code = 1
+                            $errorText = $_.Exception.Message
+                        }
+                        $watch.Stop()
+                        $results += [pscustomobject]@{
+                            Name    = $item.Name
+                            Seconds = $watch.Elapsed.TotalSeconds
+                            Exit    = $code
+                            Error   = $errorText
+                        }
+                    }
                 }
-                if ($appExit -ne 0) { $exit = $appExit; break }
+                foreach ($item in $items) {
+                    $result = @($results | Where-Object { $_.Name -eq $item.Name })[0]
+                    if ($result.Error) { Write-Host "    $($result.Error)" -ForegroundColor Yellow }
+                    $timings += [pscustomobject]@{
+                        Name    = $result.Name
+                        Seconds = $result.Seconds
+                        Ok      = ($result.Exit -eq 0)
+                    }
+                    if ($result.Exit -ne 0 -and $exit -eq 0) { $exit = $result.Exit }
+                }
             }
             $timer.Stop()
         }
