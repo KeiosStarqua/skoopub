@@ -589,6 +589,18 @@ function Initialize-SkoopStorage {
         foreach ($dir in @($Root) + @($paths.Values | Select-Object -Unique)) {
             New-Item -ItemType Directory -Force -Path $dir | Out-Null
         }
+        if (-not $Fresh -and $existingRoot) {
+            # Partial migration: apps live in the new root but the Scoop CLI
+            # still runs from the old one. Scoop resolves its shim template
+            # under $SCOOP, so copy the Scoop app itself or every new shim
+            # creation fails with "Cannot find path ...\shims\kiennq\shim.exe".
+            $srcScoop = Join-Path $existingRoot 'apps\scoop'
+            $dstScoop = Join-Path $Root 'apps\scoop'
+            if ((Test-Path -LiteralPath $srcScoop) -and -not (Test-Path -LiteralPath (Join-Path $dstScoop 'current\lib\core.ps1'))) {
+                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dstScoop) | Out-Null
+                Copy-Item -LiteralPath $srcScoop -Destination $dstScoop -Recurse -Force
+            }
+        }
         foreach ($entry in $paths.GetEnumerator()) { Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value }
         try {
             New-Item -ItemType Directory -Force -Path (Split-Path -Parent $configPath) | Out-Null
@@ -2910,6 +2922,23 @@ if (Test-Path $librescollConfig)
 } else
 {
     Write-Ok 'apps/librescoll/configure.ps1 not found - skipping'
+}
+
+# --- 22a. Repair shims for the partial-migration root ------------------------
+if ($script:SkoopPartialMigrate)
+{
+    $scoopCmd = Join-Path $shimDir 'scoop.cmd'
+    if (Test-Path -LiteralPath $scoopCmd)
+    {
+        try
+        {
+            Write-Step 'Rebuilding shims for apps installed in the new root'
+            & $scoopCmd reset * 2>$null | Out-Null
+        } catch
+        {
+            Write-Host "    shim rebuild failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
 }
 
 # --- 22b. Background repo clones started in the tailscale phase --------------
