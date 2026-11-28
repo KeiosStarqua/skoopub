@@ -31,17 +31,19 @@ if ($SkipLogin -and $ForceLogin) { throw '-SkipLogin and -ForceLogin cannot be c
 # --- 1. Locate gh (or install it with Scoop) ----------------------------------
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     $shimDir = @(
+        (Join-Path $env:SCOOP 'shims'),
         (Join-Path $env:USERPROFILE 'scoop\shims'),
         (Join-Path $env:ProgramData 'scoop\shims')
-    ) | Where-Object { Test-Path (Join-Path $_ 'scoop.cmd') } | Select-Object -First 1
+    ) | Where-Object { $_ -and (Test-Path (Join-Path $_ 'scoop.cmd')) } | Select-Object -First 1
     if ($shimDir) { $env:Path = "$shimDir;$env:Path" }
 }
 
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     $scoopCmd = @(
+        (Join-Path $env:SCOOP 'shims\scoop.cmd'),
         (Join-Path $env:USERPROFILE 'scoop\shims\scoop.cmd'),
         (Join-Path $env:ProgramData 'scoop\shims\scoop.cmd')
-    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
     if (-not $scoopCmd) {
         throw 'gh not found. Run install.ps1 first (it installs gh via scoop.json), or install GitHub CLI manually.'
     }

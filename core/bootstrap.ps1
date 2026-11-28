@@ -6,7 +6,8 @@
 # Use -ForceUniKey to replace an already installed UniKey with the Scoop build.
 # Configures UniKey (Unicode + VNI, Vietnamese on, no startup dialog, autostart)
 # via apps\unikey\configure.ps1; -Export / -Restore back up its settings.
-# Use -SkipGhLogin to avoid the interactive `gh auth login` prompt.
+# Signs in to Tailscale and offers `gh auth login` before cloning skoopub into
+# ~/repos; use -SkipGhLogin to avoid the interactive prompt.
 # Sets the global git author identity to Keios <git@taquangkhoi.com>.
 # Also applies the repo-managed Zed config from apps\zed via configure.ps1.
 # Also applies the repo-managed Rio config (font size / zoom 16) via apps\rio\configure.ps1.
@@ -477,6 +478,38 @@ Enable-TaskManager
 
 # 4. Buckets are git repos, so git must exist before the phase import.
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { scoop install git }
+
+# 4a. Get online before cloning: Tailscale sign-in and gh auth (for private
+#     checkouts) come first. Both are idempotent and non-fatal on failure.
+$ghAuth = Join-Path $repo 'apps\github\setup-auth.ps1'
+$tailscaleConfig = Join-Path $repo 'apps\tailscale\configure.ps1'
+if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) {
+    $officialCli = @(
+        (Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Tailscale\tailscale.exe')
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+    if (-not $officialCli) {
+        if (-not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE 'scoop\buckets\extras\bucket'))) {
+            try { scoop bucket add extras }
+            catch { Write-Host "Could not add the extras bucket (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+        }
+        try {
+            Write-Host 'Installing Tailscale before cloning...'
+            scoop install tailscale
+            if ($LASTEXITCODE -ne 0) { Write-Host "scoop install tailscale failed (non-fatal): exit $LASTEXITCODE" -ForegroundColor Yellow }
+        }
+        catch { Write-Host "Tailscale install failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+    }
+}
+Start-TailscaleDaemon
+if (Test-Path $tailscaleConfig) {
+    try { & $tailscaleConfig -SignIn }
+    catch { Write-Host "Tailscale sign-in failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+if (Test-Path $ghAuth) {
+    try { & $ghAuth -SkipLogin:$SkipGhLogin }
+    catch { Write-Host "GitHub auth setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
 Ensure-SkoopClone
 
 # 5. Install manifests/scoop.json in phases: phase 1 is the fast essentials
@@ -529,7 +562,6 @@ if (Test-Path $unikeyConfig) {
 #    earlier success a no-op), then tag this device in the tailnet (idempotent
 #    and non-fatal when not signed in).
 Start-TailscaleDaemon
-$tailscaleConfig = Join-Path $repo 'apps\tailscale\configure.ps1'
 if (Test-Path $tailscaleConfig) {
     try { & $tailscaleConfig -RestoreOpenCode -BackupUser $BackupUser @restoreAppsArgs }
     catch { Write-Host "OpenCode / Firefox / Atuin restore or tailnet tagging failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
@@ -573,12 +605,7 @@ if (Test-Path $sharexFix) {
     }
 }
 
-# 10. Offer gh auth login (if needed), then wire gh into git as credential helper.
-$ghAuth = Join-Path $repo 'apps\github\setup-auth.ps1'
-if (Test-Path $ghAuth) {
-    try { & $ghAuth -SkipLogin:$SkipGhLogin }
-    catch { Write-Host "GitHub auth setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
-}
+# 10. GitHub auth already ran in step 4a, before the skoopub clone.
 
 # 11. Set the git author identity used for commits.
 $gitIdentity = Join-Path $repo 'apps\git\setup-identity.ps1'
