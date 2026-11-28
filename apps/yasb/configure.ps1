@@ -333,21 +333,6 @@ Ensure-ThemeFonts -StylesPath (Join-Path $ConfigDir 'styles.css')
 # .env is created near the top (before the theme patch); an existing one is never
 # overwritten here - it may hold the user's API key, location and wallpaper path.
 
-# The wallpapers widget reads YASB_WALLPAPER_DIR. Clone the community collection
-# once and point the env var at its images folder. Non-fatal when offline.
-$wallpapersScript = Join-Path $SourceDir 'setup-wallpapers.ps1'
-if ($NoWallpapers -or $env:SKOOP_NO_WALLPAPERS -eq '1') {
-    Write-Host 'Skipping wallpaper setup (-NoWallpapers).' -ForegroundColor DarkGray
-} elseif (Test-Path -LiteralPath $wallpapersScript) {
-    try {
-        & $wallpapersScript -EnvFile $envFile
-    } catch {
-        Write-Host "    Wallpaper setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-} else {
-    Write-Host 'setup-wallpapers.ps1 not found - YASB_WALLPAPER_DIR left unchanged.' -ForegroundColor Yellow
-}
-
 function Resolve-Tool {
     param([string]$Name)
     $command = Get-Command $Name -ErrorAction SilentlyContinue
@@ -361,38 +346,60 @@ function Resolve-Tool {
 }
 
 $yasbc = Resolve-Tool 'yasbc'
-if (-not $yasbc) {
-    Write-Host 'yasbc not found; YASB config deployed but not started.' -ForegroundColor Yellow
-    return
-}
-
 $colorsFile = Join-Path $ConfigDir 'yasb_colors.css'
 $colorsExisted = Test-Path -LiteralPath $colorsFile
-$running = [bool](Get-Process -Name yasb -ErrorAction SilentlyContinue)
-if ($running -and $Restart) {
-    Write-Host 'Restarting YASB...'
-    & $yasbc stop 2>&1 | ForEach-Object { Write-Host "    $_" }
-    Start-Sleep -Milliseconds 700
-    $running = $false
-}
-if (-not $running) {
-    Write-Host 'Starting YASB...'
-    & $yasbc start 2>&1 | ForEach-Object { Write-Host "    $_" }
-    Start-Sleep -Seconds 2
+if ($yasbc) {
+    $running = [bool](Get-Process -Name yasb -ErrorAction SilentlyContinue)
+    if ($running -and $Restart) {
+        Write-Host 'Restarting YASB...'
+        & $yasbc stop 2>&1 | ForEach-Object { Write-Host "    $_" }
+        Start-Sleep -Milliseconds 700
+        $running = $false
+    }
+    if (-not $running) {
+        Write-Host 'Starting YASB...'
+        & $yasbc start 2>&1 | ForEach-Object { Write-Host "    $_" }
+        Start-Sleep -Seconds 2
+    }
+
+    # With system_colors: true, YASB generates yasb_colors.css after the first CSS
+    # pass, so a theme that @imports it can log a missing-file error on first run.
+    # Reload once when the file appeared during this run so the import resolves.
+    if (-not $colorsExisted -and (Test-Path -LiteralPath $colorsFile) -and
+        (Get-Process -Name yasb -ErrorAction SilentlyContinue)) {
+        Write-Host 'Reloading YASB so the generated yasb_colors.css is picked up...'
+        & $yasbc reload 2>&1 | ForEach-Object { Write-Host "    $_" }
+        Start-Sleep -Milliseconds 600
+    }
+} else {
+    Write-Host 'yasbc not found; YASB config deployed but not started.' -ForegroundColor Yellow
 }
 
-# With system_colors: true, YASB generates yasb_colors.css after the first CSS
-# pass, so a theme that @imports it can log a missing-file error on first run.
-# Reload once when the file appeared during this run so the import resolves.
-if (-not $colorsExisted -and (Test-Path -LiteralPath $colorsFile) -and
+# The wallpapers widget reads YASB_WALLPAPER_DIR, and the community collection is
+# a ~645 MB shallow clone: start the bar first so the clone runs behind a working
+# status bar, then reload YASB when the env value changed so the gallery sees it.
+$wallpaperDirBefore = Get-YasbEnvValue 'YASB_WALLPAPER_DIR'
+$wallpapersScript = Join-Path $SourceDir 'setup-wallpapers.ps1'
+if ($NoWallpapers -or $env:SKOOP_NO_WALLPAPERS -eq '1') {
+    Write-Host 'Skipping wallpaper setup (-NoWallpapers).' -ForegroundColor DarkGray
+} elseif (Test-Path -LiteralPath $wallpapersScript) {
+    try {
+        & $wallpapersScript -EnvFile $envFile
+    } catch {
+        Write-Host "    Wallpaper setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host 'setup-wallpapers.ps1 not found - YASB_WALLPAPER_DIR left unchanged.' -ForegroundColor Yellow
+}
+if ($yasbc -and (Get-YasbEnvValue 'YASB_WALLPAPER_DIR') -ne $wallpaperDirBefore -and
     (Get-Process -Name yasb -ErrorAction SilentlyContinue)) {
-    Write-Host 'Reloading YASB so the generated yasb_colors.css is picked up...'
+    Write-Host 'Reloading YASB so the wallpaper folder is picked up...'
     & $yasbc reload 2>&1 | ForEach-Object { Write-Host "    $_" }
     Start-Sleep -Milliseconds 600
 }
 
 if (Get-Process -Name yasb -ErrorAction SilentlyContinue) {
     Write-Host "YASB is running with the '$themeName' theme ($ConfigDir)." -ForegroundColor Green
-} else {
+} elseif ($yasbc) {
     Write-Host 'YASB did not stay running; check `yasbc log`.' -ForegroundColor Yellow
 }
