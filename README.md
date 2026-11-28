@@ -40,6 +40,8 @@ The install is **phased** so the useful parts land first. Phase 1 (`core-termina
 
 When **pwsh** (PowerShell 7) is already installed, `install.ps1` re-launches itself under it with the same options — Windows PowerShell 5.1 mangles native stderr (gum's TUI) and reads BOM-less UTF-8 as ANSI. If pwsh is not there yet, it starts phase 1 under 5.1 and re-launches under 7 as soon as phase 1 installs it. Pass `-NoPwsh` (or `$env:SKOOP_NO_PWSH=1`) to stay on 5.1; a piped `irm … | iex` run cannot re-launch and stays in the evaluating shell.
 
+Every run writes a console transcript to `%LOCALAPPDATA%\skoop\install-<timestamp>.log` (including the pwsh re-launch, which appends to the same file). Override it with `-LogPath <file>` (or `$env:SKOOP_LOG_PATH` for piped runs) and opt out with `-NoLog` (or `$env:SKOOP_NO_LOG=1`). Transcripts capture the script's own messages; under Windows PowerShell 5.1 they omit native command stdout (Scoop, git, gh), so the log is most detailed when pwsh is used. The log may contain login URLs/QRs and other terminal output, so treat it as private.
+
 Run this in PowerShell (no admin required):
 
 ```powershell

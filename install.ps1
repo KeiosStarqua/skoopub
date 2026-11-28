@@ -170,6 +170,10 @@
     correctly. Use -NoPwsh (or $env:SKOOP_NO_PWSH=1) to stay on 5.1, e.g. before
     pwsh is installed. Piped runs cannot re-launch (there is no script file) and
     stay in the shell that evaluates them.
+    - Writes a transcript of the run to %LOCALAPPDATA%\skoop\install-<timestamp>.log
+      (-LogPath overrides it, -NoLog opts out); the pwsh re-launch shares that file.
+      PowerShell 5.1 transcripts capture the script's own messages but not native
+      command stdout (e.g. Scoop/gh), so log details are fullest under pwsh.
 
 .PARAMETER RepoRawBase
     Raw URL base used to fetch scoop.json / profile.ps1 when the script is piped in
@@ -258,6 +262,14 @@
     Do not restore Atuin config/history from the backup (also
     $env:SKOOP_NO_ATUIN_RESTORE=1).
 
+.PARAMETER LogPath
+    File to record the console output in. Defaults to
+    %LOCALAPPDATA%\skoop\install-<timestamp>.log; the pwsh re-launch appends to
+    the same file (also $env:SKOOP_LOG_PATH for piped runs).
+
+.PARAMETER NoLog
+    Do not write a log (also $env:SKOOP_NO_LOG=1).
+
 .EXAMPLE
     # One command: configure this machine, then pick a tailnet machine and add it to Herdr.
     powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
@@ -305,6 +317,8 @@ param(
     [string]$Wallpaper = "$env:SKOOP_WALLPAPER",
     # Skip clearing the wallpaper policy and setting a desktop wallpaper.
     [switch]$NoWallpaper,
+    [string]$LogPath = (Join-Path $env:LOCALAPPDATA ("skoop\install-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))),
+    [switch]$NoLog,
     [switch]$Help
 )
 
@@ -355,6 +369,34 @@ if ($env:SKOOP_FORCE_INSTALL -eq '1')
 if ($NoGum)
 { $env:SKOOP_NO_GUM = '1' 
 }
+if ($env:SKOOP_LOG_PATH) { $LogPath = $env:SKOOP_LOG_PATH }
+if ($env:SKOOP_NO_LOG -eq '1') { $NoLog = $true }
+
+# One transcript per run; the pwsh re-launch stops here and appends from the child.
+$script:SkoopLogActive = $false
+function Start-SkoopLog
+{
+    if ($NoLog -or $script:SkoopLogActive) { return }
+    try
+    {
+        $dir = Split-Path -Parent $LogPath
+        if ($dir -and -not (Test-Path -LiteralPath $dir))
+        { New-Item -ItemType Directory -Path $dir -Force | Out-Null 
+        }
+        Start-Transcript -LiteralPath $LogPath -Append -ErrorAction Stop | Out-Null
+        $script:SkoopLogActive = $true
+    } catch
+    {
+        Write-Host "    logging disabled: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+function Stop-SkoopLog
+{
+    if (-not $script:SkoopLogActive) { return }
+    try { Stop-Transcript -ErrorAction Stop | Out-Null } catch { }
+    $script:SkoopLogActive = $false
+}
+Start-SkoopLog
 
 # `--help` arrives in $args with CmdletBinding; handle it before any side effect.
 # --help binds to the first positional string parameter ($RepoRawBase) when
@@ -374,9 +416,10 @@ Usage:
   .\install.ps1 -SkipHerdrConnect        # configure only
   irm https://raw.githubusercontent.com/KeiosStarqua/skoopub/main/install.ps1 | iex
 
-Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -ForceFirefoxRestore -ForceAtuinRestore -SkipFirefoxRestore -SkipAtuinRestore -SkipSshRestore -SkipRepoClones -EssentialsOnly -BackupUser -SkipShutdownHook -Help
-Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_FORCE_FIREFOX_RESTORE, SKOOP_FORCE_ATUIN_RESTORE, SKOOP_NO_FIREFOX_RESTORE, SKOOP_NO_ATUIN_RESTORE, SKOOP_NO_SSH_RESTORE, SKOOP_NO_REPO_CLONES, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL
+Options: -ForceUniKey -ForceInstall -SkipGhLogin -HerdrPeer -Peer -HerdrUser -SkipHerdrConnect -Menu -NoMenu -NoGum -NoPwsh -NoAutoHerdr -MouseDpi <dpi> -SkipMouseDpi -ForceFirefoxRestore -ForceAtuinRestore -SkipFirefoxRestore -SkipAtuinRestore -SkipSshRestore -SkipRepoClones -EssentialsOnly -BackupUser -SkipShutdownHook -LogPath <file> -NoLog -Help
+Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, SKOOP_MENU, SKOOP_NO_MENU, SKOOP_NO_GUM, SKOOP_NO_PWSH, SKOOP_NO_AUTO_HERDR, SKOOP_MOUSE_DPI, SKOOP_NO_MOUSE_DPI, SKOOP_FORCE_FIREFOX_RESTORE, SKOOP_FORCE_ATUIN_RESTORE, SKOOP_NO_FIREFOX_RESTORE, SKOOP_NO_ATUIN_RESTORE, SKOOP_NO_SSH_RESTORE, SKOOP_NO_REPO_CLONES, SKOOP_ESSENTIALS_ONLY, SKOOP_BACKUP_USER, SKOOP_FORCE_INSTALL, SKOOP_LOG_PATH, SKOOP_NO_LOG
 '@
+    Stop-SkoopLog
     return
 }
 
@@ -466,6 +509,11 @@ function Get-SkoopReLaunchArgs
     if ($BackupUser)
     { $list += @('-BackupUser', $BackupUser) 
     }
+    if ($NoLog)
+    { $list += '-NoLog' 
+    } else
+    { $list += @('-LogPath', $LogPath) 
+    }
     return $list
 }
 
@@ -491,10 +539,12 @@ function Invoke-PwshReLaunch
     $env:SKOOP_PWSH_RELAUNCHED = '1'
     try
     {
+        Stop-SkoopLog
         & $pwsh.Source @(Get-SkoopReLaunchArgs -SkipMenu:$SkipMenu)
         exit $LASTEXITCODE
     } catch
     {
+        Start-SkoopLog
         Write-Host "    could not start pwsh ($($_.Exception.Message)) - continuing on Windows PowerShell 5.1" -ForegroundColor Yellow
         return $false
     }
@@ -1499,6 +1549,7 @@ if ($HerdrPeer)
 if ($runMode -eq 'quit')
 {
     Write-Host 'Cancelled - nothing changed.' -ForegroundColor Yellow
+    Stop-SkoopLog
     return
 }
 if ($runMode -eq 'essentials')
@@ -1625,6 +1676,7 @@ if ($runMode -eq 'herdr')
     Connect-HerdrRemote
     Write-Host ''
     Write-Host 'Done. Herdr machine saved - open Herdr and pick it from the sidebar; run the full setup to configure this machine.' -ForegroundColor Green
+    Stop-SkoopLog
     return
 }
 
@@ -1939,6 +1991,7 @@ if ($EssentialsOnly)
     Write-Host ''
     Write-Host 'Essentials ready: PowerShell 7, Rio, Vicinae (Ctrl+Space), the Herdr TUI and Tailscale.' -ForegroundColor Green
     Write-Host 'Run .\install.ps1 later to install the remaining phases.' -ForegroundColor Green
+    Stop-SkoopLog
     return
 }
 
@@ -2372,3 +2425,4 @@ if (-not $SkipShutdownHook)
 {
     Write-Host 'Shutdown cleanup is registered: Firefox/Vicinae/Atuin/Pear Desktop/OpenCode back up to acer-ubuntu and local sign-ins (GitHub, Tailscale, Pear Desktop, OpenCode, Firefox) are cleared on shutdown/logoff.' -ForegroundColor Green
 }
+Stop-SkoopLog
