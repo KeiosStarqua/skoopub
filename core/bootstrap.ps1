@@ -122,6 +122,39 @@ function Ensure-SkoopClone {
     }
 }
 
+# A long-running shell never sees the shims Scoop installs after it started.
+# Resolve executables from the Scoop roots and rebuild PATH from the registry
+# so the Rio/Herdr launch and child shells use the freshly installed pwsh.
+function Get-SkoopExePath {
+    param([Parameter(Mandatory)][string]$Name)
+    $found = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($found) { return $found.Source }
+    foreach ($root in @($env:SCOOP, (Join-Path $env:USERPROFILE 'scoop'), (Join-Path $env:ProgramData 'scoop'))) {
+        if (-not $root) { continue }
+        foreach ($relative in @("shims\$Name.exe", "apps\$Name\current\$Name.exe", "apps\$Name\current\bin\$Name.exe")) {
+            $candidate = Join-Path $root $relative
+            if (Test-Path -LiteralPath $candidate) { return $candidate }
+        }
+    }
+    return $null
+}
+
+function Update-SkoopProcessPath {
+    $entries = New-Object 'System.Collections.Generic.List[string]'
+    $userShims = Join-Path $env:USERPROFILE 'scoop\shims'
+    if ($userShims) { $entries.Add($userShims) }
+    foreach ($value in @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User'))) {
+        if (-not $value) { continue }
+        foreach ($dir in ([Environment]::ExpandEnvironmentVariables($value) -split ';')) {
+            if ($dir -and -not $entries.Contains($dir)) { $entries.Add($dir) }
+        }
+    }
+    foreach ($dir in ($env:Path -split ';')) {
+        if ($dir -and -not $entries.Contains($dir)) { $entries.Add($dir) }
+    }
+    $env:Path = ($entries -join ';')
+}
+
 function Start-HerdrInRio {
     # Open the terminal with Herdr already running, so a fresh machine is ready
     # to use right after the essentials phase. Skipped for unattended/embedded
@@ -129,9 +162,10 @@ function Start-HerdrInRio {
     if ($env:SKOOP_NO_AUTO_HERDR -eq '1' -or -not [Environment]::UserInteractive -or $env:HERDR_ENV -eq '1') {
         return
     }
-    $rio = Get-Command rio -ErrorAction SilentlyContinue
-    $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
-    if (-not $rio -or -not $pwshCmd) { return }
+    Update-SkoopProcessPath
+    $rioPath = Get-SkoopExePath -Name rio
+    $pwshPath = Get-SkoopExePath -Name pwsh
+    if (-not $rioPath -or -not $pwshPath) { return }
     $reposDir = Join-Path $env:USERPROFILE 'repos'
     if (-not (Test-Path -LiteralPath $reposDir)) { New-Item -ItemType Directory -Force -Path $reposDir | Out-Null }
     # Pane markers inherited from a Herdr session make `herdr` refuse to start.
@@ -142,8 +176,8 @@ function Start-HerdrInRio {
         Remove-Item "Env:$name" -ErrorAction SilentlyContinue
     }
     try {
-        $rioArgs = @('-w', "`"$reposDir`"", '-e', "`"$($pwshCmd.Source)`"", '-NoLogo', '-NoExit', '-Command', 'herdr')
-        Start-Process -FilePath $rio.Source -ArgumentList $rioArgs -WorkingDirectory $reposDir | Out-Null
+        $rioArgs = @('-w', "`"$reposDir`"", '-e', "`"$pwshPath`"", '-NoLogo', '-NoExit', '-Command', 'herdr')
+        Start-Process -FilePath $rioPath -ArgumentList $rioArgs -WorkingDirectory $reposDir | Out-Null
         Write-Host "Opened Rio in $reposDir with Herdr."
     } catch {
         Write-Host "Could not open Rio/Herdr (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
@@ -600,6 +634,7 @@ if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
     & $installer -RunAsAdmin:$elevated
 }
 $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
+Update-SkoopProcessPath
 Set-SkoopBackupUserCache -Name $BackupUser
 
 # 2. Allow local scripts, then hook the repo-managed profile into $PROFILE.
@@ -682,6 +717,7 @@ $phaseResult = Invoke-SkoopPhases -Scoop 'scoop' `
     -AfterPhase {
         param($phase)
         if ($phase.Name -ne 'core-terminal') { return }
+        Update-SkoopProcessPath
         # Finish Rio and Vicinae before the slower phases start.
         foreach ($script in @('apps\rio\configure.ps1', 'apps\vicinae\configure.ps1', 'apps\vicinae\enable-autostart.ps1')) {
             $path = Join-Path $repo $script

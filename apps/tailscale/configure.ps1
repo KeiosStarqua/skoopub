@@ -5,7 +5,7 @@
 
 .DESCRIPTION
     Idempotent and non-fatal. Resolves tailscale.exe from PATH, Program Files
-    or Scoop, skips when Tailscale is not connected, and only runs
+    or any Scoop root (shim or app dir), skips when Tailscale is not connected, and only runs
     `tailscale up --advertise-tags=...` when the tag is not already advertised.
     It never reauthenticates an unconnected node: sign in from the tray icon or
     with `tailscale up` first. Native stderr is merged through cmd.exe because
@@ -163,11 +163,19 @@ $BackupUser = Resolve-BackupUser -Explicit $BackupUser
 function Resolve-TailscaleCli {
     $found = Get-Command tailscale -ErrorAction SilentlyContinue
     if ($found) { return $found.Source }
-    $candidates = @(
-        (Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'),
-        (Join-Path ${env:ProgramFiles(x86)} 'Tailscale\tailscale.exe'),
-        (Join-Path $env:USERPROFILE 'scoop\shims\tailscale.exe')
-    )
+    $candidates = @()
+    if ($env:ProgramFiles) { $candidates += (Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe') }
+    if (${env:ProgramFiles(x86)}) { $candidates += (Join-Path ${env:ProgramFiles(x86)} 'Tailscale\tailscale.exe') }
+    # Scoop can be rooted in a user profile or ProgramData; its shim and the
+    # package's app dir are both usable when PATH has not caught up yet.
+    $roots = @()
+    if ($env:SCOOP) { $roots += $env:SCOOP }
+    if ($env:USERPROFILE) { $roots += (Join-Path $env:USERPROFILE 'scoop') }
+    if ($env:ProgramData) { $roots += (Join-Path $env:ProgramData 'scoop') }
+    foreach ($root in $roots) {
+        $candidates += (Join-Path $root 'shims\tailscale.exe')
+        $candidates += (Join-Path $root 'apps\tailscale\current\tailscale.exe')
+    }
     foreach ($candidate in $candidates) {
         if ($candidate -and (Test-Path $candidate)) { return $candidate }
     }

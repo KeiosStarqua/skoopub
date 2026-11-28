@@ -167,8 +167,12 @@
     PowerShell 5.1 the script re-launches itself with the same options via
     `pwsh -NoProfile -File`, so gum's TUI, native stderr and UTF-8 files behave
     correctly. Use -NoPwsh (or $env:SKOOP_NO_PWSH=1) to stay on 5.1, e.g. before
-    pwsh is installed. Piped runs cannot re-launch (there is no script file) and
-    stay in the shell that evaluates them.
+    pwsh is installed. A piped `irm ... | iex` run caches install.ps1 to
+    %LOCALAPPDATA%\skoop\install.ps1 so it can re-launch too; after phases are
+    imported the process PATH is rebuilt from the registry and executables are
+    resolved from the Scoop roots, so newly installed pwsh, Rio and Herdr are
+    found without asking you to open a new shell. Rio is then opened in ~/repos
+    with Herdr already running, using that PowerShell 7 executable.
     - Writes a transcript of the run to %LOCALAPPDATA%\skoop\install-<timestamp>.log
       (-LogPath overrides it, -NoLog opts out); the pwsh re-launch shares that file.
       PowerShell 5.1 transcripts capture the script's own messages but not native
@@ -434,12 +438,79 @@ Piped runs use env vars: SKOOP_HERDR_PEER, SKOOP_HERDR_USER, SKOOP_SKIP_HERDR, S
 # native stderr (gum's TUI becomes a NativeCommandError) and decodes BOM-less
 # UTF-8 as ANSI. Phase 1 installs pwsh, so the same check runs again after that
 # phase and re-launches the rest of the setup under pwsh. -NoPwsh /
-# $env:SKOOP_NO_PWSH=1 stays on 5.1, and a piped `irm ... | iex` run has no
-# script file to re-launch.
+# $env:SKOOP_NO_PWSH=1 stays on 5.1. A piped run caches the installer so there
+# is still a script file for pwsh to re-launch.
+$script:InstallScriptPath = $PSCommandPath
+if (-not $script:InstallScriptPath)
+{
+    $script:InstallScriptPath = Join-Path $env:LOCALAPPDATA 'skoop\install.ps1'
+    try
+    {
+        $cachedDir = Split-Path -Parent $script:InstallScriptPath
+        if (-not (Test-Path -LiteralPath $cachedDir))
+        { New-Item -ItemType Directory -Path $cachedDir -Force | Out-Null 
+        }
+        $oldProgress = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -UseBasicParsing -Uri "$RepoRawBase/install.ps1" -OutFile $script:InstallScriptPath
+        $ProgressPreference = $oldProgress
+        Unblock-File $script:InstallScriptPath
+    } catch
+    {
+        Write-Host "    could not cache install.ps1 for the pwsh re-launch: $($_.Exception.Message)" -ForegroundColor Yellow
+        $script:InstallScriptPath = $null
+    }
+}
+
+# Scoop installs shims into a directory that a long-running shell never adds to
+# its own PATH. Resolve executables from the known Scoop roots as a fallback and
+# rebuild $env:Path from the registry after installs so child processes see them.
+function Get-SkoopExePath
+{
+    param([Parameter(Mandatory)][string]$Name)
+    $found = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($found) { return $found.Source }
+    foreach ($root in @($env:SCOOP, (Join-Path $env:USERPROFILE 'scoop'), (Join-Path $env:ProgramData 'scoop')))
+    {
+        if (-not $root) { continue }
+        foreach ($relative in @("shims\$Name.exe", "apps\$Name\current\$Name.exe", "apps\$Name\current\bin\$Name.exe"))
+        {
+            $candidate = Join-Path $root $relative
+            if (Test-Path -LiteralPath $candidate) { return $candidate }
+        }
+    }
+    return $null
+}
+
+function Update-SkoopProcessPath
+{
+    $preferred = @()
+    if ($script:SkoopShimDir) { $preferred += $script:SkoopShimDir }
+    if ($env:SCOOP) { $preferred += (Join-Path $env:SCOOP 'shims') }
+    $entries = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($dir in $preferred)
+    {
+        if ($dir -and -not $entries.Contains($dir)) { $entries.Add($dir) }
+    }
+    foreach ($value in @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')))
+    {
+        if (-not $value) { continue }
+        foreach ($dir in ([Environment]::ExpandEnvironmentVariables($value) -split ';'))
+        {
+            if ($dir -and -not $entries.Contains($dir)) { $entries.Add($dir) }
+        }
+    }
+    foreach ($dir in ($env:Path -split ';'))
+    {
+        if ($dir -and -not $entries.Contains($dir)) { $entries.Add($dir) }
+    }
+    $env:Path = ($entries -join ';')
+}
+
 function Get-SkoopReLaunchArgs
 {
     param([switch]$SkipMenu)
-    $list = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
+    $list = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script:InstallScriptPath)
     if ($SkipMenu -or $NoMenu)
     { $list += '-NoMenu' 
     }
@@ -536,11 +607,13 @@ function Invoke-PwshReLaunch
     if ($PSVersionTable.PSEdition -ne 'Desktop')
     { return $false 
     }
-    if (-not $PSCommandPath -or -not (Test-Path -LiteralPath $PSCommandPath))
+    if (-not $script:InstallScriptPath -or -not (Test-Path -LiteralPath $script:InstallScriptPath))
     { return $false 
     }
-    $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
-    if (-not $pwsh)
+    # Phase 1 may have installed pwsh into a shim dir this shell has not seen.
+    Update-SkoopProcessPath
+    $pwshPath = Get-SkoopExePath -Name pwsh
+    if (-not $pwshPath)
     { return $false 
     }
 
@@ -550,7 +623,7 @@ function Invoke-PwshReLaunch
     try
     {
         Stop-SkoopLog
-        & $pwsh.Source @(Get-SkoopReLaunchArgs -SkipMenu:$SkipMenu)
+        & $pwshPath @(Get-SkoopReLaunchArgs -SkipMenu:$SkipMenu)
         exit $LASTEXITCODE
     } catch
     {
@@ -1535,11 +1608,12 @@ function Start-HerdrInRio
         Write-Ok 'running inside Herdr - skipping the nested Rio/Herdr launch'
         return
     }
-    $rio = Get-Command rio -ErrorAction SilentlyContinue
-    $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
-    if (-not $rio -or -not $pwshCmd)
+    Update-SkoopProcessPath
+    $rioPath = Get-SkoopExePath -Name rio
+    $pwshPath = Get-SkoopExePath -Name pwsh
+    if (-not $rioPath -or -not $pwshPath)
     {
-        Write-Host '    Rio or pwsh not on PATH - skipping the auto-launch' -ForegroundColor Yellow
+        Write-Host '    Rio or pwsh not found in PATH/Scoop shims - skipping the auto-launch' -ForegroundColor Yellow
         return
     }
     $reposDir = Join-Path $env:USERPROFILE 'repos'
@@ -1561,8 +1635,8 @@ function Start-HerdrInRio
     {
         # Rio's -e command must be the last argument; run herdr through pwsh so
         # the repo-managed profile loads (and scrubs any leftover Herdr vars).
-        $rioArgs = @('-w', "`"$reposDir`"", '-e', "`"$($pwshCmd.Source)`"", '-NoLogo', '-NoExit', '-Command', 'herdr')
-        Start-Process -FilePath $rio.Source -ArgumentList $rioArgs -WorkingDirectory $reposDir | Out-Null
+        $rioArgs = @('-w', "`"$reposDir`"", '-e', "`"$pwshPath`"", '-NoLogo', '-NoExit', '-Command', 'herdr')
+        Start-Process -FilePath $rioPath -ArgumentList $rioArgs -WorkingDirectory $reposDir | Out-Null
         Write-Ok 'Rio opened - Herdr is starting in it'
     } catch
     {
@@ -1826,8 +1900,12 @@ if (-not $shimDir)
 # --- 5. Put the shims on PATH for this process -------------------------------
 $env:SCOOP = Split-Path $shimDir -Parent
 $env:Path  = "$shimDir;$env:Path"
+$script:SkoopShimDir = $shimDir
 $scoop     = Join-Path $shimDir 'scoop.cmd'
 Write-Ok "shims: $shimDir"
+# Scoop edits the registry PATH; pull those changes into this long-running
+# process so the phase imports and child shells see all installed shims.
+Update-SkoopProcessPath
 Set-SkoopBackupUserCache -Name $BackupUser
 
 # --- 6. Buckets are git repos, so git must exist before scoop import ---------
@@ -1862,13 +1940,13 @@ function Invoke-CoreTerminalSetup
     {
         Write-Host "    Rio config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
     }
-    $herdr = Get-Command herdr -ErrorAction SilentlyContinue
-    if ($herdr)
+    $herdrPath = Get-SkoopExePath -Name herdr
+    if ($herdrPath)
     {
-        Write-Ok "Herdr TUI ready ($($herdr.Source))"
+        Write-Ok "Herdr TUI ready ($herdrPath)"
     } else
     {
-        Write-Host '    herdr is not on PATH yet - open a new shell after the install' -ForegroundColor Yellow
+        Write-Host '    herdr not found in PATH or the Scoop shims - check the phase 1 install' -ForegroundColor Yellow
     }
     Start-HerdrInRio
 }
@@ -2004,6 +2082,7 @@ $phaseResult = Invoke-SkoopPhases -Scoop $scoop -ManifestPath $manifest -PhasesP
         'core-terminal'
         {
             # pwsh now exists (phase 1 installs it), so move the rest of the run to 7.
+            Update-SkoopProcessPath
             if (Invoke-PwshReLaunch -SkipMenu)
             { return 
             }   # exits the script
