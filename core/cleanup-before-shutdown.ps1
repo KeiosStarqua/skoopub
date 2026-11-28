@@ -184,6 +184,14 @@ function Write-Log {
 
 function Resolve-SshUser {
     if ($User) { return $User.Trim() }
+    if ($env:SKOOP_BACKUP_USER) { return $env:SKOOP_BACKUP_USER.Trim() }
+    # install.ps1 caches -BackupUser here; use it so unattended backup runs
+    # do not stop at the SSH-user prompt.
+    $cachedUserFile = Join-Path $env:LOCALAPPDATA 'skoop\backup-user'
+    if (Test-Path -LiteralPath $cachedUserFile) {
+        $cachedUser = (Get-Content -LiteralPath $cachedUserFile -Raw -ErrorAction SilentlyContinue).Trim()
+        if ($cachedUser) { return $cachedUser }
+    }
     if ($DryRun) { return 'USER' }
     if (-not [Environment]::UserInteractive) {
         throw 'SSH user is required in a non-interactive shell. Re-run with -User <username>.'
