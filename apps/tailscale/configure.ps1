@@ -7,6 +7,8 @@
     Idempotent and non-fatal. Resolves tailscale.exe from PATH, Program Files
     or any Scoop root (shim or app dir), skips when Tailscale is not connected, and only runs
     `tailscale up --advertise-tags=...` when the tag is not already advertised.
+    Tagging runs BEFORE the snapshot restores, because the tailnet ACL may only
+    let tagged devices reach acer-ubuntu: an untagged node would be refused.
     It never reauthenticates an unconnected node: sign in from the tray icon or
     with `tailscale up` first. Native stderr is merged through cmd.exe because
     Windows PowerShell 5.1 turns it into a terminating NativeCommandError.
@@ -32,7 +34,8 @@
     ACL tag to advertise. The `tag:` prefix is added when omitted.
 
 .PARAMETER SkipTag
-    Leave this device's advertised tags untouched.
+    Leave this device's advertised tags untouched. The parallel per-app restore
+    children pass this; the parent tags once, before the restores.
 
 .PARAMETER SignIn
     Run `tailscale up --qr` when this node is not signed in, so the login URL
@@ -603,6 +606,40 @@ if ($signInCompleted -and -not $connected) { $connected = Wait-TailscaleConnecte
 if ($connected) {
     Start-TailscaleTray -AppDir (Resolve-TailscaleAppDir -Cli $cli)
 }
+# Advertise the ACL tag BEFORE restoring: the tailnet ACL may only let tagged
+# devices reach acer-ubuntu, so SSH restores are refused until this device carries
+# the tag. The parallel per-app children run with -SkipTag and never repeat it.
+if ($SkipTag) {
+    Write-Ok 'Tailnet tagging skipped (-SkipTag)'
+} else {
+    if ($Tag -notlike 'tag:*') { $Tag = "tag:$Tag" }
+    if (-not $cli) {
+        Write-Warn 'tailscale.exe not found - skipping tailnet tagging.'
+    } elseif (-not $connected) {
+        Write-Warn 'Tailscale is not connected - sign in from the tray icon or run `tailscale up`, then re-run.'
+    } else {
+        Write-Step "Tagging this device with $Tag in the tailnet"
+        $prefsRaw = (& cmd /c "`"$cli`" debug prefs 2>&1" | Out-String)
+        $prefs = try { $prefsRaw | ConvertFrom-Json -ErrorAction Stop } catch { $null }
+        $advertised = if ($prefs) { @($prefs.AdvertiseTags) } else { @() }
+        if ($advertised -contains $Tag) {
+            Write-Ok "$Tag is already advertised on this device"
+        } else {
+            $out = (& cmd /c "`"$cli`" up --advertise-tags=$Tag 2>&1" | Out-String)
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warn "Could not advertise $Tag (non-fatal, exit $LASTEXITCODE): $(($out -split "`r?`n" | Select-Object -First 2) -join ' ')"
+                Write-Warn 'Check that your tailnet ACL lists you as a tag owner for this tag.'
+            } else {
+                Write-Ok "advertised $Tag on this device"
+                # A tag change re-registers the node; wait before the restores SSH out.
+                if (-not (Wait-TailscaleConnected $cli)) {
+                    $connected = $false
+                    Write-Warn 'Tailscale did not come back online after tagging - skipping the restores.'
+                }
+            }
+        }
+    }
+}
 # Mandatory restores must not silently fall through when Tailscale is offline.
 if ($RestoreFirefox -and $FailOnFirefoxRestoreError -and -not $connected) {
     $firefoxMarker = Join-Path $env:LOCALAPPDATA 'skoop\firefox-restore.done'
@@ -683,30 +720,3 @@ if ($restoreJobs.Count -eq 1) {
         }
     }
 }
-
-if ($SkipTag) { Write-Ok 'Tailnet tagging skipped (-SkipTag).'; return }
-if ($Tag -notlike 'tag:*') { $Tag = "tag:$Tag" }
-
-if (-not $cli) { Write-Warn 'tailscale.exe not found - skipping tailnet tagging.'; return }
-
-Write-Step "Tagging this device with $Tag in the tailnet"
-if (-not $connected) {
-    Write-Warn 'Tailscale is not connected - sign in from the tray icon or run `tailscale up`, then re-run.'
-    return
-}
-
-$prefsRaw = (& cmd /c "`"$cli`" debug prefs 2>&1" | Out-String)
-$prefs = try { $prefsRaw | ConvertFrom-Json -ErrorAction Stop } catch { $null }
-$advertised = if ($prefs) { @($prefs.AdvertiseTags) } else { @() }
-if ($advertised -contains $Tag) {
-    Write-Ok "$Tag is already advertised on this device"
-    return
-}
-
-$out = (& cmd /c "`"$cli`" up --advertise-tags=$Tag 2>&1" | Out-String)
-if ($LASTEXITCODE -ne 0) {
-    Write-Warn "Could not advertise $Tag (non-fatal, exit $LASTEXITCODE): $(($out -split "`r?`n" | Select-Object -First 2) -join ' ')"
-    Write-Warn 'Check that your tailnet ACL lists you as a tag owner for this tag.'
-    return
-}
-Write-Ok "advertised $Tag on this device"

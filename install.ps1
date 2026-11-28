@@ -34,7 +34,10 @@
       apps/tailscale/configure.ps1 before any ~/repos clone. The QR opens in a
       new Rio window (a legacy console mangles its Unicode blocks), reuses one
       already showing the QR, and closes itself after sign-in; sign-in is skipped
-      when the node is already connected.
+      when the node is already connected. Once connected it advertises
+      tag:public-client BEFORE restoring (the tailnet ACL may only let tagged
+      devices reach acer-ubuntu); the restore children pass -SkipTag so it is
+      advertised once.
       Once connected it restores everything from acer-ubuntu in one pass
       (Vicinae, Pear Desktop, Firefox, Atuin, OpenCode credentials, SSH key and
       repo list) before the `gh auth login` prompt; if the OpenCode or Firefox

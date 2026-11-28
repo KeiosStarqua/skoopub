@@ -44,9 +44,11 @@ Installs Tailscale, then the callback does everything that needs the network:
 2. Start the Tailscale daemon.
 3. `apps/tailscale/configure.ps1 -SignIn`: `tailscale up --qr` in a new Rio window
    (reusing one already showing the QR; a console fallback forces UTF-8), wait
-   until online, then restore OpenCode first, followed by Vicinae, Pear Desktop,
-   Firefox and Atuin as parallel child processes (each with its own restore log),
-   then advertise `tag:public-client`.
+   until online, advertise `tag:public-client` (the tailnet ACL may only let
+   tagged devices reach acer-ubuntu), then restore OpenCode first, followed by
+   Vicinae, Pear Desktop, Firefox and Atuin as parallel child processes (each
+   with its own `restore-<app>-<stamp>.log` and `-SkipTag`, so the tag is
+   advertised once).
 4. Restore the SSH key (`core/restore-backup.ps1 -Only ssh`).
 5. Restore the registered repo list (`-Only repos`).
 6. Apply the Vicinae config (Ctrl+Space) and autostart on top of the restored data.
