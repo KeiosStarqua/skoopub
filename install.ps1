@@ -67,6 +67,8 @@
     - Checks first, then only applies what is missing via apps/sharex/fix-printscreen.ps1
       so ShareX owns the PrtSc key; an already-applied fix is left untouched (no registry
       write, no ShareX restart). A failure is reported but does not abort the bootstrap.
+    - Starts Tailscale and ShareX from their Scoop Apps Start Menu shortcuts at the
+      end of the run when they are not already up; failures are non-fatal.
     - Copies the repo-managed Zed settings/keymap/tasks into %APPDATA%\Zed (old
       files are backed up); Zed installs its declared extensions on next start.
     - Copies the repo-managed Rio config into %LOCALAPPDATA%\rio\config.toml,
@@ -556,6 +558,29 @@ function Write-Step([string]$Message)
 }
 function Write-Ok([string]$Message)
 { Write-Host "    $Message" -ForegroundColor DarkGray 
+}
+
+function Start-ScoopAppShortcut {
+    # Start a Scoop tray app from its Start Menu shortcut if it is not up yet.
+    param([string]$Name, [string]$ProcessName)
+    $menu = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Microsoft\Windows\Start Menu\Programs\Scoop Apps'
+    $shortcut = Join-Path $menu ($Name + '.lnk')
+    if (-not (Test-Path -LiteralPath $shortcut))
+    { Write-Host "    $Name shortcut not found - skipping" -ForegroundColor Yellow
+      return
+    }
+    if (Get-Process -Name $ProcessName -ErrorAction SilentlyContinue)
+    { Write-Ok "$Name is already running"
+      return
+    }
+    try
+    {
+        Start-Process -FilePath $shortcut
+        Write-Ok "started $Name from its Scoop Apps shortcut"
+    } catch
+    {
+        Write-Host "    Could not start $Name (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
 }
 
 function Set-SkoopBackupUserCache
@@ -2333,4 +2358,9 @@ if (-not $SkipShutdownHook)
 {
     Write-Host 'Shutdown cleanup is registered: Firefox/Vicinae/Atuin/Pear Desktop/OpenCode back up to acer-ubuntu and local sign-ins (GitHub, Tailscale, Pear Desktop, OpenCode, Firefox) are cleared on shutdown/logoff.' -ForegroundColor Green
 }
+
+# --- 22. Leave the Scoop tray apps running ------------------------------------
+Write-Step 'Starting Tailscale and ShareX from their Scoop Apps shortcuts'
+Start-ScoopAppShortcut -Name 'Tailscale' -ProcessName 'tailscale-ipn'
+Start-ScoopAppShortcut -Name 'ShareX' -ProcessName 'ShareX'
 Stop-SkoopLog

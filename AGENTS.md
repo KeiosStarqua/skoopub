@@ -9,7 +9,7 @@ manager of its own — the files are the product.
 
 | Path | Type | Purpose |
 |---|---|---|
-| `install.ps1` | PowerShell entry point | Public one-shot bootstrap: runs the Full setup by default with no options; `-Menu` opts into the interactive selector. Installs `manifests/scoop.json` in phases and delegates app work to `apps/<app>/configure.ps1` scripts. Logs each run to `%LOCALAPPDATA%\skoop\install-<timestamp>.log` (`-LogPath` / `SKOOP_LOG_PATH`, `-NoLog` / `SKOOP_NO_LOG`); the pwsh re-launch appends to the same file. |
+| `install.ps1` | PowerShell entry point | Public one-shot bootstrap: runs the Full setup by default with no options; `-Menu` opts into the interactive selector. Installs `manifests/scoop.json` in phases and delegates app work to `apps/<app>/configure.ps1` scripts. Logs each run to `%LOCALAPPDATA%\skoop\install-<timestamp>.log` (`-LogPath` / `SKOOP_LOG_PATH`, `-NoLog` / `SKOOP_NO_LOG`); the pwsh re-launch appends to the same file. Starts Tailscale and ShareX from their `Scoop Apps` Start Menu shortcuts at the end when not already running. |
 | `bootstrap.ps1` | PowerShell wrapper | Backward-compatible entry point that forwards to `core/bootstrap.ps1`. |
 | `core/bootstrap.ps1` | PowerShell script | Older/simpler full bootstrap, kept for `-File` usage from a clone. |
 | `core/scoop-phases.ps1` | PowerShell helper | Validates `manifests/phases.json` against `scoop.json`, generates one temporary manifest per app (adding the phase's buckets on the first import), imports them in order and prints a per-package time table. Dot-sourced by both bootstraps. |
