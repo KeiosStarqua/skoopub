@@ -301,12 +301,26 @@ function Invoke-SkoopPhases {
                         Write-Host ('      {0} - installing' -f $item.Name) -ForegroundColor DarkGray
                         $watch = [System.Diagnostics.Stopwatch]::StartNew()
                         $errorText = ''
+                        # Nerd Font packages copy the same .ttf files into the
+                        # per-user Fonts dir. Installing them in parallel makes
+                        # Copy-Item fail with "used by another process" and can
+                        # stop the whole pipeline. Serialize just those imports.
+                        $fontLock = $null
+                        if ($item.Name -match '-NF(-|$)') {
+                            $fontLock = New-Object System.Threading.Mutex($false, 'SkoopNerdFontInstall')
+                            $fontLock.WaitOne() | Out-Null
+                        }
                         try {
                             & $scoopExe import $file
                             $code = $LASTEXITCODE
                         } catch {
                             $code = 1
                             $errorText = $_.Exception.Message
+                        } finally {
+                            if ($fontLock) {
+                                $fontLock.ReleaseMutex()
+                                $fontLock.Dispose()
+                            }
                         }
                         $watch.Stop()
                         Write-Host ('      {0} - {1} ({2:n1}s)' -f $item.Name, $(if ($code -eq 0) { 'done' } else { 'failed' }), $watch.Elapsed.TotalSeconds) -ForegroundColor DarkGray
