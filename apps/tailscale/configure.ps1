@@ -723,8 +723,11 @@ if ($restoreJobs.Count -eq 1) {
         }
         $restoreJobs = @()
     }
+    $finished = 0
     foreach ($entry in $running) {
         $entry.Process.WaitForExit()
+        $finished++
+        Write-Ok "$($entry.Job.Label) restore finished ($finished/$($running.Count))"
         if ($entry.Process.ExitCode -ne 0) {
             $message = "$($entry.Job.Label) auto-restore failed (exit $($entry.Process.ExitCode))."
             if ($entry.Job.Fail) { throw $message }

@@ -296,6 +296,21 @@ function Get-ProfilesIniSections {
     return @($sections)
 }
 
+function Get-RemoteSize {
+    # Apparent size of a remote snapshot folder, used only for a download
+    # percentage. Returns 0 when du is unavailable so the caller can fall back
+    # to reporting bytes transferred.
+    param([string] $RemoteFolder)
+
+    $cmd = "du -sb '$RemoteFolder' 2>/dev/null | cut -f1"
+    $out = & ssh @sshArgs $cmd 2>&1
+    if ($LASTEXITCODE -ne 0) { return 0 }
+    $value = [long]0
+    $last = @($out | ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ }) | Select-Object -Last 1
+    if ($last -and [long]::TryParse($last, [ref]$value)) { return $value }
+    return 0
+}
+
 function Save-Snapshot {
     param(
         [string] $RemoteFolder,
@@ -330,12 +345,45 @@ function Save-Snapshot {
 
         $downloadLine = "ssh $sshQuoted `"$remoteCmd`" > `"$tarFile`" 2>>`"$sshErrLog`""
         Write-Log ("tar download: ssh " + ($sshArgs -join ' ') + " '$remoteCmd' > $tarFile")
-        & cmd.exe /d /c $downloadLine | Out-Null
-        $tarExit = $LASTEXITCODE
+        # Poll the growing tar file so the wait shows a percentage. The download
+        # is a child process (not `& cmd /c`) only so it can be observed.
+        $total = Get-RemoteSize -RemoteFolder $RemoteFolder
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $env:ComSpec
+        $psi.Arguments = '/d /c ' + $downloadLine
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $lastReport = Get-Date
+        $lastPct = -1
+        while (-not $proc.HasExited) {
+            Start-Sleep -Milliseconds 500
+            $now = Get-Date
+            if (($now - $lastReport).TotalSeconds -lt 2) { continue }
+            $lastReport = $now
+            $size = 0
+            try { $size = (Get-Item -LiteralPath $tarFile -ErrorAction Stop).Length } catch { }
+            if ($total -gt 0) {
+                $pct = [int][Math]::Min(99, [Math]::Floor(100 * $size / $total))
+                if ($pct -ne $lastPct) {
+                    Write-Log ("{0} download: {1}% ({2:N1} / {3:N1} MB)" -f $FolderName, $pct, ($size / 1MB), ($total / 1MB))
+                    $lastPct = $pct
+                }
+            } else {
+                Write-Log ("{0} download: {1:N1} MB" -f $FolderName, ($size / 1MB))
+            }
+        }
+        $proc.WaitForExit()
+        $tarExit = $proc.ExitCode
+        $finalSize = 0
+        try { $finalSize = (Get-Item -LiteralPath $tarFile -ErrorAction Stop).Length } catch { }
+        Write-Log ("{0} download: 100% ({1:N1} MB)" -f $FolderName, ($finalSize / 1MB))
         if ($tarExit -eq 0) {
+            Write-Log ("{0} extract: starting" -f $FolderName)
             $extractLine = "`"$($tarCmd.Source)`" -xf `"$tarFile`" -C `"$target`" 2>>`"$tarErrLog`""
             & cmd.exe /d /c $extractLine | Out-Null
             $tarExit = $LASTEXITCODE
+            Write-Log ("{0} extract: done" -f $FolderName)
         }
         foreach ($errLog in @($sshErrLog, $tarErrLog)) {
             if (Test-Path -LiteralPath $errLog) {
