@@ -7,7 +7,9 @@
 .DESCRIPTION
     Intended for public/shared PCs: run it before turning the machine off to leave
     no signed-in accounts behind. It copies every Firefox profile found in
-    profiles.ini, Vicinae's config/data/state folders, Atuin's config + data
+    profiles.ini, Vicinae's config/data/state folders plus its master key (a
+    Windows Credential Manager entry, required to read the encrypted databases),
+    Atuin's config + data
     (history/records/meta databases and the encryption key), Pear Desktop's
     signed-in userData and OpenCode's config/state plus an `opencode auth export`
     credential dump into local staging folders, uploads them to the tailnet machine
@@ -258,6 +260,69 @@ function Copy-Profile {
     }
 }
 
+function Initialize-CredentialApi {
+    if ('SkoopCredential' -as [type]) { return }
+    # QKeychain (v0.14.0, USE_CREDENTIAL_STORE) keeps Vicinae's master key as a
+    # generic credential named after the key, so only CredReadW/CredWriteW can
+    # export or restore it.
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+public static class SkoopCredential {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileTime { public int Low; public int High; }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct Credential {
+        public int Flags; public int Type; public string TargetName; public string Comment;
+        public FileTime LastWritten; public int CredentialBlobSize; public IntPtr CredentialBlob;
+        public int Persist; public int AttributeCount; public IntPtr Attributes;
+        public string TargetAlias; public string UserName;
+    }
+
+    [DllImport("advapi32", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool CredReadW(string target, int type, int flags, out IntPtr credential);
+    [DllImport("advapi32", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool CredWriteW(ref Credential credential, int flags);
+    [DllImport("advapi32")]
+    private static extern void CredFree(IntPtr buffer);
+
+    public static byte[] Read(string target) {
+        IntPtr pointer;
+        if (!CredReadW(target, 1, 0, out pointer)) return null;
+        try {
+            Credential credential = (Credential)Marshal.PtrToStructure(pointer, typeof(Credential));
+            byte[] data = new byte[credential.CredentialBlobSize];
+            Marshal.Copy(credential.CredentialBlob, data, 0, data.Length);
+            return data;
+        } finally {
+            CredFree(pointer);
+        }
+    }
+
+    public static void Write(string target, byte[] data) {
+        IntPtr blob = Marshal.AllocHGlobal(data.Length);
+        try {
+            Marshal.Copy(data, 0, blob, data.Length);
+            Credential credential = new Credential();
+            credential.Type = 1;
+            credential.TargetName = target;
+            credential.CredentialBlob = blob;
+            credential.CredentialBlobSize = data.Length;
+            credential.Persist = 3;
+            if (!CredWriteW(ref credential, 0)) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+        } finally {
+            Marshal.FreeHGlobal(blob);
+        }
+    }
+}
+'@
+}
+
 function Copy-VicinaeData {
     param([string] $Source, [string] $Destination)
 
@@ -283,6 +348,20 @@ function Copy-VicinaeData {
             Copy-Item -LiteralPath $sub -Destination $target -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
+    Initialize-CredentialApi
+    $masterKey = [SkoopCredential]::Read('vicinae-master-key')
+    if ($masterKey) {
+        # Encrypted clipboard.db / vicinae.db are useless without this key, so it
+        # travels with the folders. Without it a restore hits the FATAL "database
+        # is encrypted but its key is missing from the keychain".
+        $keyDir = Join-Path $Destination 'keychain'
+        New-Item -ItemType Directory -Force -Path $keyDir | Out-Null
+        [System.IO.File]::WriteAllBytes((Join-Path $keyDir 'vicinae-master-key'), $masterKey)
+        Write-Log ("staging vicinae/keychain/vicinae-master-key (" + $masterKey.Length + " bytes)")
+    } else {
+        Write-Log 'Vicinae master key not in Windows Credential Manager; nothing to stage'
+    }
+
     $files = @(Get-ChildItem -LiteralPath $Destination -Recurse -File -ErrorAction SilentlyContinue)
     if ($files.Count -lt 1) {
         Write-Log 'Vicinae data had no files to back up; no snapshot will be uploaded'

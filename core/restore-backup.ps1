@@ -22,6 +22,9 @@
       - Vicinae: the config, data and state folders in the snapshot are merged
         into %LOCALAPPDATA%\vicinae (the disposable cache is never restored). A
         running vicinae-server is stopped for the copy and restarted afterwards.
+        The snapshot's `keychain/vicinae-master-key` is written back to Windows
+        Credential Manager as `vicinae-master-key`, because the restored SQLCipher
+        databases are unreadable without it.
       - Atuin: config.toml / server.toml and the data folder (history.db,
         records.db, meta.db, key and SQLite sidecars) are merged into
         %USERPROFILE%\.atuin. Stale .db-wal / .db-shm files already on this machine
@@ -452,6 +455,84 @@ function Restore-Firefox {
     }
 }
 
+function Initialize-CredentialApi {
+    if ('SkoopCredential' -as [type]) { return }
+    # QKeychain (v0.14.0, USE_CREDENTIAL_STORE) keeps Vicinae's master key as a
+    # generic credential named after the key, so only CredReadW/CredWriteW can
+    # export or restore it.
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+public static class SkoopCredential {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileTime { public int Low; public int High; }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct Credential {
+        public int Flags; public int Type; public string TargetName; public string Comment;
+        public FileTime LastWritten; public int CredentialBlobSize; public IntPtr CredentialBlob;
+        public int Persist; public int AttributeCount; public IntPtr Attributes;
+        public string TargetAlias; public string UserName;
+    }
+
+    [DllImport("advapi32", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool CredReadW(string target, int type, int flags, out IntPtr credential);
+    [DllImport("advapi32", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool CredWriteW(ref Credential credential, int flags);
+    [DllImport("advapi32")]
+    private static extern void CredFree(IntPtr buffer);
+
+    public static byte[] Read(string target) {
+        IntPtr pointer;
+        if (!CredReadW(target, 1, 0, out pointer)) return null;
+        try {
+            Credential credential = (Credential)Marshal.PtrToStructure(pointer, typeof(Credential));
+            byte[] data = new byte[credential.CredentialBlobSize];
+            Marshal.Copy(credential.CredentialBlob, data, 0, data.Length);
+            return data;
+        } finally {
+            CredFree(pointer);
+        }
+    }
+
+    public static void Write(string target, byte[] data) {
+        IntPtr blob = Marshal.AllocHGlobal(data.Length);
+        try {
+            Marshal.Copy(data, 0, blob, data.Length);
+            Credential credential = new Credential();
+            credential.Type = 1;
+            credential.TargetName = target;
+            credential.CredentialBlob = blob;
+            credential.CredentialBlobSize = data.Length;
+            credential.Persist = 3;
+            if (!CredWriteW(ref credential, 0)) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+        } finally {
+            Marshal.FreeHGlobal(blob);
+        }
+    }
+}
+'@
+}
+
+function Test-SqliteEncrypted {
+    param([string] $Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $header = New-Object byte[] 16
+        if ($stream.Read($header, 0, 16) -lt 16) { return $false }
+        # SQLCipher replaces the plaintext "SQLite format 3\0" header.
+        return ([System.Text.Encoding]::ASCII.GetString($header) -ne "SQLite format 3`0")
+    } finally {
+        $stream.Dispose()
+    }
+}
+
 function Restore-Vicinae {
     param([string] $StageRoot, [string] $TheStamp)
 
@@ -468,6 +549,24 @@ function Restore-Vicinae {
         }
         Write-Log ("restore vicinae/" + $name + " -> " + $dest)
         if (-not $DryRun) { Copy-Tree -Source $src -Destination $dest }
+    }
+
+    Initialize-CredentialApi
+    $stageRootVicinae = Join-Path $StageRoot 'vicinae'
+    $keyFile = Join-Path (Join-Path $stageRootVicinae 'keychain') 'vicinae-master-key'
+    if (Test-Path -LiteralPath $keyFile) {
+        $masterKey = [System.IO.File]::ReadAllBytes($keyFile)
+        if ($masterKey.Length -ne 32) {
+            throw ("Vicinae master key in the snapshot has unexpected size " + $masterKey.Length + " (expected 32).")
+        }
+        Write-Log 'restore vicinae master key -> Windows Credential Manager'
+        if (-not $DryRun) { [SkoopCredential]::Write('vicinae-master-key', $masterKey) }
+    } else {
+        Write-Log 'snapshot has no Vicinae master key (older snapshot); leaving the keychain alone'
+        if (-not $DryRun -and (Test-SqliteEncrypted -Path (Join-Path $stageRootVicinae 'data\vicinae.db')) -and
+            -not [SkoopCredential]::Read('vicinae-master-key')) {
+            Write-Warn 'The restored Vicinae database is encrypted but no master key exists in Windows Credential Manager; vicinae-server will refuse to start. Delete %LOCALAPPDATA%\vicinae\data\vicinae.db* and clipboard.db* to reset it.'
+        }
     }
 }
 
