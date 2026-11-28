@@ -55,17 +55,21 @@ if ($env:SKOOP_NO_ATUIN_RESTORE -eq '1') { $SkipAtuinRestore = $true }
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-# Firefox and Atuin restore happens right after Tailscale connects (phase 1) and
-# is retried at the end of the run. Markers make the retry a no-op; both apps are
-# installed later, but these restores only lay down files (no CLI dependency).
-$restoreAppsArgs = @()
+# Firefox is restored right after the early Tailscale sign-in, before the gh auth
+# prompt; Atuin follows in phase 1. Both are retried at the end (markers make the
+# retry a no-op); neither app must be installed yet - these are file copies.
+# Hashtables (not string arrays) are required: splatting an array binds the
+# strings positionally, so '-RestoreFirefox' would land in -Tag instead.
+$earlyRestoreArgs = @{}
 if (-not $SkipFirefoxRestore) {
-    $restoreAppsArgs += '-RestoreFirefox'
-    if ($ForceFirefoxRestore) { $restoreAppsArgs += '-ForceFirefoxRestore' }
+    $earlyRestoreArgs.RestoreFirefox = $true
+    if ($ForceFirefoxRestore) { $earlyRestoreArgs.ForceFirefoxRestore = $true }
 }
+$restoreAppsArgs = @{}
+foreach ($key in $earlyRestoreArgs.Keys) { $restoreAppsArgs[$key] = $earlyRestoreArgs[$key] }
 if (-not $SkipAtuinRestore) {
-    $restoreAppsArgs += '-RestoreAtuin'
-    if ($ForceAtuinRestore) { $restoreAppsArgs += '-ForceAtuinRestore' }
+    $restoreAppsArgs.RestoreAtuin = $true
+    if ($ForceAtuinRestore) { $restoreAppsArgs.ForceAtuinRestore = $true }
 }
 
 function Ensure-SkoopClone {
@@ -419,9 +423,16 @@ function Show-TailscaleSignInHint {
 
 function Start-TailscaleDaemon {
     # Scoop ships tailscaled but not the Windows service. Prefer the service
-    # when the official installer created it; otherwise run the shim directly.
-    # Login is interactive (tray icon or `tailscale up`), so it is left to you.
+    # when the official installer created it; otherwise run the exe from the
+    # Scoop app folder directly. Also start tailscale-ipn.exe (tray) and import
+    # the package's add-startup.reg so it comes back after sign-in/reboot.
     Write-Host 'Starting Tailscale...'
+    $appDir = $null
+    foreach ($root in @($env:SCOOP, (Join-Path $env:USERPROFILE 'scoop'), (Join-Path $env:ProgramData 'scoop'))) {
+        if (-not $root) { continue }
+        $candidate = Join-Path $root 'apps\tailscale\current'
+        if (Test-Path -LiteralPath (Join-Path $candidate 'tailscale.exe')) { $appDir = $candidate; break }
+    }
     $service = Get-Service -Name 'Tailscale' -ErrorAction SilentlyContinue
     if ($service) {
         try {
@@ -440,15 +451,42 @@ function Start-TailscaleDaemon {
         }
     } else {
         $tailscaled = Get-Command tailscaled -ErrorAction SilentlyContinue
-        if (-not $tailscaled) { Write-Host 'tailscaled not on PATH - skipping.' }
+        $daemonExe = if ($tailscaled) { $tailscaled.Source } elseif ($appDir) { Join-Path $appDir 'tailscaled.exe' } else { $null }
+        if (-not $daemonExe -or -not (Test-Path -LiteralPath $daemonExe)) { Write-Host 'tailscaled.exe not found - skipping.' }
         elseif (Get-Process -Name 'tailscaled' -ErrorAction SilentlyContinue) {
             Write-Host 'tailscaled is already running.'
         } else {
             try {
-                Start-Process -FilePath $tailscaled.Source -WindowStyle Hidden
+                Start-Process -FilePath $daemonExe -WindowStyle Hidden
                 Write-Host 'Launched tailscaled from Scoop.'
             } catch {
                 Write-Host "Could not launch tailscaled (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+    }
+
+    if ($appDir) {
+        $trayExe = Join-Path $appDir 'tailscale-ipn.exe'
+        if (Test-Path -LiteralPath $trayExe) {
+            if (-not (Get-Process -Name 'tailscale-ipn' -ErrorAction SilentlyContinue)) {
+                try {
+                    Start-Process -FilePath $trayExe
+                    Write-Host 'Started tailscale-ipn.exe (Tailscale tray).'
+                } catch {
+                    Write-Host "Could not start tailscale-ipn.exe (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+                }
+            } else { Write-Host 'tailscale-ipn.exe is already running.' }
+            $startupReg = Join-Path $appDir 'add-startup.reg'
+            if (Test-Path -LiteralPath $startupReg) {
+                $runValue = (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'Tailscale' -ErrorAction SilentlyContinue).Tailscale
+                if (-not $runValue -or $runValue -notlike '*tailscale-ipn.exe*') {
+                    try {
+                        & reg.exe import $startupReg
+                        Write-Host 'Registered tailscale-ipn.exe to start with Windows.'
+                    } catch {
+                        Write-Host "Could not register Tailscale autostart (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+                    }
+                }
             }
         }
     }
@@ -503,8 +541,9 @@ if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) {
 }
 Start-TailscaleDaemon
 if (Test-Path $tailscaleConfig) {
-    try { & $tailscaleConfig -SignIn }
-    catch { Write-Host "Tailscale sign-in failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+    # Restore the Firefox profile while Tailscale is connected, before gh auth.
+    try { & $tailscaleConfig -SignIn -BackupUser $BackupUser @earlyRestoreArgs }
+    catch { Write-Host "Tailscale sign-in / Firefox restore failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 if (Test-Path $ghAuth) {
     try { & $ghAuth -SkipLogin:$SkipGhLogin }

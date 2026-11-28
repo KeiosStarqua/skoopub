@@ -152,6 +152,17 @@ function Test-TailscaleConnected {
     return [bool]($status -and $status.BackendState -eq 'Running' -and $status.Self.Online)
 }
 
+function Wait-TailscaleConnected {
+    param([string]$Cli, [int]$TimeoutSeconds = 30)
+    # `tailscale up --qr` can exit 0 before status --json reports Online.
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        if (Test-TailscaleConnected $Cli) { return $true }
+        Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $deadline)
+    return Test-TailscaleConnected $Cli
+}
+
 function Get-FirefoxExePath {
     # Prefer the path of a running Firefox; otherwise look in the usual install
     # locations. Scoop's shim points at a versioned folder, so use the app dir.
@@ -284,6 +295,7 @@ function Invoke-RestoreOnConnect {
 }
 
 $cli = Resolve-TailscaleCli
+$signInCompleted = $false
 
 if ($SignIn) {
     # Connect before the slow phases so `tailscale up --qr` can show its login
@@ -303,13 +315,16 @@ if ($SignIn) {
             Write-Warn "Tailscale sign-in did not finish (exit $LASTEXITCODE) - run ``tailscale up --qr`` later."
         } else {
             Write-Ok 'Tailscale sign-in complete'
+            $signInCompleted = $true
         }
     }
 }
 
 # Probe again rather than trusting the sign-in exit code: the QR flow can exit
 # 0 without a working connection, and already-connected nodes skip it entirely.
+# After a successful sign-in, allow status --json a few seconds to report Online.
 $connected = Test-TailscaleConnected $cli
+if ($signInCompleted -and -not $connected) { $connected = Wait-TailscaleConnected $cli }
 if ($RestoreVicinae -and $connected) {
     Invoke-RestoreOnConnect -App vicinae -Label 'Vicinae' -ForceRestore:$ForceVicinaeRestore -ForceSwitch 'ForceVicinaeRestore'
 }
@@ -332,7 +347,7 @@ if ($Tag -notlike 'tag:*') { $Tag = "tag:$Tag" }
 if (-not $cli) { Write-Warn 'tailscale.exe not found - skipping tailnet tagging.'; return }
 
 Write-Step "Tagging this device with $Tag in the tailnet"
-if (-not (Test-TailscaleConnected $cli)) {
+if (-not $connected) {
     Write-Warn 'Tailscale is not connected - sign in from the tray icon or run `tailscale up`, then re-run.'
     return
 }
