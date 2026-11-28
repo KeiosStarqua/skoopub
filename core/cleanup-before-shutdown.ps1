@@ -106,6 +106,15 @@
 .PARAMETER NoRepos
     Skip the repo-list snapshot.
 
+.PARAMETER BackupPath
+    Extra local file or directory to snapshot, e.g.
+    C:\Users\Administrator\scoop\apps\firefox\current. Each path is staged
+    under a "custom-<name>" folder and uploaded to BackupRemotePath; a failed
+    upload aborts the run, so -BackupOnly still gets a verified copy.
+
+.PARAMETER BackupRemotePath
+    Remote folder for -BackupPath snapshots (default 'skoop-backups/custom').
+
 .PARAMETER StagingDir
     Local folder used to assemble the backup before upload. Defaults to
     %LOCALAPPDATA%\skoop\backup and is removed after a verified upload.
@@ -157,6 +166,10 @@ param(
     [switch] $NoOpenCode,
     [switch] $NoSsh,
     [switch] $NoRepos,
+    # Extra local path(s) to snapshot, e.g. a Scoop app directory.
+    [string[]] $BackupPath = @(),
+    # Remote folder for -BackupPath snapshots.
+    [string] $BackupRemotePath = 'skoop-backups/custom',
     [switch] $SkipBackup,
     [switch] $KeepFirefoxLogins,
     [switch] $BackupOnly,
@@ -1024,7 +1037,7 @@ if (-not $SkipBackup) {
 
     $stagingRoot = Join-Path $logDir $stamp
     if ($DryRun) {
-        Write-Log 'DRYRUN would stage Firefox + Vicinae + Atuin + Pear Desktop + OpenCode locally, upload each, verify over ssh, then delete staging'
+        Write-Log 'DRYRUN would stage Firefox + Vicinae + Atuin + Pear Desktop + OpenCode + any -BackupPath targets locally, upload each, verify over ssh, then delete staging'
     } else {
         $firefoxRoot = Join-Path $stagingRoot 'firefox'
         New-Item -ItemType Directory -Force -Path $firefoxRoot | Out-Null
@@ -1045,6 +1058,26 @@ if (-not $SkipBackup) {
         Write-Log ("local staging complete: " + $stagedFiles.Count + " files, " + ('{0:N1}' -f ($stagedBytes / 1MB)) + ' MB')
         $remoteBackups += Invoke-RemoteBackup -Source $firefoxRoot -Stamp $stamp -SshUser $sshUser `
             -RemotePath $RemotePath -RequiredPaths @('profiles.ini') -MinFiles 2
+
+        foreach ($custom in $BackupPath) {
+            if (-not $custom -or -not (Test-Path -LiteralPath $custom)) {
+                Write-Log ("custom backup path missing: " + $custom)
+                continue
+            }
+            $name = Split-Path -Leaf $custom.TrimEnd('\')
+            if (-not $name) { $name = 'custom' }
+            $customRoot = Join-Path $stagingRoot ('custom-' + $name)
+            New-Item -ItemType Directory -Force -Path $customRoot | Out-Null
+            if ((Get-Item -LiteralPath $custom -Force).PSIsContainer) {
+                Get-ChildItem -LiteralPath $custom -Force | Copy-Item -Destination $customRoot -Recurse -Force
+            } else {
+                Copy-Item -LiteralPath $custom -Destination $customRoot -Force
+            }
+            $customCount = @(Get-ChildItem -LiteralPath $customRoot -Recurse -File -ErrorAction SilentlyContinue).Count
+            Write-Log ("staged custom path: $custom -> $customRoot ($customCount files)")
+            $remoteBackups += Invoke-RemoteBackup -Source $customRoot -Stamp $stamp -SshUser $sshUser `
+                -RemotePath $BackupRemotePath -RequiredPaths @() -MinFiles 1
+        }
 
         if (-not $NoVicinae) {
             $vicinaeRoot = Join-Path $stagingRoot 'vicinae'
