@@ -907,7 +907,13 @@ try {
         Start-VicinaeServer
     }
     if (-not $DryRun -and (Test-Path -LiteralPath $stage)) {
-        Remove-Item -LiteralPath $stage -Recurse -Force
-        Write-Log ("removed staging: " + $stage)
+        # Cleanup must never turn a successful restore into a failure. A stale
+        # Firefox staging folder can still hold a locked widevinecdm.dll.
+        try {
+            Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop
+            Write-Log ("removed staging: " + $stage)
+        } catch {
+            Write-Warn ("could not remove staging " + $stage + ": " + $_.Exception.Message)
+        }
     }
 }
