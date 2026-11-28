@@ -122,6 +122,11 @@
       SKOOP_BACKUP_USER supplies the SSH user and is cached in
       %LOCALAPPDATA%\skoop\backup-user so later restores do not prompt;
       -SkipShutdownHook opts out.
+    - Adds a notification-area icon via apps/tray/configure.ps1 (per-user
+      Startup shortcut, started now) whose menu runs the same scripts without a
+      terminal: "Backup now" (-BackupOnly) or "Backup + sign out" (the full
+      cleanup, after a confirmation). Useful when the desktop is handover-ready
+      and no shell can be opened.
     - Installs skoopub-mouse from the GitHub Release into %LOCALAPPDATA%\skoop\mouse
       via apps/mouse/configure.ps1 (non-fatal), so `apps/mouse/mouse.ps1 diagnose`
       can capture HID Raw Input vs WM_MOUSEWHEEL. It also sets the hardware DPI
@@ -1804,6 +1809,7 @@ if (-not $repoRoot)
         'apps/rio/configure.ps1', 'apps/komorebi/configure.ps1',
         'apps/yasb/configure.ps1', 'apps/yasb/setup-wallpapers.ps1', 'apps/nushell/setup.ps1',
         'apps/mouse/configure.ps1', 'apps/mouse/mouse.ps1',
+        'apps/tray/configure.ps1', 'apps/tray/tray.ps1',
         'apps/librescoll/configure.ps1',
         'apps/starship/configure.ps1', 'apps/starship/starship.toml',
         'apps/marimo/configure.ps1', 'apps/marimo/config.toml',
@@ -1844,6 +1850,7 @@ $starshipConfig  = Join-Path $repoRoot 'apps\starship\configure.ps1'
 $marimoConfig    = Join-Path $repoRoot 'apps\marimo\configure.ps1'
 $darkMode        = Join-Path $repoRoot 'core\set-dark-mode.ps1'
 $mouseConfig     = Join-Path $repoRoot 'apps\mouse\configure.ps1'
+$trayConfig      = Join-Path $repoRoot 'apps\tray\configure.ps1'
 $librescollConfig = Join-Path $repoRoot 'apps\librescoll\configure.ps1'
 # One restore pass from acer-ubuntu once Tailscale connects: every snapshot is
 # restored here, before GitHub auth and any repo clone. Hashtables (not string
@@ -2525,6 +2532,24 @@ if (-not $SkipShutdownHook -and (Test-Path $shutdownHook))
     Write-Ok 'core/install-shutdown-hook.ps1 not found - skipping'
 }
 
+# --- 21b. Tray icon for backup and cleanup ----------------------------------
+# The window may be gone when the machine is about to be handed over, so the
+# same work is reachable from the notification area.
+if (Test-Path $trayConfig)
+{
+    Write-Step 'Installing the backup and cleanup tray icon'
+    try
+    {
+        & $trayConfig
+    } catch
+    {
+        Write-Host "    Tray setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else
+{
+    Write-Ok 'apps/tray/configure.ps1 not found - skipping'
+}
+
 # --- 22. LibreScroll (inertial middle-button scrolling) ----------------------
 if (Test-Path $librescollConfig)
 {
@@ -2565,6 +2590,7 @@ if (-not $SkipShutdownHook)
 {
     Write-Host 'Shutdown cleanup is registered: Firefox/Vicinae/Atuin/Pear Desktop/OpenCode back up to acer-ubuntu and local sign-ins (GitHub, Tailscale, Pear Desktop, OpenCode, Firefox) are cleared on shutdown/logoff.' -ForegroundColor Green
 }
+Write-Host 'Skoop tray icon: right-click for "Backup now" or "Backup + sign out" (starts at login).' -ForegroundColor Green
 
 # --- 23. Leave the Scoop tray apps running ------------------------------------
 Write-Step 'Starting Tailscale and ShareX from their Scoop Apps shortcuts'
