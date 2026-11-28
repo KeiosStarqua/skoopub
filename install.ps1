@@ -70,7 +70,9 @@
       so ShareX owns the PrtSc key; an already-applied fix is left untouched (no registry
       write, no ShareX restart). A failure is reported but does not abort the bootstrap.
     - Starts Tailscale and ShareX from their Scoop Apps Start Menu shortcuts at the
-      end of the run when they are not already up; failures are non-fatal.
+      end of the run when they are not already up; failures are non-fatal. After the
+      Tailscale sign-in the tray is (re)started from the same shortcut so Windows
+      keeps showing its icon and the "Authentication Needed" notification.
     - Copies the repo-managed Zed settings/keymap/tasks into %APPDATA%\Zed (old
       files are backed up); Zed installs its declared extensions on next start.
     - Copies the repo-managed Rio config into %LOCALAPPDATA%\rio\config.toml,
@@ -1023,8 +1025,10 @@ function Start-TailscaleDaemon
     # Scoop ships tailscaled but not the Windows service. Prefer the service
     # when the official installer created it; otherwise run the exe from the
     # Scoop app folder directly (there is no tailscaled shim). Also start the
-    # tray app (tailscale-ipn.exe) and register it in HKCU Run via the package's
-    # add-startup.reg, so Tailscale comes back after a sign-in/reboot.
+    # tray app from its Scoop Apps Start Menu shortcut (falling back to
+    # tailscale-ipn.exe) and register it in HKCU Run via the package's
+    # add-startup.reg, so Tailscale comes back after a sign-in/reboot. The
+    # shortcut keeps Windows' notification-area identity (and icon) intact.
     # Login is interactive (tray icon or `tailscale up`), so it is left to you.
     Write-Step 'Starting Tailscale'
     $appDir = $null
@@ -1091,13 +1095,33 @@ function Start-TailscaleDaemon
         {
             if (-not (Get-Process -Name 'tailscale-ipn' -ErrorAction SilentlyContinue))
             {
-                try
+                # Prefer the Start Menu shortcut: Windows keys the tray icon on
+                # the shortcut/executable identity, so this keeps the icon and
+                # its notifications visible.
+                $trayShortcut = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Microsoft\Windows\Start Menu\Programs\Scoop Apps\Tailscale.lnk'
+                $started = $false
+                if (Test-Path -LiteralPath $trayShortcut)
                 {
-                    Start-Process -FilePath $trayExe
-                    Write-Ok 'started tailscale-ipn.exe (Tailscale tray)'
-                } catch
+                    try
+                    {
+                        Start-Process -FilePath $trayShortcut
+                        Write-Ok 'started the Tailscale tray from its Scoop Apps shortcut'
+                        $started = $true
+                    } catch
+                    {
+                        Write-Host "    Could not start the Tailscale shortcut (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+                    }
+                }
+                if (-not $started)
                 {
-                    Write-Host "    Could not start tailscale-ipn.exe (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+                    try
+                    {
+                        Start-Process -FilePath $trayExe
+                        Write-Ok 'started tailscale-ipn.exe (Tailscale tray)'
+                    } catch
+                    {
+                        Write-Host "    Could not start tailscale-ipn.exe (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+                    }
                 }
             } else
             { Write-Ok 'tailscale-ipn.exe is already running'

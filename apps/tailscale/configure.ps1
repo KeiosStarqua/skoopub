@@ -182,6 +182,77 @@ function Resolve-TailscaleCli {
     return $null
 }
 
+function Resolve-TailscaleAppDir {
+    param([string]$Cli)
+    # Prefer the package's app dir over the CLI's folder: Scoop also shims
+    # tailscale-ipn.exe into shims\, and the tray must be launched from
+    # apps\tailscale\current to keep its notification-area identity.
+    $candidates = @()
+    $roots = @()
+    if ($env:SCOOP) { $roots += $env:SCOOP }
+    if ($env:USERPROFILE) { $roots += (Join-Path $env:USERPROFILE 'scoop') }
+    if ($env:ProgramData) { $roots += (Join-Path $env:ProgramData 'scoop') }
+    foreach ($root in $roots) { $candidates += (Join-Path $root 'apps\tailscale\current') }
+    if ($Cli) { $candidates += (Split-Path -Parent $Cli) }
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath (Join-Path $candidate 'tailscale-ipn.exe'))) { return $candidate }
+    }
+    return $null
+}
+
+function Start-TailscaleTray {
+    # Launch the tray app from its Scoop Apps Start Menu shortcut. Windows keys
+    # the notification-area entry on the shortcut/executable identity, so a tray
+    # started from a versioned folder (apps\tailscale\1.104.7) is treated as a
+    # different app and can stay hidden. Starting the .lnk keeps the icon and
+    # the "Authentication Needed" notification visible.
+    param([string]$AppDir)
+
+    $wanted = if ($AppDir) { Join-Path $AppDir 'tailscale-ipn.exe' } else { $null }
+    $running = @(Get-Process -Name 'tailscale-ipn' -ErrorAction SilentlyContinue)
+    $stale = @()
+    foreach ($process in $running) {
+        try {
+            $path = $process.Path
+            if ($wanted -and $path -and ($path -ne $wanted)) { $stale += $process }
+        } catch {
+            # An elevated tray may hide its path; leave it alone.
+        }
+    }
+    if ($running.Count -gt 0 -and $stale.Count -eq 0) {
+        Write-Ok 'Tailscale tray is already running'
+        return
+    }
+    if ($stale.Count -gt 0) {
+        try {
+            $stale | Stop-Process -Force
+            Start-Sleep -Milliseconds 500
+            Write-Ok 'restarted the Tailscale tray so its icon identity matches'
+        } catch {
+            Write-Warn "could not restart the stale Tailscale tray: $($_.Exception.Message)"
+        }
+    }
+
+    $shortcut = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Microsoft\Windows\Start Menu\Programs\Scoop Apps\Tailscale.lnk'
+    if (Test-Path -LiteralPath $shortcut) {
+        try {
+            Start-Process -FilePath $shortcut
+            Write-Ok 'started the Tailscale tray from its Scoop Apps shortcut'
+            return
+        } catch {
+            Write-Warn "could not start the Tailscale shortcut: $($_.Exception.Message)"
+        }
+    }
+    if ($wanted -and (Test-Path -LiteralPath $wanted)) {
+        try {
+            Start-Process -FilePath $wanted
+            Write-Ok 'started tailscale-ipn.exe (Tailscale tray)'
+        } catch {
+            Write-Warn "could not start the Tailscale tray: $($_.Exception.Message)"
+        }
+    }
+}
+
 function Test-TailscaleConnected {
     param([string]$Cli)
     if (-not $Cli) { return $false }
@@ -360,12 +431,29 @@ if ($SignIn) {
     } elseif (-not [Environment]::UserInteractive) {
         Write-Warn 'Tailscale sign-in needs a terminal - run `tailscale up --qr` yourself.'
     } else {
-        Write-Step 'Signing in to Tailscale (scan the QR code or open the URL below)'
-        # Stream the output: --qr draws the login QR code and the URL stays
-        # clickable. cmd merges stderr so 5.1 does not raise NativeCommandError.
-        & cmd /c "`"$cli`" up --qr 2>&1"
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warn "Tailscale sign-in did not finish (exit $LASTEXITCODE) - run ``tailscale up --qr`` later."
+        Write-Step 'Signing in to Tailscale (scan the QR code below)'
+        # Stream the QR through PowerShell: --qr draws it on stderr and a
+        # transcript does not capture native stderr live. Tee-Object keeps a
+        # copy in %LOCALAPPDATA%\skoop\tailscale-signin.log and Write-Host makes
+        # every line appear in the terminal (and the install transcript) as it
+        # arrives. cmd merges stderr so 5.1 does not raise NativeCommandError.
+        $signInLog = Join-Path $env:LOCALAPPDATA 'skoop\tailscale-signin.log'
+        $signInDir = Split-Path -Parent $signInLog
+        if (-not (Test-Path -LiteralPath $signInDir)) {
+            New-Item -ItemType Directory -Force -Path $signInDir | Out-Null
+        }
+        & cmd /c "`"$cli`" up --qr 2>&1" |
+            Tee-Object -FilePath $signInLog |
+            ForEach-Object {
+                if ($_ -match '(https://login\.tailscale\.com/\S+)') {
+                    Write-Host ('    Login URL: ' + $Matches[1]) -ForegroundColor Yellow
+                } else {
+                    Write-Host $_
+                }
+            }
+        $exit = $LASTEXITCODE
+        if ($exit -ne 0) {
+            Write-Warn "Tailscale sign-in did not finish (exit $exit) - run ``tailscale up --qr`` later."
         } else {
             Write-Ok 'Tailscale sign-in complete'
             $signInCompleted = $true
@@ -378,6 +466,11 @@ if ($SignIn) {
 # After a successful sign-in, allow status --json a few seconds to report Online.
 $connected = Test-TailscaleConnected $cli
 if ($signInCompleted -and -not $connected) { $connected = Wait-TailscaleConnected $cli }
+# Bring the tray back from its Scoop Apps shortcut once the node is connected:
+# that is the identity Windows expects, so the icon and its notifications show.
+if ($connected) {
+    Start-TailscaleTray -AppDir (Resolve-TailscaleAppDir -Cli $cli)
+}
 # Mandatory restores must not silently fall through when Tailscale is offline.
 if ($RestoreFirefox -and $FailOnFirefoxRestoreError -and -not $connected) {
     $firefoxMarker = Join-Path $env:LOCALAPPDATA 'skoop\firefox-restore.done'
