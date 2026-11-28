@@ -36,8 +36,15 @@
 
 .PARAMETER SignIn
     Run `tailscale up --qr` when this node is not signed in, so the login URL
-    and QR code are printed in the terminal. Used by the core-terminal phase so
-    Tailscale is connected before the slower phases (and Firefox) start.
+    and QR code are shown. The QR is opened in a new Rio window when Rio and
+    pwsh are available (they render the Unicode block QR correctly); otherwise
+    it streams in the current console with UTF-8 output. Used by the
+    core-terminal phase so Tailscale is connected before the slower phases (and
+    Firefox) start.
+
+.PARAMETER SignInTimeout
+    Seconds to wait for the QR sign-in when it runs in its own Rio window.
+    Defaults to 600; 0 waits until you interrupt the script.
 
 .PARAMETER RestoreVicinae
     After sign-in (or for an already-connected node), restore Vicinae from the
@@ -122,6 +129,9 @@ param(
     [string]$Tag = 'tag:public-client',
     [switch]$SkipTag,
     [switch]$SignIn,
+    # Seconds to wait for the QR sign-in when it runs in its own terminal
+    # window. 0 waits until you give up (Ctrl+C).
+    [int]$SignInTimeout = 600,
     [switch]$RestoreVicinae,
     [switch]$RestorePearDesktop,
     [switch]$RestoreFirefox,
@@ -250,6 +260,98 @@ function Start-TailscaleTray {
         } catch {
             Write-Warn "could not start the Tailscale tray: $($_.Exception.Message)"
         }
+    }
+}
+
+function Resolve-SkoopExe {
+    # Resolve rio/pwsh from PATH or the Scoop roots (shims, app dir, bin).
+    param([string]$Name)
+    $found = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($found) { return $found.Source }
+    $roots = @()
+    if ($env:SCOOP) { $roots += $env:SCOOP }
+    if ($env:USERPROFILE) { $roots += (Join-Path $env:USERPROFILE 'scoop') }
+    if ($env:ProgramData) { $roots += (Join-Path $env:ProgramData 'scoop') }
+    foreach ($root in $roots) {
+        foreach ($relative in @("shims\$Name.exe", "apps\$Name\current\$Name.exe", "apps\$Name\current\bin\$Name.exe")) {
+            $candidate = Join-Path $root $relative
+            if (Test-Path -LiteralPath $candidate) { return $candidate }
+        }
+    }
+    return $null
+}
+
+function Test-TailscaleSignInProcess {
+    # True when a `tailscale up --qr` is already running, e.g. the QR window from
+    # an earlier install run. Reuse it instead of opening another window.
+    try {
+        $procs = @(Get-CimInstance Win32_Process -Filter "Name='tailscale.exe'" -ErrorAction SilentlyContinue)
+    } catch {
+        return $false
+    }
+    foreach ($proc in $procs) {
+        $line = [string]$proc.CommandLine
+        if ($line -match '(^|\s)up(\s|$)' -and $line -match '--qr') { return $true }
+    }
+    return $false
+}
+
+function Start-TailscaleQrWindow {
+    # Show `tailscale up --qr` in its own Rio window. Rio (installed in phase 1)
+    # renders the Unicode block QR correctly, while a legacy conhost with code
+    # page 437 shows it as mojibake. The window closes itself once `tailscale up`
+    # returns, so repeated install runs do not pile up terminals. Returns $true
+    # when the window was opened.
+    param([string]$Cli)
+
+    if (-not [Environment]::UserInteractive) { return $false }
+    $rio = Resolve-SkoopExe -Name 'rio'
+    $pwsh = Resolve-SkoopExe -Name 'pwsh'
+    if (-not $rio -or -not $pwsh) { return $false }
+
+    $reposDir = Join-Path $env:USERPROFILE 'repos'
+    if (-not (Test-Path -LiteralPath $reposDir)) {
+        New-Item -ItemType Directory -Force -Path $reposDir | Out-Null
+    }
+    # Single quotes keep a path with spaces intact; the whole -Command string is
+    # double-quoted because Start-Process joins -ArgumentList without quoting.
+    # `$LASTEXITCODE` is escaped so the child evaluates it, not this script.
+    $command = "& '$Cli' up --qr; if (`$LASTEXITCODE -ne 0) { Write-Host 'Tailscale sign-in did not finish - see the message above.'; Start-Sleep -Seconds 10 }"
+    $rioArgs = @('-w', "`"$reposDir`"", '-e', "`"$pwsh`"", '-NoLogo', '-Command', "`"$command`"")
+    try {
+        Start-Process -FilePath $rio -ArgumentList $rioArgs -WorkingDirectory $reposDir | Out-Null
+        return $true
+    } catch {
+        Write-Warn "could not open Rio for the QR: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Wait-TailscaleSignIn {
+    # The QR runs in its own window, so poll the backend instead of waiting on
+    # the child process. -TimeoutSeconds 0 waits until the script is stopped.
+    param([string]$Cli, [int]$TimeoutSeconds = 600, [switch]$WatchProcess)
+    $deadline = if ($TimeoutSeconds -gt 0) { (Get-Date).AddSeconds($TimeoutSeconds) } else { $null }
+    $nextReport = (Get-Date).AddSeconds(20)
+    while ($true) {
+        if (Test-TailscaleConnected $Cli) { return $true }
+        if ($WatchProcess -and -not (Test-TailscaleSignInProcess)) {
+            # The QR window exited (cancelled or failed). Give the backend a
+            # moment, then stop instead of waiting out the whole timeout.
+            Start-Sleep -Seconds 5
+            return (Test-TailscaleConnected $Cli)
+        }
+        if ($deadline -and (Get-Date) -ge $deadline) { return $false }
+        if ((Get-Date) -ge $nextReport) {
+            if ($deadline) {
+                $left = [int][Math]::Max(0, [Math]::Ceiling(($deadline - (Get-Date)).TotalSeconds))
+                Write-Ok "waiting for the Tailscale sign-in (${left}s left)"
+            } else {
+                Write-Ok 'waiting for the Tailscale sign-in'
+            }
+            $nextReport = (Get-Date).AddSeconds(20)
+        }
+        Start-Sleep -Seconds 2
     }
 }
 
@@ -431,32 +533,62 @@ if ($SignIn) {
     } elseif (-not [Environment]::UserInteractive) {
         Write-Warn 'Tailscale sign-in needs a terminal - run `tailscale up --qr` yourself.'
     } else {
-        Write-Step 'Signing in to Tailscale (scan the QR code below)'
-        # Stream the QR through PowerShell: --qr draws it on stderr and a
-        # transcript does not capture native stderr live. Tee-Object keeps a
-        # copy in %LOCALAPPDATA%\skoop\tailscale-signin.log and Write-Host makes
-        # every line appear in the terminal (and the install transcript) as it
-        # arrives. cmd merges stderr so 5.1 does not raise NativeCommandError.
-        $signInLog = Join-Path $env:LOCALAPPDATA 'skoop\tailscale-signin.log'
-        $signInDir = Split-Path -Parent $signInLog
-        if (-not (Test-Path -LiteralPath $signInDir)) {
-            New-Item -ItemType Directory -Force -Path $signInDir | Out-Null
-        }
-        & cmd /c "`"$cli`" up --qr 2>&1" |
-            Tee-Object -FilePath $signInLog |
-            ForEach-Object {
-                if ($_ -match '(https://login\.tailscale\.com/\S+)') {
-                    Write-Host ('    Login URL: ' + $Matches[1]) -ForegroundColor Yellow
-                } else {
-                    Write-Host $_
-                }
+        # A legacy conhost with code page 437 renders the Unicode block QR as
+        # mojibake, so the QR is shown in a new Rio window when possible. An
+        # already-open `tailscale up --qr` (from an earlier run) is reused
+        # instead of opening another terminal.
+        if (Test-TailscaleSignInProcess) {
+            Write-Step 'Signing in to Tailscale (a QR window is already open)'
+            $signInCompleted = Wait-TailscaleSignIn -Cli $cli -TimeoutSeconds $SignInTimeout -WatchProcess
+            if ($signInCompleted) {
+                Write-Ok 'Tailscale sign-in complete'
+            } else {
+                Write-Warn 'Tailscale sign-in did not complete - run `tailscale up --qr` later.'
             }
-        $exit = $LASTEXITCODE
-        if ($exit -ne 0) {
-            Write-Warn "Tailscale sign-in did not finish (exit $exit) - run ``tailscale up --qr`` later."
+        } elseif (Start-TailscaleQrWindow -Cli $cli) {
+            Write-Step 'Signing in to Tailscale (scan the QR code in the new Rio window)'
+            $signInCompleted = Wait-TailscaleSignIn -Cli $cli -TimeoutSeconds $SignInTimeout -WatchProcess
+            if ($signInCompleted) {
+                Write-Ok 'Tailscale sign-in complete'
+            } else {
+                Write-Warn 'Tailscale sign-in did not complete - run `tailscale up --qr` later.'
+            }
         } else {
-            Write-Ok 'Tailscale sign-in complete'
-            $signInCompleted = $true
+            Write-Step 'Signing in to Tailscale (scan the QR code below)'
+            # Fallback for machines without Rio/pwsh: stream the QR through
+            # PowerShell. --qr draws it on stderr and a transcript does not
+            # capture native stderr live, so Tee-Object keeps a copy in
+            # %LOCALAPPDATA%\skoop\tailscale-signin.log and Write-Host makes
+            # every line appear as it arrives. The console code page is forced
+            # to UTF-8 so the block characters are not mangled; cmd merges
+            # stderr so 5.1 does not raise NativeCommandError.
+            $signInLog = Join-Path $env:LOCALAPPDATA 'skoop\tailscale-signin.log'
+            $signInDir = Split-Path -Parent $signInLog
+            if (-not (Test-Path -LiteralPath $signInDir)) {
+                New-Item -ItemType Directory -Force -Path $signInDir | Out-Null
+            }
+            $oldEncoding = [Console]::OutputEncoding
+            try {
+                [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+                & cmd /c "`"$cli`" up --qr 2>&1" |
+                    Tee-Object -FilePath $signInLog |
+                    ForEach-Object {
+                        if ($_ -match '(https://login\.tailscale\.com/\S+)') {
+                            Write-Host ('    Login URL: ' + $Matches[1]) -ForegroundColor Yellow
+                        } else {
+                            Write-Host $_
+                        }
+                    }
+            } finally {
+                [Console]::OutputEncoding = $oldEncoding
+            }
+            $exit = $LASTEXITCODE
+            if ($exit -ne 0) {
+                Write-Warn "Tailscale sign-in did not finish (exit $exit) - run ``tailscale up --qr`` later."
+            } else {
+                Write-Ok 'Tailscale sign-in complete'
+                $signInCompleted = $true
+            }
         }
     }
 }

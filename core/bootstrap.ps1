@@ -162,6 +162,11 @@ function Start-HerdrInRio {
     if ($env:SKOOP_NO_AUTO_HERDR -eq '1' -or -not [Environment]::UserInteractive -or $env:HERDR_ENV -eq '1') {
         return
     }
+    # Re-runs must not stack Rio/Herdr windows on the desktop.
+    if (Get-Process -Name 'rio' -ErrorAction SilentlyContinue) {
+        Write-Host 'Rio is already open - skipping the auto-launch.'
+        return
+    }
     Update-SkoopProcessPath
     $rioPath = Get-SkoopExePath -Name rio
     $pwshPath = Get-SkoopExePath -Name pwsh

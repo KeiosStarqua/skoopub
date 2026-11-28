@@ -31,8 +31,10 @@
       before the restore pass, so both CLIs/browsers are usable immediately; the
       later phases skip apps that are already installed.
     - Phase 2 installs Tailscale and runs `tailscale up --qr` through
-      apps/tailscale/configure.ps1 before any ~/repos clone, so the login URL/QR
-      is printed early; sign-in is skipped when the node is already connected.
+      apps/tailscale/configure.ps1 before any ~/repos clone. The QR opens in a
+      new Rio window (a legacy console mangles its Unicode blocks), reuses one
+      already showing the QR, and closes itself after sign-in; sign-in is skipped
+      when the node is already connected.
       Once connected it restores everything from acer-ubuntu in one pass
       (Vicinae, Pear Desktop, Firefox, Atuin, OpenCode credentials, SSH key and
       repo list) before the `gh auth login` prompt; if the OpenCode or Firefox
@@ -136,8 +138,8 @@
       overwritten; -SkipRepoClones / SKOOP_NO_REPO_CLONES=1 opts out.
     - Installs the terminals and Herdr first (phase 1, core-terminal), then opens
       Rio in ~/repos with Herdr already running before Tailscale. Skipped for
-      non-interactive shells and Herdr panes; -NoAutoHerdr / SKOOP_NO_AUTO_HERDR=1
-      opts out.
+      non-interactive shells, Herdr panes and an already-open Rio window;
+      -NoAutoHerdr / SKOOP_NO_AUTO_HERDR=1 opts out.
     - Phase 2 installs and signs in to Tailscale (`tailscale up --qr`), then
       restores everything from acer-ubuntu in one pass before GitHub auth and the
       repo clones: Vicinae, Pear Desktop, Firefox, Atuin, OpenCode config/state and
@@ -1637,6 +1639,12 @@ function Start-HerdrInRio
         # install.ps1 is sometimes run from inside a Herdr pane; launching a
         # nested client there makes herdr abort with the inception message.
         Write-Ok 'running inside Herdr - skipping the nested Rio/Herdr launch'
+        return
+    }
+    # Re-runs must not stack Rio/Herdr windows on the desktop.
+    if (Get-Process -Name 'rio' -ErrorAction SilentlyContinue)
+    {
+        Write-Ok 'Rio is already open - skipping the auto-launch'
         return
     }
     Update-SkoopProcessPath

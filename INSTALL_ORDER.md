@@ -29,7 +29,8 @@ After the phase, in this order:
    continues under PowerShell 7 (piped runs use a cached copy of `install.ps1`).
 3. `apps/rio/configure.ps1` (font size / zoom).
 4. Open Rio in `~/repos` with Herdr already running, using the resolved pwsh 7
-   executable (`-NoAutoHerdr` opts out).
+   executable (`-NoAutoHerdr` opts out). Skipped when a Rio window is already
+   open, so repeated install runs do not stack terminals.
 
 Rio is deliberately installed before Herdr; Vicinae is only installed here and
 configured later, after its backup restore.
@@ -41,10 +42,11 @@ Installs Tailscale, then the callback does everything that needs the network:
 1. Install OpenCode, then Firefox from their `manifests/scoop.json` entries (their
    restores need the CLI / the browser profile; skipped with `-EssentialsOnly`).
 2. Start the Tailscale daemon.
-3. `apps/tailscale/configure.ps1 -SignIn`: `tailscale up --qr`, wait until online,
-   then restore OpenCode first, followed by Vicinae, Pear Desktop, Firefox and
-   Atuin as parallel child processes (each with its own restore log), then
-   advertise `tag:public-client`.
+3. `apps/tailscale/configure.ps1 -SignIn`: `tailscale up --qr` in a new Rio window
+   (reusing one already showing the QR; a console fallback forces UTF-8), wait
+   until online, then restore OpenCode first, followed by Vicinae, Pear Desktop,
+   Firefox and Atuin as parallel child processes (each with its own restore log),
+   then advertise `tag:public-client`.
 4. Restore the SSH key (`core/restore-backup.ps1 -Only ssh`).
 5. Restore the registered repo list (`-Only repos`).
 6. Apply the Vicinae config (Ctrl+Space) and autostart on top of the restored data.
