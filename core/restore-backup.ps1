@@ -306,9 +306,9 @@ function Save-Snapshot {
     }
     New-Item -ItemType Directory -Force -Path $target | Out-Null
 
-    # A tar stream avoids Windows' 260-character path limit that scp hits on
-    # deep Firefox cache paths. cmd.exe carries the binary stream straight from
-    # ssh to tar; PowerShell 5.1 would corrupt it through its text pipeline.
+    # A tar archive avoids Windows' 260-character path limit that scp hits on
+    # deep Firefox paths. Download it to a file first: piping ssh into tar
+    # deadlocked on Windows, leaving both ends waiting forever.
     $tarCmd = Get-Command tar -ErrorAction SilentlyContinue
     if ($tarCmd) {
         $excludeArgs = @()
@@ -316,25 +316,33 @@ function Save-Snapshot {
         $tarExcludes = if ($excludeArgs.Count) { ' ' + ($excludeArgs -join ' ') } else { '' }
         $remoteCmd = "cd '$RemoteFolder' && tar -cf -$tarExcludes ."
         $sshQuoted = @($sshArgs | ForEach-Object { '"' + $_ + '"' }) -join ' '
-        # Separate stderr files: both sides of a cmd pipeline writing to the
-        # same append target causes a sharing violation on Windows.
+        $tarFile = Join-Path $StageRoot ("{0}.tar" -f $FolderName)
         $sshErrLog = $script:LogPath + '.ssh.err'
         $tarErrLog = $script:LogPath + '.tar.err'
-        foreach ($errLog in @($sshErrLog, $tarErrLog)) {
-            if (Test-Path -LiteralPath $errLog) { Remove-Item -LiteralPath $errLog -Force }
+        foreach ($path in @($tarFile, $sshErrLog, $tarErrLog)) {
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
         }
-        $cmdLine = "ssh $sshQuoted `"$remoteCmd`" 2>>`"$sshErrLog`" | `"$($tarCmd.Source)`" -xf - -C `"$target`" 2>>`"$tarErrLog`""
-        Write-Log ("tar stream: ssh " + ($sshArgs -join ' ') + " '$remoteCmd' | tar -xf - -C $target")
-        & cmd.exe /d /c $cmdLine | Out-Null
+
+        $downloadLine = "ssh $sshQuoted `"$remoteCmd`" > `"$tarFile`" 2>>`"$sshErrLog`""
+        Write-Log ("tar download: ssh " + ($sshArgs -join ' ') + " '$remoteCmd' > $tarFile")
+        & cmd.exe /d /c $downloadLine | Out-Null
         $tarExit = $LASTEXITCODE
+        if ($tarExit -eq 0) {
+            $extractLine = "`"$($tarCmd.Source)`" -xf `"$tarFile`" -C `"$target`" 2>>`"$tarErrLog`""
+            & cmd.exe /d /c $extractLine | Out-Null
+            $tarExit = $LASTEXITCODE
+        }
         foreach ($errLog in @($sshErrLog, $tarErrLog)) {
             if (Test-Path -LiteralPath $errLog) {
                 Get-Content -LiteralPath $errLog | ForEach-Object { Write-Log ("stream: " + $_.Trim()) }
             }
         }
+        Remove-Item -LiteralPath $tarFile -Force -ErrorAction SilentlyContinue
         if ($tarExit -eq 0) { return }
         Write-Warn "tar download failed for $RemoteFolder (exit $tarExit); falling back to scp."
-        if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+        if (Test-Path -LiteralPath $target) {
+            try { Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop } catch { }
+        }
     }
 
     $scpArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=10', '-o', 'LogLevel=ERROR', '-r', ($peer + ':' + $RemoteFolder), $StageRoot)
@@ -815,8 +823,9 @@ if ($doPear -and $pearRunning.Count -gt 0 -and -not $DryRun) {
     Start-Sleep -Seconds 2
 }
 
-$restoreStamp = @($ffStamp, $vcStamp, $atStamp, $peStamp, $ocStamp, $ssStamp, $rsStamp) | Where-Object { $_ } | Select-Object -First 1
-$stage = Join-Path $restoreRoot $restoreStamp
+# Short unique staging path per run: a locked leftover from an earlier restore
+# must never block this one, and the short name keeps deep profile paths valid.
+$stage = Join-Path $restoreRoot ('r' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $stage | Out-Null }
 
 try {
@@ -824,9 +833,13 @@ try {
         $remoteFolder = Get-SnapshotRemotePath -BasePath $FirefoxRemotePath -FolderName 'firefox' -TheStamp $ffStamp
         Write-Log ("restoring Firefox from " + $peer + ':' + $remoteFolder)
         if (-not $DryRun) {
-            # Skip browser caches: they are not part of the usable profile and
-            # contain paths longer than Windows' MAX_PATH (scp cannot create them).
-            $firefoxExcludes = @('cache', 'cache2', 'startupCache', 'offlineCache', 'thumbnails', 'jumpListCache')
+            # Skip browser caches and machine-local plugin binaries: neither is
+            # profile data, the caches exceed MAX_PATH, and a running Firefox
+            # locks widevinecdm.dll so it must not be replaced.
+            $firefoxExcludes = @(
+                'cache', 'cache2', 'startupCache', 'offlineCache', 'thumbnails', 'jumpListCache',
+                'gmp-widevinecdm', 'gmp-gmpopenh264', 'widevinecdm.dll'
+            )
             Save-Snapshot -RemoteFolder $remoteFolder -StageRoot $stage -FolderName 'firefox' -Excludes $firefoxExcludes
         }
         if (-not $DryRun -and -not (Test-Path -LiteralPath (Join-Path $stage 'firefox\profiles.ini'))) {
@@ -913,7 +926,7 @@ try {
             Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop
             Write-Log ("removed staging: " + $stage)
         } catch {
-            Write-Warn ("could not remove staging " + $stage + ": " + $_.Exception.Message)
+            Write-Log ("staging cleanup skipped (" + $stage + "): " + $_.Exception.Message)
         }
     }
 }
