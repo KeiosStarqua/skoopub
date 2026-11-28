@@ -554,6 +554,11 @@ function Initialize-SkoopStorage {
     if (Test-Path -LiteralPath $configPath) {
         try { $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json } catch { }
     }
+    # A migration requested by the parent must survive a pwsh handoff even if
+    # the switch was not forwarded (older cached installer).
+    if ($config -and $config.migrate -and -not $MigrateScoop -and -not $StorageRoot)
+    { $MigrateScoop = $true 
+    }
 
     $existingRoot = @($env:SCOOP, (Join-Path $env:USERPROFILE 'scoop'), (Join-Path $env:ProgramData 'scoop')) |
         Where-Object { $_ -and (Test-Path -LiteralPath (Join-Path $_ 'shims\scoop.cmd')) } |
@@ -595,7 +600,7 @@ function Initialize-SkoopStorage {
     foreach ($entry in $paths.GetEnumerator()) { Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value }
     try {
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $configPath) | Out-Null
-        $payload = [pscustomobject]@{ root = $root; paths = $paths }
+        $payload = [pscustomobject]@{ root = $root; migrate = $true; paths = $paths }
         $utf8 = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($configPath, ($payload | ConvertTo-Json -Depth 5), $utf8)
         foreach ($entry in $paths.GetEnumerator()) {

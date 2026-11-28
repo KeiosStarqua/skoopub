@@ -264,6 +264,17 @@ function Invoke-SkoopPhases {
                 # Without this the phase looks frozen until every import finishes;
                 # phase 5 can run for minutes.
                 Write-Host ('    importing {0} package(s): {1}' -f $items.Count, (($items | ForEach-Object { $_.Name }) -join ', ')) -ForegroundColor DarkGray
+                # A native warning on stderr (e.g. rustup's "installing msvc
+                # toolchain without its prerequisites") becomes a terminating
+                # error under the caller's Stop preference. Suppressing it only
+                # inside each worker is not enough: the parent pipeline still
+                # stops. Scope the suppression around the whole import section.
+                $parentEap = $ErrorActionPreference
+                $parentNative = $PSNativeCommandUseErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                $PSNativeCommandUseErrorActionPreference = $false
+                try
+                {
                 if ($ThrottleLimit -gt 1 -and $PSVersionTable.PSVersion.Major -ge 7) {
                     $results = @($items | ForEach-Object -Parallel {
                         $item = $_
@@ -326,6 +337,11 @@ function Invoke-SkoopPhases {
                             Error   = $errorText
                         }
                     }
+                }
+                } finally
+                {
+                    $ErrorActionPreference = $parentEap
+                    $PSNativeCommandUseErrorActionPreference = $parentNative
                 }
                 foreach ($item in $items) {
                     $result = @($results | Where-Object { $_.Name -eq $item.Name })[0]
