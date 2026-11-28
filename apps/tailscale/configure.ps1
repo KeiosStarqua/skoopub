@@ -92,6 +92,10 @@
     The bootstraps pass this so an install stops before GitHub auth and repo
     clones when the Firefox profile could not be restored.
 
+.PARAMETER FailOnOpenCodeRestoreError
+    Treat a failed OpenCode auth restore as a terminating error. The bootstraps
+    pass this so credentials are restored before the Firefox profile.
+
 .EXAMPLE
     .\apps\tailscale\configure.ps1
 
@@ -126,6 +130,7 @@ param(
     [switch]$ForceAtuinRestore,
     [switch]$ForceOpenCodeRestore,
     [switch]$FailOnFirefoxRestoreError,
+    [switch]$FailOnOpenCodeRestoreError,
     [string]$BackupUser = "$env:SKOOP_BACKUP_USER"
 )
 
@@ -135,6 +140,20 @@ Set-StrictMode -Version Latest
 function Write-Step([string]$Message) { Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok([string]$Message)   { Write-Host "    $Message" -ForegroundColor DarkGray }
 function Write-Warn([string]$Message) { Write-Host "    $Message" -ForegroundColor Yellow }
+
+function Resolve-BackupUser {
+    param([string]$Explicit)
+    if ($Explicit) { return $Explicit.Trim() }
+    $cacheFile = Join-Path $env:LOCALAPPDATA 'skoop\backup-user'
+    if (Test-Path -LiteralPath $cacheFile) {
+        $cached = (Get-Content -LiteralPath $cacheFile -TotalCount 1 -ErrorAction SilentlyContinue)
+        if ($cached -and $cached.Trim()) { return $cached.Trim() }
+    }
+    return $null
+}
+# install.ps1 caches -BackupUser early; use it here too so non-interactive
+# restores do not fail just because the caller omitted -BackupUser.
+$BackupUser = Resolve-BackupUser -Explicit $BackupUser
 
 function Resolve-TailscaleCli {
     $found = Get-Command tailscale -ErrorAction SilentlyContinue
@@ -345,12 +364,17 @@ if ($SignIn) {
 # After a successful sign-in, allow status --json a few seconds to report Online.
 $connected = Test-TailscaleConnected $cli
 if ($signInCompleted -and -not $connected) { $connected = Wait-TailscaleConnected $cli }
-# When a bootstrap asks for a mandatory Firefox restore, a disconnected node
-# must not fall through to gh auth and repo clones with the stale profile.
+# Mandatory restores must not silently fall through when Tailscale is offline.
 if ($RestoreFirefox -and $FailOnFirefoxRestoreError -and -not $connected) {
     $firefoxMarker = Join-Path $env:LOCALAPPDATA 'skoop\firefox-restore.done'
     if ($ForceFirefoxRestore -or -not (Test-Path -LiteralPath $firefoxMarker)) {
         throw 'Firefox restore is required but Tailscale is not connected - sign in to Tailscale, then re-run install.ps1.'
+    }
+}
+if ($RestoreOpenCode -and $FailOnOpenCodeRestoreError -and -not $connected) {
+    $opencodeMarker = Join-Path $env:LOCALAPPDATA 'skoop\opencode-restore.done'
+    if ($ForceOpenCodeRestore -or -not (Test-Path -LiteralPath $opencodeMarker)) {
+        throw 'OpenCode auth restore is required but Tailscale is not connected - sign in to Tailscale, then re-run install.ps1.'
     }
 }
 if ($RestoreVicinae -and $connected) {
@@ -359,14 +383,16 @@ if ($RestoreVicinae -and $connected) {
 if ($RestorePearDesktop -and $connected) {
     Invoke-RestoreOnConnect -App pear -Label 'Pear Desktop' -ForceRestore:$ForcePearDesktopRestore -ForceSwitch 'ForcePearDesktopRestore'
 }
+# OpenCode credentials first: the bootstraps require them to be in place before
+# the Firefox profile is copied and before gh auth prompts.
+if ($RestoreOpenCode -and $connected) {
+    Invoke-RestoreOnConnect -App opencode -Label 'OpenCode' -ForceRestore:$ForceOpenCodeRestore -ForceSwitch 'ForceOpenCodeRestore' -MarkerName 'opencode-restore.done' -FailOnRestoreError:$FailOnOpenCodeRestoreError
+}
 if ($RestoreFirefox -and $connected) {
     Invoke-RestoreOnConnect -App firefox -Label 'Firefox' -ForceRestore:$ForceFirefoxRestore -ForceSwitch 'ForceFirefoxRestore' -MarkerName 'firefox-restore.done' -FailOnRestoreError:$FailOnFirefoxRestoreError
 }
 if ($RestoreAtuin -and $connected) {
     Invoke-RestoreOnConnect -App atuin -Label 'Atuin' -ForceRestore:$ForceAtuinRestore -ForceSwitch 'ForceAtuinRestore' -MarkerName 'atuin-restore.done'
-}
-if ($RestoreOpenCode -and $connected) {
-    Invoke-RestoreOnConnect -App opencode -Label 'OpenCode' -ForceRestore:$ForceOpenCodeRestore -ForceSwitch 'ForceOpenCodeRestore' -MarkerName 'opencode-restore.done'
 }
 
 if ($SkipTag) { Write-Ok 'Tailnet tagging skipped (-SkipTag).'; return }

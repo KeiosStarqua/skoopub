@@ -55,12 +55,26 @@ if ($env:SKOOP_NO_ATUIN_RESTORE -eq '1') { $SkipAtuinRestore = $true }
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-# Firefox is restored right after the early Tailscale sign-in, before the gh auth
-# prompt; Atuin follows in phase 1. Both are retried at the end (markers make the
-# retry a no-op); neither app must be installed yet - these are file copies.
+
+function Set-SkoopBackupUserCache {
+    # Remember the acer-ubuntu SSH user so restore-backup.ps1 and the Tailscale
+    # hook never have to prompt on later installs.
+    param([string]$Name)
+    if (-not $Name -or -not $Name.Trim()) { return }
+    $dir = Join-Path $env:LOCALAPPDATA 'skoop'
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    Set-Content -LiteralPath (Join-Path $dir 'backup-user') -Value $Name.Trim() -Encoding ASCII
+    Write-Host "Cached SSH user for acer-ubuntu: $($Name.Trim())"
+}
+# OpenCode credentials are restored first, then the Firefox profile, both right
+# after the early Tailscale sign-in and before gh auth; Atuin follows in phase 1.
+# Both CLIs are installed early because OpenCode's restore needs its CLI. Markers
+# make the end-of-run retries no-ops.
 # Hashtables (not string arrays) are required: splatting an array binds the
 # strings positionally, so '-RestoreFirefox' would land in -Tag instead.
 $earlyRestoreArgs = @{}
+$earlyRestoreArgs.RestoreOpenCode = $true
+$earlyRestoreArgs.FailOnOpenCodeRestoreError = $true
 if (-not $SkipFirefoxRestore) {
     $earlyRestoreArgs.RestoreFirefox = $true
     # A failed restore must stop the run before gh auth / repo clones. Keep this
@@ -537,6 +551,45 @@ function Install-FirefoxBeforeRestore {
     Write-Host "Firefox $versionLabel installed with Scoop."
 }
 
+function Install-OpenCodeBeforeRestore {
+    # OpenCode's restore imports credentials with `opencode auth import`, so the
+    # CLI must be installed before its auth is restored ahead of Firefox.
+    param([string]$ManifestPath, [switch]$Force)
+
+    $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE 'scoop' }
+    if (Get-Command opencode -ErrorAction SilentlyContinue) {
+        if (-not $Force) {
+            Write-Host 'OpenCode already installed with Scoop.'
+            return
+        }
+    }
+    if (-not (Test-Path -LiteralPath $ManifestPath)) { throw "manifest not found: $ManifestPath" }
+    $plan = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+    $app = @($plan.apps | Where-Object { $_.Name -eq 'opencode' })[0]
+    if (-not $app) { throw 'opencode is missing from manifests/scoop.json' }
+    $bucket = @($plan.buckets | Where-Object { $_.Name -eq $app.Source })[0]
+    if (-not $bucket) { $bucket = @($plan.buckets | Where-Object { $_.Name -eq 'main' })[0] }
+    if (-not (Test-Path -LiteralPath (Join-Path $scoopRoot ("buckets\{0}\bucket" -f $bucket.Name)))) {
+        try {
+            if ($bucket.Source) { scoop bucket add $bucket.Name $bucket.Source } else { scoop bucket add $bucket.Name }
+            if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+        } catch {
+            throw "Could not add the $($bucket.Name) bucket for OpenCode: $($_.Exception.Message)"
+        }
+    }
+    $buckets = if ($bucket) { @($bucket) } else { @() }
+    $tmp = Join-Path $env:TEMP 'skoop-opencode-early.json'
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($tmp, ([pscustomobject]@{ buckets = $buckets; apps = @($app) } | ConvertTo-Json -Depth 12), $utf8)
+    Write-Host 'Installing OpenCode with Scoop before restoring its credentials...'
+    & scoop import $tmp
+    $exit = $LASTEXITCODE
+    Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    if ($exit -ne 0) { throw "scoop import failed for the early OpenCode install (exit $exit)." }
+    $env:Path = "$scoopRoot\shims;$env:Path"
+    Write-Host 'OpenCode installed with Scoop.'
+}
+
 # 1. Install Scoop if it is missing (no admin needed unless already elevated).
 if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
     $installer = Join-Path $env:TEMP 'install-scoop.ps1'
@@ -547,6 +600,7 @@ if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
     & $installer -RunAsAdmin:$elevated
 }
 $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
+Set-SkoopBackupUserCache -Name $BackupUser
 
 # 2. Allow local scripts, then hook the repo-managed profile into $PROFILE.
 Set-SkoopExecutionPolicy
@@ -584,19 +638,20 @@ if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) {
     }
 }
 $earlyManifest = Join-Path $repo 'manifests\scoop.json'
+Install-OpenCodeBeforeRestore -ManifestPath $earlyManifest -Force:$ForceInstall
 Install-FirefoxBeforeRestore -ManifestPath $earlyManifest -Force:$ForceInstall
 Start-TailscaleDaemon
-$firefoxRestoreRequired = $earlyRestoreArgs.ContainsKey('FailOnFirefoxRestoreError')
+$earlyRestoreRequired = $earlyRestoreArgs.ContainsKey('FailOnOpenCodeRestoreError') -or $earlyRestoreArgs.ContainsKey('FailOnFirefoxRestoreError')
 if (Test-Path $tailscaleConfig) {
-    # Restore the Firefox profile while Tailscale is connected, before gh auth.
+    # Restore OpenCode auth, then the Firefox profile, before gh auth.
     try { & $tailscaleConfig -SignIn -BackupUser $BackupUser @earlyRestoreArgs }
     catch {
-        $message = "Tailscale sign-in / Firefox restore failed: $($_.Exception.Message)"
-        if ($firefoxRestoreRequired) { throw $message }
+        $message = "Tailscale sign-in / OpenCode/Firefox restore failed: $($_.Exception.Message)"
+        if ($earlyRestoreRequired) { throw $message }
         Write-Host "$message (non-fatal)" -ForegroundColor Yellow
     }
-} elseif ($firefoxRestoreRequired) {
-    throw "apps/tailscale/configure.ps1 not found at $tailscaleConfig - cannot restore Firefox before GitHub auth."
+} elseif ($earlyRestoreRequired) {
+    throw "apps/tailscale/configure.ps1 not found at $tailscaleConfig - cannot restore OpenCode/Firefox before GitHub auth."
 }
 if (Test-Path $ghAuth) {
     try { & $ghAuth -SkipLogin:$SkipGhLogin }

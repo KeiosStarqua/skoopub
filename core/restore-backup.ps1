@@ -56,7 +56,9 @@
     if you changed them outside the repo.
 
 .PARAMETER User
-    SSH user on acer-ubuntu. Defaults to $env:SKOOP_BACKUP_USER; prompts when omitted.
+    SSH user on acer-ubuntu. Defaults to $env:SKOOP_BACKUP_USER, then the cached
+    %LOCALAPPDATA%\skoop\backup-user written by install.ps1; prompts only when
+    neither is available. An answer given at the prompt is cached for next time.
 
 .PARAMETER TargetHost
     Tailnet hostname/IP of the backup machine (default 'acer-ubuntu').
@@ -178,15 +180,37 @@ function Write-Warn {
 }
 
 function Resolve-SshUser {
-    if ($User) { return $User.Trim() }
-    if (-not [Environment]::UserInteractive) {
-        throw 'SSH user is required in a non-interactive shell. Re-run with -User <username>.'
+    $cacheFile = Join-Path $env:LOCALAPPDATA 'skoop\backup-user'
+    $resolved = $null
+    if ($User) {
+        $resolved = $User.Trim()
+    } elseif (Test-Path -LiteralPath $cacheFile) {
+        $cached = (Get-Content -LiteralPath $cacheFile -TotalCount 1 -ErrorAction SilentlyContinue)
+        if ($cached -and $cached.Trim()) {
+            $resolved = $cached.Trim()
+            Write-Log ("SSH user from " + $cacheFile + ": " + $resolved)
+        }
     }
-    $answer = Read-Host ("SSH user for " + $TargetHost)
-    if (-not $answer -or -not $answer.Trim()) {
-        throw 'SSH user cannot be empty.'
+    if (-not $resolved) {
+        if (-not [Environment]::UserInteractive) {
+            throw 'SSH user is required in a non-interactive shell. Re-run with -User <username>.'
+        }
+        $answer = Read-Host ("SSH user for " + $TargetHost)
+        if (-not $answer -or -not $answer.Trim()) {
+            throw 'SSH user cannot be empty.'
+        }
+        $resolved = $answer.Trim()
     }
-    return $answer.Trim()
+    # Remember the answer (or an explicit -User) so later installs and the
+    # per-app Tailscale restore hooks never prompt again on this machine.
+    try {
+        $cacheDir = Split-Path -Parent $cacheFile
+        if (-not (Test-Path -LiteralPath $cacheDir)) { New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null }
+        Set-Content -LiteralPath $cacheFile -Value $resolved -Encoding ASCII
+    } catch {
+        Write-Warn ("could not cache the SSH user in " + $cacheFile + ": " + $_.Exception.Message)
+    }
+    return $resolved
 }
 
 function Remove-SshDiagnostics {
@@ -223,12 +247,30 @@ function Copy-Tree {
     param([string] $Source, [string] $Destination)
 
     if (Get-Command robocopy -ErrorAction SilentlyContinue) {
-        $copyOutput = (& robocopy $Source $Destination /E /COPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NP 2>&1 | Out-String)
-        $code = $LASTEXITCODE
-        if ($code -ge 16) { throw "robocopy failed with code $code for $Source" }
-        if ($code -ge 8) { Write-Warn ("robocopy skipped some files in " + $Source) }
-    } else {
-        Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
+        # Run through cmd.exe so robocopy's stderr is merged into stdout; under
+        # Windows PowerShell 5.1 native stderr would otherwise become a
+        # terminating NativeCommandError and abort before the exit code is seen.
+        # Retry briefly for files that are still locked as Firefox exits.
+        $code = 0
+        $copyOutput = ''
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $copyOutput = (& cmd.exe /d /c "robocopy `"$Source`" `"$Destination`" /E /COPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NP 2>&1" | Out-String)
+            $code = $LASTEXITCODE
+            Write-Log ("robocopy attempt {0} for {1}: exit {2}" -f $attempt, $Source, $code)
+            if ($code -lt 8) { return }
+            if ($attempt -lt 3) { Start-Sleep -Seconds 2 }
+        }
+        throw ("robocopy failed with code $code for $Source`n" + $copyOutput)
+    }
+
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
+            return
+        } catch {
+            if ($attempt -eq 3) { throw }
+            Start-Sleep -Seconds 2
+        }
     }
 }
 
