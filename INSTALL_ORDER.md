@@ -44,8 +44,9 @@ configured later, after its backup restore.
 
 Installs Tailscale, then the callback does everything that needs the network:
 
-1. Install OpenCode, then Firefox from their `manifests/scoop.json` entries (their
-   restores need the CLI / the browser profile; skipped with `-EssentialsOnly`).
+1. Install OpenCode, Firefox and Pear Desktop from their `manifests/scoop.json`
+   entries (their restores need the CLI / the browser profile / the app's
+   signed-in userData; skipped with `-EssentialsOnly`).
 2. Start the Tailscale daemon.
 3. `apps/tailscale/configure.ps1 -SignIn`: `tailscale up --qr` in a new Rio window
    (reusing one already showing the QR; a console fallback forces UTF-8), wait

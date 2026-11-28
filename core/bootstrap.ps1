@@ -593,6 +593,43 @@ function Install-FirefoxBeforeRestore {
     Write-Host "Firefox $versionLabel installed with Scoop."
 }
 
+function Install-PearDesktopBeforeRestore {
+    # Its signed-in userData is restored before the apps phase, so install the
+    # app now from the same scoop.json entry that phase would use.
+    param([string]$ManifestPath, [switch]$Force)
+
+    $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { Join-Path $env:USERPROFILE 'scoop' }
+    $installedExe = Join-Path $scoopRoot 'apps\pear-desktop\current\YouTube Music.exe'
+    if ((Test-Path -LiteralPath $installedExe) -and -not $Force) {
+        Write-Host 'Pear Desktop already installed with Scoop.'
+        return
+    }
+    if (-not (Test-Path -LiteralPath $ManifestPath)) { throw "manifest not found: $ManifestPath" }
+    $plan = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+    $app = @($plan.apps | Where-Object { $_.Name -eq 'pear-desktop' })[0]
+    if (-not $app) { throw 'pear-desktop is missing from manifests/scoop.json' }
+    $bucket = @($plan.buckets | Where-Object { $_.Name -eq 'extras' })[0]
+    if (-not (Test-Path -LiteralPath (Join-Path $scoopRoot 'buckets\extras\bucket'))) {
+        try {
+            if ($bucket -and $bucket.Source) { scoop bucket add extras $bucket.Source } else { scoop bucket add extras }
+            if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+        } catch {
+            throw "Could not add the extras bucket for Pear Desktop: $($_.Exception.Message)"
+        }
+    }
+    $buckets = if ($bucket) { @($bucket) } else { @() }
+    $tmp = Join-Path $env:TEMP 'skoop-pear-early.json'
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($tmp, ([pscustomobject]@{ buckets = $buckets; apps = @($app) } | ConvertTo-Json -Depth 12), $utf8)
+    Write-Host 'Installing Pear Desktop with Scoop before restoring its userData...'
+    & scoop import $tmp
+    $exit = $LASTEXITCODE
+    Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    if ($exit -ne 0) { throw "scoop import failed for the early Pear Desktop install (exit $exit)." }
+    $env:Path = "$scoopRoot\shims;$env:Path"
+    Write-Host 'Pear Desktop installed with Scoop.'
+}
+
 function Install-OpenCodeBeforeRestore {
     # OpenCode's restore imports credentials with `opencode auth import`, so the
     # CLI must be installed before its auth is restored ahead of Firefox.
@@ -690,6 +727,7 @@ if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) {
 $earlyManifest = Join-Path $repo 'manifests\scoop.json'
 Install-OpenCodeBeforeRestore -ManifestPath $earlyManifest -Force:$ForceInstall
 Install-FirefoxBeforeRestore -ManifestPath $earlyManifest -Force:$ForceInstall
+Install-PearDesktopBeforeRestore -ManifestPath $earlyManifest -Force:$ForceInstall
 Start-TailscaleDaemon
 $earlyRestoreRequired = $earlyRestoreArgs.ContainsKey('FailOnOpenCodeRestoreError') -or $earlyRestoreArgs.ContainsKey('FailOnFirefoxRestoreError')
 if (Test-Path $tailscaleConfig) {
