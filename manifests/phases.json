@@ -2,7 +2,7 @@
     "phases": [
         {
             "Name": "core-terminal",
-            "Description": "PowerShell 7, Rio / Alacritty / WezTerm, Vicinae, the Herdr TUI, Tailscale sign-in and JetBrains Mono Nerd Fonts (regular + proportional)",
+            "Description": "PowerShell 7, Rio / Alacritty / WezTerm, Vicinae, the Herdr TUI and JetBrains Mono Nerd Fonts (regular + proportional)",
             "Buckets": [ "main", "extras", "nerd-fonts" ],
             "Apps": [
                 "git",
@@ -14,7 +14,14 @@
                 "herdr-core",
                 "vicinae",
                 "JetBrainsMono-NF",
-                "JetBrainsMono-NF-Propo",
+                "JetBrainsMono-NF-Propo"
+            ]
+        },
+        {
+            "Name": "tailscale",
+            "Description": "Tailscale install, sign-in and the acer-ubuntu snapshot restore",
+            "Buckets": [ "extras" ],
+            "Apps": [
                 "tailscale"
             ]
         },

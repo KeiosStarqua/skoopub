@@ -659,8 +659,9 @@ if (Test-Path $ghAuth) {
 }
 Ensure-SkoopClone
 
-# 5. Install manifests/scoop.json in phases: phase 1 is the fast essentials
-#    (PowerShell 7, Rio first, then Herdr, Vicinae and Tailscale), heavy downloads last.
+# 5. Install manifests/scoop.json in phases: phase 1 is the terminal + Herdr
+#    (PowerShell 7, Rio first, then Herdr, Vicinae); the tailscale phase follows,
+#    heavy downloads last.
 . (Join-Path $repo 'core\scoop-phases.ps1')
 $skipUniKey = (-not $ForceUniKey) -and (Test-UniKeyInstalled)
 if ($skipUniKey) {
