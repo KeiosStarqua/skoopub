@@ -636,8 +636,12 @@ function Invoke-PwshReLaunch
     $env:SKOOP_PWSH_RELAUNCHED = '1'
     try
     {
-        $relaunchArgs = @('-NoLogo', '-NoProfile', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', $script:InstallScriptPath) +
-            @(Get-SkoopReLaunchArgs -SkipMenu:$SkipMenu)
+        # Get-SkoopReLaunchArgs already starts with the engine flags (-NoLogo,
+        # -NoProfile, -ExecutionPolicy Bypass, -File <script>). Duplicating them
+        # after -File makes PowerShell bind -NoLogo as a script parameter and the
+        # child dies with "A parameter cannot be found that matches parameter
+        # name 'NoLogo'". Only -NoExit needs to be added here.
+        $relaunchArgs = @('-NoExit') + @(Get-SkoopReLaunchArgs -SkipMenu:$SkipMenu)
         # Start-Process joins the list without quoting wrapping, so protect any
         # value that contains a space (script path, -LogPath).
         $argLine = ($relaunchArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
