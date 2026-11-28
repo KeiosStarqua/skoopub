@@ -55,7 +55,9 @@ Installs Tailscale, then the callback does everything that needs the network:
 6. Apply the Vicinae config (Ctrl+Space) and autostart on top of the restored data.
 7. `gh auth login` / `gh auth setup-git`, so private checkouts can authenticate.
 8. Clone skoopub into `~/repos\skoopub`, then every missing repo from the restored
-   (or shipped) `repos.json`.
+   (or shipped) `repos.json` **in the background** (`%LOCALAPPDATA%\skoop\repo-clone-<name>.log`).
+   Phase 3 starts immediately; `Complete-RegisteredRepoClones` reports each clone
+   near the end of the run.
 
 ## Phase 3 — `shell`
 

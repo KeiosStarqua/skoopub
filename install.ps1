@@ -1579,9 +1579,11 @@ function Ensure-SkoopClone
     }
 }
 
+$script:RepoCloneJobs = @()
+
 function Ensure-RegisteredRepos
 {
-    param([string] $Manifest)
+    param([string] $Manifest, [switch] $Background)
 
     if (-not (Test-Path -LiteralPath $Manifest))
     {
@@ -1624,6 +1626,24 @@ function Ensure-RegisteredRepos
         if ($entry.branch) { $cloneArgs += @('-b', $entry.branch) }
         $cloneArgs += @($entry.url, $target)
         Write-Step "Cloning $($entry.name) into $target"
+        if ($Background)
+        {
+            # Clones are independent and slow (network + disk), so they must not
+            # stall the phases behind them. Start them all, report at the end.
+            $log = Join-Path $env:LOCALAPPDATA ('skoop\repo-clone-{0}.log' -f $entry.name)
+            $argLine = ($cloneArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
+            try
+            {
+                $proc = Start-Process -FilePath $gitExe.Source -ArgumentList $argLine -RedirectStandardOutput $log `
+                    -RedirectStandardError ($log + '.err') -NoNewWindow -PassThru
+                $script:RepoCloneJobs += [pscustomobject]@{ Name = $entry.name; Target = $target; Log = $log; Process = $proc }
+                Write-Ok "$($entry.name) cloning in the background - install continues (log: $log)"
+            } catch
+            {
+                Write-Host "    could not start the $($entry.name) clone (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+            continue
+        }
         # git writes progress to stderr; merge through cmd so PowerShell 5.1
         # does not raise a terminating NativeCommandError under ErrorAction=Stop.
         $quoted = (@($cloneArgs) | ForEach-Object { '"' + $_ + '"' }) -join ' '
@@ -1636,6 +1656,36 @@ function Ensure-RegisteredRepos
             Write-Ok "cloned $($entry.name)"
         }
     }
+}
+
+function Complete-RegisteredRepoClones
+{
+    # Report the clones started by `Ensure-RegisteredRepos -Background`. Called
+    # near the end of the install; failures stay non-fatal.
+    if (-not $script:RepoCloneJobs -or $script:RepoCloneJobs.Count -eq 0) { return }
+    Write-Step 'Checking the background repo clones'
+    foreach ($job in $script:RepoCloneJobs)
+    {
+        try { $job.Process.WaitForExit() } catch { }
+        if (Test-Path -LiteralPath (Join-Path $job.Target '.git'))
+        {
+            Write-Ok "cloned $($job.Name)"
+            continue
+        }
+        $tail = @()
+        # Parenthesise the second element: `@($a, $a + '.err')` parses as
+        # `(@($a, $a)) + '.err'`, so the .err log would never be read.
+        foreach ($path in @($job.Log, ($job.Log + '.err')))
+        {
+            if (Test-Path -LiteralPath $path)
+            {
+                $tail += @(Get-Content -LiteralPath $path -Tail 2 -ErrorAction SilentlyContinue)
+            }
+        }
+        $detail = ($tail | ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ } | Select-Object -Last 2) -join ' '
+        Write-Host "    clone failed for $($job.Name) (non-fatal): $detail" -ForegroundColor Yellow
+    }
+    $script:RepoCloneJobs = @()
 }
 
 function Start-HerdrInRio
@@ -2142,7 +2192,9 @@ function Invoke-TailscaleSetup
         {
             $reposManifest = Join-Path $repoRoot 'manifests\repos.json'
         }
-        Ensure-RegisteredRepos -Manifest $reposManifest
+        # Repos clone in the background so the phases behind them are not held up;
+        # Complete-RegisteredRepoClones reports the outcome before the summary.
+        Ensure-RegisteredRepos -Manifest $reposManifest -Background
     }
 }
 
@@ -2489,6 +2541,9 @@ if (Test-Path $librescollConfig)
 {
     Write-Ok 'apps/librescoll/configure.ps1 not found - skipping'
 }
+
+# --- 22b. Background repo clones started in the tailscale phase --------------
+Complete-RegisteredRepoClones
 
 Write-Host ''
 Write-Host 'Done. Open a new PowerShell window, then try: z ..' -ForegroundColor Green
