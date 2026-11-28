@@ -123,8 +123,9 @@
       via apps/mouse/configure.ps1 (non-fatal), so `apps/mouse/mouse.ps1 diagnose`
       can capture HID Raw Input vs WM_MOUSEWHEEL. It also sets the hardware DPI
       of a Logitech HID++ mouse to 1200 via `mouse.ps1 dpi` (hidapi, no G H UB
-      config editing); -MouseDpi changes the value, -SkipMouseDpi opts out. The
-      correction hook remains opt-in: run `mouse.ps1 fix` / `restore` yourself.
+      config editing); -MouseDpi changes the value, -SkipMouseDpi opts out. Both
+      run early, before the Scoop phases, so the pointer is correct right away.
+      The correction hook remains opt-in: run `mouse.ps1 fix` / `restore` yourself.
     - Installs and starts LibreScroll (inertial middle-button scrolling) from its
       GitHub release via apps/librescoll/configure.ps1: the SHA-256 digest is
       verified before extracting to %LOCALAPPDATA%\skoop\librescoll, a per-user
@@ -1846,6 +1847,37 @@ if (-not (Test-SkoopProfileLoads))
     Write-Host '    profile did not load in a fresh shell - check Get-ExecutionPolicy -List and your $PROFILE' -ForegroundColor Red
 }
 
+# --- 2b. Set the mouse DPI before the slow phase installs ---------------------
+# Hardware-level and instant, so the pointer is already correct while scoop
+# downloads. Runs after step 2 because the CLI is a .ps1 (needs the policy).
+if (Test-Path $mouseConfig)
+{
+    Write-Step 'Installing skoopub-mouse wheel diagnostics'
+    try
+    {
+        & $mouseConfig
+    } catch
+    {
+        # Diagnostics are optional: never let a GitHub outage abort the setup.
+        Write-Host "    skoopub-mouse install failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    $mouseCli = Join-Path $repoRoot 'apps\mouse\mouse.ps1'
+    if (-not $SkipMouseDpi -and $env:SKOOP_NO_MOUSE_DPI -ne '1' -and (Test-Path $mouseCli))
+    {
+        Write-Step "Setting Logitech mouse DPI to $MouseDpi"
+        try
+        {
+            & $mouseCli dpi -Dpi $MouseDpi
+        } catch
+        {
+            Write-Host "    Mouse DPI setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+} else
+{
+    Write-Ok 'apps/mouse/configure.ps1 not found - skipping'
+}
+
 # --- 3. Clear the Task Manager policy ---------------------------------------
 Enable-TaskManager
 
@@ -2423,36 +2455,7 @@ if (-not $SkipShutdownHook -and (Test-Path $shutdownHook))
     Write-Ok 'core/install-shutdown-hook.ps1 not found - skipping'
 }
 
-# --- 22. skoopub-mouse (wheel diagnostics, opt-in correction) -----------------
-if (Test-Path $mouseConfig)
-{
-    Write-Step 'Installing skoopub-mouse wheel diagnostics'
-    try
-    {
-        & $mouseConfig
-    } catch
-    {
-        # Diagnostics are optional: never let a GitHub outage abort the setup.
-        Write-Host "    skoopub-mouse install failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-    $mouseCli = Join-Path $repoRoot 'apps\mouse\mouse.ps1'
-    if (-not $SkipMouseDpi -and $env:SKOOP_NO_MOUSE_DPI -ne '1' -and (Test-Path $mouseCli))
-    {
-        Write-Step "Setting Logitech mouse DPI to $MouseDpi"
-        try
-        {
-            & $mouseCli dpi -Dpi $MouseDpi
-        } catch
-        {
-            Write-Host "    Mouse DPI setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
-        }
-    }
-} else
-{
-    Write-Ok 'apps/mouse/configure.ps1 not found - skipping'
-}
-
-# --- 23. LibreScroll (inertial middle-button scrolling) ----------------------
+# --- 22. LibreScroll (inertial middle-button scrolling) ----------------------
 if (Test-Path $librescollConfig)
 {
     Write-Step 'Installing and starting LibreScroll inertial scrolling'
@@ -2490,7 +2493,7 @@ if (-not $SkipShutdownHook)
     Write-Host 'Shutdown cleanup is registered: Firefox/Vicinae/Atuin/Pear Desktop/OpenCode back up to acer-ubuntu and local sign-ins (GitHub, Tailscale, Pear Desktop, OpenCode, Firefox) are cleared on shutdown/logoff.' -ForegroundColor Green
 }
 
-# --- 22. Leave the Scoop tray apps running ------------------------------------
+# --- 23. Leave the Scoop tray apps running ------------------------------------
 Write-Step 'Starting Tailscale and ShareX from their Scoop Apps shortcuts'
 Start-ScoopAppShortcut -Name 'Tailscale' -ProcessName 'tailscale-ipn'
 Start-ScoopAppShortcut -Name 'ShareX' -ProcessName 'ShareX'

@@ -82,12 +82,14 @@ reported and the remaining phases still run.
 3. Dark Mode (`core/set-dark-mode.ps1`) — no network, so the rest is already dark.
 4. Execution policy + the repo-managed profile hook (`Install-ProfileHook`), then
    verify the profile loads in a fresh shell.
-5. Clear the Task Manager policy.
-6. Check Windows activation (and activate when it is not).
-7. Install Scoop when its shims are missing.
-8. Put the shims on PATH and cache the backup user.
-9. Install git when missing — buckets are git repos.
-10. Run the phases above.
+5. skoopub-mouse install + the Logitech DPI value (early, before the slow
+   downloads; needs step 4 because the CLI is a `.ps1`).
+6. Clear the Task Manager policy.
+7. Check Windows activation (and activate when it is not).
+8. Install Scoop when its shims are missing.
+9. Put the shims on PATH and cache the backup user.
+10. Install git when missing — buckets are git repos.
+11. Run the phases above.
 
 ## After the phases
 
@@ -108,9 +110,8 @@ reported and the remaining phases still run.
 14. marimo dark mode.
 15. ponytail plugin for OpenCode (skipped when already listed).
 16. Shutdown cleanup hook.
-17. skoopub-mouse install, then the Logitech DPI value.
-18. LibreScroll install + startup shortcut.
-19. Start Tailscale and ShareX from their `Scoop Apps` Start Menu shortcuts when
+17. LibreScroll install + startup shortcut.
+18. Start Tailscale and ShareX from their `Scoop Apps` Start Menu shortcuts when
     they are not already running.
 
 Why these boundaries matter:
