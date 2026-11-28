@@ -19,7 +19,7 @@
 # Deploys the YASB status bar config and starts YASB via apps\yasb\configure.ps1.
 # Adds `n` for Nushell in PowerShell (profile.ps1) and cmd (apps\nushell\setup.ps1).
 # Sets the CurrentUser execution policy to RemoteSigned so the profile hook works.
-# Checks the Windows theme and enables Dark Mode (core\set-dark-mode.ps1).
+# Turns on Dark Mode first (core\set-dark-mode.ps1), before Scoop or the network.
 # Creates ~/repos and clones skoopub there when missing (idempotent).
 # Installs Rio before Herdr in phase 1, then opens Rio in ~/repos with Herdr
 # running (SKOOP_NO_AUTO_HERDR=1 opts out).
@@ -609,6 +609,13 @@ if (-not (Test-SkoopProfileLoads)) {
     Write-Host 'Profile did not load in a fresh shell - check Get-ExecutionPolicy -List and your $PROFILE.' -ForegroundColor Red
 }
 
+# 2a. Turn on Dark Mode first (no Scoop or network dependency).
+$darkMode = Join-Path $repo 'core\set-dark-mode.ps1'
+if (Test-Path $darkMode) {
+    try { & $darkMode }
+    catch { Write-Host "Dark Mode setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+
 # 3. Clear the Task Manager policy.
 Enable-TaskManager
 
@@ -815,13 +822,6 @@ $marimoConfig = Join-Path $repo 'apps\marimo\configure.ps1'
 if (Test-Path $marimoConfig) {
     try { & $marimoConfig }
     catch { Write-Host "marimo config failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
-}
-
-# 17. Check the Windows theme and enable Dark Mode (apps + system), idempotently.
-$darkMode = Join-Path $repo 'core\set-dark-mode.ps1'
-if (Test-Path $darkMode) {
-    try { & $darkMode }
-    catch { Write-Host "Dark Mode setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
 Write-Host "Done. Open a new PowerShell window, then try: z .." -ForegroundColor Green

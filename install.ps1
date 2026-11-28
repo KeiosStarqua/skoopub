@@ -62,8 +62,8 @@
     - Sets marimo's permanent display theme to dark by merging `[display]
       theme = "dark"` into ~/.marimo.toml via apps/marimo/configure.ps1; existing
       settings are preserved and changed originals are backed up.
-    - Checks the Windows theme and turns on Dark Mode for apps and the system via
-      core/set-dark-mode.ps1; re-runs leave an already-dark theme untouched.
+    - Turns on Dark Mode for apps and the system first (core/set-dark-mode.ps1,
+      before Scoop or anything else); re-runs leave an already-dark theme untouched.
     - Checks first, then only applies what is missing via apps/sharex/fix-printscreen.ps1
       so ShareX owns the PrtSc key; an already-applied fix is left untouched (no registry
       write, no ShareX restart). A failure is reported but does not abort the bootstrap.
@@ -1668,6 +1668,23 @@ if ($runMode -eq 'herdr')
     return
 }
 
+# --- 1a. Turn on Dark Mode first --------------------------------------------
+# No Scoop or network dependency, so the rest of the install already runs on the
+# dark theme.
+if (Test-Path $darkMode)
+{
+    try
+    {
+        & $darkMode
+    } catch
+    {
+        Write-Host "    Dark Mode setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else
+{
+    Write-Ok 'core/set-dark-mode.ps1 not found - skipping'
+}
+
 # --- 2. Allow local scripts and hook the repo-managed profile into $PROFILE --
 # Both are done before anything that can fail, so `z`/`atuin` are configured and
 # the dot-source below actually loads in new shells (see Set-SkoopExecutionPolicy).
@@ -2195,23 +2212,7 @@ if (Test-Path $marimoConfig)
     Write-Ok 'apps/marimo/configure.ps1 not found - skipping'
 }
 
-# --- 20. Check and enable Windows Dark Mode ---------------------------------
-if (Test-Path $darkMode)
-{
-    try
-    {
-        & $darkMode
-    } catch
-    {
-        # Cosmetic: never let a theme setting abort the bootstrap.
-        Write-Host "    Dark Mode setup failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-} else
-{
-    Write-Ok 'core/set-dark-mode.ps1 not found - skipping'
-}
-
-# --- 20b. Add the ponytail plugin to OpenCode -------------------------------
+# --- 20. Add the ponytail plugin to OpenCode --------------------------------
 # OpenCode is installed early (its auth restore needs the CLI). Add the plugin
 # once, non-fatally; read the global config first so re-runs never duplicate it
 # or prompt.
