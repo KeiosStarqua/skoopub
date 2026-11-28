@@ -856,13 +856,15 @@ if ($Stamp) {
     # Only probe the snapshots this run will restore: every probe is a separate
     # SSH round trip, so a `-Only atuin` child would otherwise make seven
     # connections (and the four parallel children, 28) just to find a folder.
-    $ffStamps = if ($Only -contains 'firefox')  { @(Get-LatestStamps -SshArgs $sshArgs -Path $FirefoxRemotePath) } else { @() }
-    $vcStamps = if ($Only -contains 'vicinae')  { @(Get-LatestStamps -SshArgs $sshArgs -Path $VicinaeRemotePath) } else { @() }
-    $atStamps = if ($Only -contains 'atuin')    { @(Get-LatestStamps -SshArgs $sshArgs -Path $AtuinRemotePath) } else { @() }
-    $peStamps = if ($Only -contains 'pear')     { @(Get-LatestStamps -SshArgs $sshArgs -Path $PearRemotePath) } else { @() }
-    $ocStamps = if ($Only -contains 'opencode') { @(Get-LatestStamps -SshArgs $sshArgs -Path $OpenCodeRemotePath) } else { @() }
-    $ssStamps = if ($Only -contains 'ssh')      { @(Get-LatestStamps -SshArgs $sshArgs -Path $SshRemotePath) } else { @() }
-    $rsStamps = if ($Only -contains 'repos')    { @(Get-LatestStamps -SshArgs $sshArgs -Path $ReposRemotePath) } else { @() }
+    # The outer @() matters: an `if` with no output assigns $null, and .Count on
+    # $null throws under the StrictMode inherited from configure.ps1.
+    $ffStamps = @(if ($Only -contains 'firefox')  { Get-LatestStamps -SshArgs $sshArgs -Path $FirefoxRemotePath })
+    $vcStamps = @(if ($Only -contains 'vicinae')  { Get-LatestStamps -SshArgs $sshArgs -Path $VicinaeRemotePath })
+    $atStamps = @(if ($Only -contains 'atuin')    { Get-LatestStamps -SshArgs $sshArgs -Path $AtuinRemotePath })
+    $peStamps = @(if ($Only -contains 'pear')     { Get-LatestStamps -SshArgs $sshArgs -Path $PearRemotePath })
+    $ocStamps = @(if ($Only -contains 'opencode') { Get-LatestStamps -SshArgs $sshArgs -Path $OpenCodeRemotePath })
+    $ssStamps = @(if ($Only -contains 'ssh')      { Get-LatestStamps -SshArgs $sshArgs -Path $SshRemotePath })
+    $rsStamps = @(if ($Only -contains 'repos')    { Get-LatestStamps -SshArgs $sshArgs -Path $ReposRemotePath })
 }
 $ffStamp = if ($ffStamps.Count) { $ffStamps[0] } else { $null }
 $vcStamp = if ($vcStamps.Count) { $vcStamps[0] } else { $null }

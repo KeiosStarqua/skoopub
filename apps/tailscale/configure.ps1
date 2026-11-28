@@ -609,14 +609,18 @@ if ($connected) {
 # Advertise the ACL tag BEFORE restoring: the tailnet ACL may only let tagged
 # devices reach acer-ubuntu, so SSH restores are refused until this device carries
 # the tag. The parallel per-app children run with -SkipTag and never repeat it.
+# When restores are requested, a tag that cannot be applied stops the run - the
+# restores would otherwise fail one by one with a confusing SSH error.
+$restoresRequested = $RestoreVicinae -or $RestorePearDesktop -or $RestoreFirefox -or $RestoreAtuin -or $RestoreOpenCode
 if ($SkipTag) {
     Write-Ok 'Tailnet tagging skipped (-SkipTag)'
 } else {
     if ($Tag -notlike 'tag:*') { $Tag = "tag:$Tag" }
+    $tagError = $null
     if (-not $cli) {
-        Write-Warn 'tailscale.exe not found - skipping tailnet tagging.'
+        $tagError = 'tailscale.exe was not found'
     } elseif (-not $connected) {
-        Write-Warn 'Tailscale is not connected - sign in from the tray icon or run `tailscale up`, then re-run.'
+        $tagError = 'Tailscale is not connected'
     } else {
         Write-Step "Tagging this device with $Tag in the tailnet"
         $prefsRaw = (& cmd /c "`"$cli`" debug prefs 2>&1" | Out-String)
@@ -627,16 +631,24 @@ if ($SkipTag) {
         } else {
             $out = (& cmd /c "`"$cli`" up --advertise-tags=$Tag 2>&1" | Out-String)
             if ($LASTEXITCODE -ne 0) {
-                Write-Warn "Could not advertise $Tag (non-fatal, exit $LASTEXITCODE): $(($out -split "`r?`n" | Select-Object -First 2) -join ' ')"
-                Write-Warn 'Check that your tailnet ACL lists you as a tag owner for this tag.'
+                $tagError = "tailscale up --advertise-tags exited ${LASTEXITCODE}: $(($out -split "`r?`n" | Select-Object -First 2) -join ' ')"
             } else {
                 Write-Ok "advertised $Tag on this device"
                 # A tag change re-registers the node; wait before the restores SSH out.
                 if (-not (Wait-TailscaleConnected $cli)) {
                     $connected = $false
-                    Write-Warn 'Tailscale did not come back online after tagging - skipping the restores.'
+                    $tagError = 'Tailscale did not come back online after tagging'
                 }
             }
+        }
+    }
+    if ($tagError) {
+        $message = "Cannot advertise $Tag ($tagError). The tailnet ACL may only let tagged devices reach acer-ubuntu, so the restores would fail."
+        if ($restoresRequested) {
+            throw "$message Fix the tag ownership in the ACL, then re-run install.ps1."
+        } else {
+            Write-Warn "$message (non-fatal outside the restore flow)"
+            Write-Warn 'Check that your tailnet ACL lists you as a tag owner for this tag.'
         }
     }
 }
