@@ -207,11 +207,19 @@ function Resolve-SshUser {
         $resolved = $answer.Trim()
     }
     # Remember the answer (or an explicit -User) so later installs and the
-    # per-app Tailscale restore hooks never prompt again on this machine.
+    # per-app Tailscale restore hooks never prompt again on this machine. Write
+    # only when it differs: the parallel restore children share this file and
+    # concurrent Set-Content calls make each other fail with "Stream was not
+    # readable".
     try {
-        $cacheDir = Split-Path -Parent $cacheFile
-        if (-not (Test-Path -LiteralPath $cacheDir)) { New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null }
-        Set-Content -LiteralPath $cacheFile -Value $resolved -Encoding ASCII
+        $existing = if (Test-Path -LiteralPath $cacheFile) {
+            (Get-Content -LiteralPath $cacheFile -TotalCount 1 -ErrorAction SilentlyContinue)
+        } else { $null }
+        if (-not $existing -or $existing.Trim() -ne $resolved) {
+            $cacheDir = Split-Path -Parent $cacheFile
+            if (-not (Test-Path -LiteralPath $cacheDir)) { New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null }
+            Set-Content -LiteralPath $cacheFile -Value $resolved -Encoding ASCII
+        }
     } catch {
         Write-Warn ("could not cache the SSH user in " + $cacheFile + ": " + $_.Exception.Message)
     }
@@ -296,19 +304,30 @@ function Get-ProfilesIniSections {
     return @($sections)
 }
 
-function Get-RemoteSize {
-    # Apparent size of a remote snapshot folder, used only for a download
-    # percentage. Returns 0 when du is unavailable so the caller can fall back
-    # to reporting bytes transferred.
-    param([string] $RemoteFolder)
+function Get-CachedSize {
+    # Size of the tar a previous run downloaded for this snapshot. Reading it is
+    # free, unlike `du -sb` on the remote, which walks the whole profile and made
+    # the download start tens of seconds late (and thrashed a slow remote disk
+    # when the parallel children all did it at once).
+    param([string] $FolderName, [string] $RemoteFolder)
 
-    $cmd = "du -sb '$RemoteFolder' 2>/dev/null | cut -f1"
-    $out = & ssh @sshArgs $cmd 2>&1
-    if ($LASTEXITCODE -ne 0) { return 0 }
+    $stampPart = Split-Path (Split-Path $RemoteFolder -Parent) -Leaf
+    $cache = Join-Path (Join-Path $env:LOCALAPPDATA 'skoop\restore') ("size-{0}-{1}.txt" -f $FolderName, $stampPart)
+    if (-not (Test-Path -LiteralPath $cache)) { return [long]0 }
     $value = [long]0
-    $last = @($out | ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ }) | Select-Object -Last 1
-    if ($last -and [long]::TryParse($last, [ref]$value)) { return $value }
-    return 0
+    $raw = Get-Content -LiteralPath $cache -TotalCount 1 -ErrorAction SilentlyContinue
+    if ($raw -and [long]::TryParse(([string]$raw).Trim(), [ref]$value)) { return $value }
+    return [long]0
+}
+
+function Set-CachedSize {
+    param([string] $FolderName, [string] $RemoteFolder, [long] $Size)
+
+    $stampPart = Split-Path (Split-Path $RemoteFolder -Parent) -Leaf
+    $dir = Join-Path $env:LOCALAPPDATA 'skoop\restore'
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    $cache = Join-Path $dir ("size-{0}-{1}.txt" -f $FolderName, $stampPart)
+    try { Set-Content -LiteralPath $cache -Value ([string]$Size) -Encoding ASCII -ErrorAction Stop } catch { }
 }
 
 function Save-Snapshot {
@@ -345,14 +364,17 @@ function Save-Snapshot {
 
         $downloadLine = "ssh $sshQuoted `"$remoteCmd`" > `"$tarFile`" 2>>`"$sshErrLog`""
         Write-Log ("tar download: ssh " + ($sshArgs -join ' ') + " '$remoteCmd' > $tarFile")
-        # Poll the growing tar file so the wait shows a percentage. The download
-        # is a child process (not `& cmd /c`) only so it can be observed.
-        $total = Get-RemoteSize -RemoteFolder $RemoteFolder
+        # Poll the growing tar file so the wait shows progress. The download is a
+        # child process (not `& cmd /c`) only so it can be observed. The total
+        # comes from a previous download of the same stamp (free); a remote
+        # `du -sb` would walk the whole profile first and delay the transfer.
+        $total = Get-CachedSize -FolderName $FolderName -RemoteFolder $RemoteFolder
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $env:ComSpec
         $psi.Arguments = '/d /c ' + $downloadLine
         $psi.UseShellExecute = $false
         $psi.CreateNoWindow = $true
+        $startedAt = Get-Date
         $proc = [System.Diagnostics.Process]::Start($psi)
         $lastReport = Get-Date
         $lastPct = -1
@@ -363,14 +385,16 @@ function Save-Snapshot {
             $lastReport = $now
             $size = 0
             try { $size = (Get-Item -LiteralPath $tarFile -ErrorAction Stop).Length } catch { }
+            $elapsed = [Math]::Max(1, ($now - $startedAt).TotalSeconds)
+            $rate = ($size / 1MB) / $elapsed
             if ($total -gt 0) {
                 $pct = [int][Math]::Min(99, [Math]::Floor(100 * $size / $total))
                 if ($pct -ne $lastPct) {
-                    Write-Log ("{0} download: {1}% ({2:N1} / {3:N1} MB)" -f $FolderName, $pct, ($size / 1MB), ($total / 1MB))
+                    Write-Log ("{0} download: {1}% ({2:N1} / {3:N1} MB, {4:N1} MB/s)" -f $FolderName, $pct, ($size / 1MB), ($total / 1MB), $rate)
                     $lastPct = $pct
                 }
             } else {
-                Write-Log ("{0} download: {1:N1} MB" -f $FolderName, ($size / 1MB))
+                Write-Log ("{0} download: {1:N1} MB ({2:N1} MB/s)" -f $FolderName, ($size / 1MB), $rate)
             }
         }
         $proc.WaitForExit()
@@ -378,6 +402,7 @@ function Save-Snapshot {
         $finalSize = 0
         try { $finalSize = (Get-Item -LiteralPath $tarFile -ErrorAction Stop).Length } catch { }
         Write-Log ("{0} download: 100% ({1:N1} MB)" -f $FolderName, ($finalSize / 1MB))
+        if ($finalSize -gt 0) { Set-CachedSize -FolderName $FolderName -RemoteFolder $RemoteFolder -Size $finalSize }
         if ($tarExit -eq 0) {
             Write-Log ("{0} extract: starting" -f $FolderName)
             $extractLine = "`"$($tarCmd.Source)`" -xf `"$tarFile`" -C `"$target`" 2>>`"$tarErrLog`""
