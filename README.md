@@ -29,6 +29,7 @@ PowerShell profile, restored from a single manifest.
 - `core/restore-backup.ps1` — restores the latest Firefox, Vicinae, Atuin, Pear Desktop, OpenCode, SSH-key and repo-list snapshot from `acer-ubuntu` onto a fresh machine; Tailscale also calls it for every app in the `tailscale` phase after connecting (`-SkipSshRestore` opts out)
 - `apps/mouse/` + `.github/workflows/mouse-release.yml` — Rust `skoopub-mouse` wheel diagnostics (HID Raw Input vs `WM_MOUSEWHEEL`) and Logitech HID++ hardware-DPI control via `hidapi-rs`, built on `mouse-v*` tags; `configure.ps1` downloads the release exe and `mouse.ps1` is the CLI
 - `apps/librescoll/configure.ps1` — installs and starts **LibreScroll** (inertial middle-button scrolling) from the latest GitHub release: SHA-256 digest verified, extracted to `%LOCALAPPDATA%\skoop\librescoll`, Startup shortcut written; `install.ps1` runs it on every setup
+- `INSTALL_ORDER.md` — the exact sequence `install.ps1` follows: package phases, the Tailscale restore callback, and every configure step, with the reasons the boundaries exist
 
 ## Install with one command
 
