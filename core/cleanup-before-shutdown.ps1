@@ -115,6 +115,12 @@
 .PARAMETER BackupRemotePath
     Remote folder for -BackupPath snapshots (default 'skoop-backups/custom').
 
+.PARAMETER WipeStorageAuth
+    After the backup is verified, remove auth-like files under the persisted
+    StorageRoot (scoop\persist) on another disk. Only files whose names are
+    clearly credential/token/session files are removed; app configs and
+    toolchains are left alone.
+
 .PARAMETER StagingDir
     Local folder used to assemble the backup before upload. Defaults to
     %LOCALAPPDATA%\skoop\backup and is removed after a verified upload.
@@ -170,6 +176,8 @@ param(
     [string[]] $BackupPath = @(),
     # Remote folder for -BackupPath snapshots.
     [string] $BackupRemotePath = 'skoop-backups/custom',
+    # Also remove auth-like files under the persisted StorageRoot.
+    [switch] $WipeStorageAuth,
     [switch] $SkipBackup,
     [switch] $KeepFirefoxLogins,
     [switch] $BackupOnly,
@@ -806,6 +814,41 @@ function Remove-Path {
     Write-Log ("removed: " + $Path)
 }
 
+function Remove-StorageRootAuth {
+    # A partial migration keeps Scoop apps on a second disk. Their persist
+    # folders can hold app credentials, so wipe only unmistakable auth files.
+    $configPath = Join-Path $env:LOCALAPPDATA 'skoop\storage.json'
+    $root = $null
+    if (Test-Path -LiteralPath $configPath) {
+        try {
+            $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
+            $root = $config.root
+        } catch { }
+    }
+    if (-not $root -or -not (Test-Path -LiteralPath $root)) {
+        Write-Log 'no persisted StorageRoot - skipping storage auth wipe'
+        return
+    }
+    $persist = Join-Path $root 'scoop\persist'
+    if (-not (Test-Path -LiteralPath $persist)) {
+        Write-Log ('no persist folder under ' + $root + ' - nothing to wipe')
+        return
+    }
+    $exactNames = @(
+        'auth.json', 'auth.json.bak', 'credentials', 'credentials.json',
+        'token', 'token.json', 'access_token', 'access_token.json',
+        'refresh_token', 'refresh_token.json', 'session.json',
+        '.npmrc', '.netrc', '.git-credentials'
+    )
+    foreach ($file in @(Get-ChildItem -LiteralPath $persist -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+        $name = $file.Name
+        if ($exactNames -contains $name -or $name -like 'auth.*.json' -or
+            $name -like 'access_token*' -or $name -like 'refresh_token*') {
+            Remove-Path -Path $file.FullName
+        }
+    }
+}
+
 function Remove-GitHubAuth {
     if (Get-Command gh -ErrorAction SilentlyContinue) {
         if ($DryRun) {
@@ -1208,6 +1251,7 @@ if ($BackupOnly) {
     if (-not $NoSsh) { Remove-SshKeys }
     Remove-HerdrMachines
     if (-not $NoOpenCode) { Remove-OpenCodeAuth }
+    if ($WipeStorageAuth) { Remove-StorageRootAuth }
     Remove-TailscaleAuth
     if (-not $NoPear) { Remove-PearDesktopData }
 
