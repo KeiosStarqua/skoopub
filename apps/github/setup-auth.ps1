@@ -55,6 +55,14 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
 Write-Ok "gh found: $((Get-Command gh).Source)"
 
 # --- 2. Ask to log in, then let gh do the interactive part -------------------
+# Prefer expiring credentials: gh refreshes them automatically, so a leaked
+# token dies on its own. This is also set as a config so a manual `gh auth login`
+# gets the same treatment. git 2.46+ (what Scoop installs) marks the token
+# non-cacheable, so an expired one is never reused by a credential helper.
+if (Get-Command gh -ErrorAction SilentlyContinue) {
+    $null = & cmd /c 'gh config set expiring_credentials enabled 2>&1'
+}
+
 if (-not $ForceLogin -and (Test-GhAuth)) {
     Write-Ok 'GitHub CLI is already logged in to github.com'
 } elseif ($SkipLogin -or -not [Environment]::UserInteractive) {
@@ -69,8 +77,10 @@ if (-not $ForceLogin -and (Test-GhAuth)) {
         return
     }
     Write-Step 'Running gh auth login (follow the prompts)'
-    # HTTPS matches this repo's remote; skip the unused SSH key prompt.
-    & cmd /c 'gh auth login --hostname github.com --git-protocol https --skip-ssh-key'
+    # HTTPS matches this repo's remote; skip the unused SSH key prompt. -c copies
+    # the one-time device code to the clipboard, so the browser flow only needs a
+    # paste; --expiring is enabled through `gh config set expiring_credentials`.
+    & cmd /c 'gh auth login --hostname github.com --git-protocol https --skip-ssh-key -c'
     if ($LASTEXITCODE -ne 0) { throw "gh auth login failed with exit code $LASTEXITCODE." }
     Write-Ok 'GitHub CLI is logged in'
 }
